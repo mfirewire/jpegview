@@ -10,6 +10,8 @@ public:
 		FORMAT_RGB,
 		FORMAT_Lab,
 		FORMAT_LabA,
+		FORMAT_YMCK,
+		FORMAT_AKYMC,
 	};
 
 	// Create a transform from given ICC Profile to standard sRGB color space.
@@ -32,8 +34,15 @@ public:
 	// Free memory associated with the given transform
 	static void DeleteTransform(void* transform);
 
-	static void* CreateLabTransform(PixelFormat format);
-
 private:
+	static const int FLAGS;
+
 	static void* sRGBProfile;
+	static void* LabProfile;
+	static void* CMYKProfile;
+
+	static void* GetsRGBProfile();
+	static void* GetLabProfile();
+	static void* GetCMYKProfile();
+
 };

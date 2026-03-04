@@ -229,6 +229,7 @@
 			</Feature>
 			<Feature Id="FeatureLCMS" Title="ICC Profile Support (WebP, JPEG XL, HEIF/HEIC/AVIF)">
 				<ComponentRef Id="lcmsDLL"/>
+				<ComponentRef Id="cmyk.icm"/>
 			</Feature>
 
 			<Feature Id="FeatureWIC" Title="WIC Support">
@@ -672,6 +673,9 @@
 						<File Id="strings_zhtw.txt" Name="strings_zh-tw.txt" Source="$(var.JPEGView.TargetDir)strings_zh-tw.txt" />
 					</Component>
 
+					<Component Id="cmyk.icm" Guid="*">
+						<File Id="cmyk.icm" Name="cmyk.icm" Source="$(var.JPEGView.TargetDir)cmyk.icm" />
+					</Component>
 
 				</Directory>
 			</Directory>
