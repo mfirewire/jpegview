@@ -935,7 +935,7 @@ LRESULT CMainDlg::OnMouseMove(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, B
 LRESULT CMainDlg::OnMouseWheel(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
 	bool bCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 	int nDelta = GET_WHEEL_DELTA_WPARAM(wParam);
-	if (!bCtrl && CSettingsProvider::This().NavigateWithMouseWheel() && !m_pPanelMgr->IsModalPanelShown()) {
+	if (bCtrl && CSettingsProvider::This().NavigateWithMouseWheel() && !m_pPanelMgr->IsModalPanelShown()) {
 		if (nDelta < 0) {
 			GotoImage(POS_Next);
 		} else if (nDelta > 0) {
@@ -3533,3 +3533,4 @@ void CMainDlg::ToggleAlwaysOnTop() {
 	);
 
 }
+
