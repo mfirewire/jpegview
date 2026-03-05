@@ -36,6 +36,7 @@
 #include "EXIFHelpers.h"
 #include "RawMetadata.h"
 #include "ProcessingThreadPool.h"
+#include "ICCProfileTransform.h"
 #include "PaintMemDCMgr.h"
 #include "PanelMgr.h"
 #include "ZoomNavigatorCtl.h"
@@ -381,6 +382,7 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 
 	// create thread pool for processing requests on multiple CPU cores
 	CProcessingThreadPool::This().CreateThreadPoolThreads();
+	ICCProfileTransform::Prewarm(); // pre-load lcms2.dll and sRGB profile
 
 	// create JPEG provider and request first image - do no processing yet if not in fullscreen mode (as we do not know the size yet)
 	m_pJPEGProvider = new CJPEGProvider(m_hWnd, NUM_THREADS, READ_AHEAD_BUFFERS);	

@@ -20,6 +20,12 @@ void* ICCProfileTransform::LabProfile = NULL;
 void* ICCProfileTransform::CMYKProfile = NULL;
 
 
+void ICCProfileTransform::Prewarm() {
+	// Pre-initialize the sRGB profile on startup so the first image
+	// load doesn't pay the lcms2.dll load + profile creation cost.
+	GetsRGBProfile();
+}
+
 void* ICCProfileTransform::GetsRGBProfile() {
 	if (sRGBProfile == NULL) {
 		// Use try-catch to avoid crash if lcms2.dll not present

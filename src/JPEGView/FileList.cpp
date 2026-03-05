@@ -4,6 +4,7 @@
 #include "Helpers.h"
 #include "DirectoryWatcher.h"
 #include "Shlwapi.h"
+#include <set>
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -814,17 +815,37 @@ CFileList* CFileList::TryCreateFileList(const CString& directory, int nNewLevel)
 
 void CFileList::FindFiles() {
 	m_fileList.clear();
-	if (!m_sDirectory.IsEmpty()) {
-		CFindFile fileFind;
-		LPCTSTR* allFileEndings = GetSupportedFileEndingList();
-		for (int i = 0; i < nNumEndings; i++) {
-			if (fileFind.FindFile(m_sDirectory + _T("\\*.") + allFileEndings[i])) {
-				AddToFileList(m_fileList, fileFind, allFileEndings[i]);
-				while (fileFind.FindNextFile()) {
-					AddToFileList(m_fileList, fileFind, allFileEndings[i]);
+	if (m_sDirectory.IsEmpty()) return;
+
+	// Build a set of allowed extensions (lower-case) for O(1) lookup.
+	// This replaces the original loop of ~46 separate FindFirstFile() kernel
+	// calls (one per extension) with a single *.* enumeration pass.
+	LPCTSTR* allFileEndings = GetSupportedFileEndingList();
+	std::set<CString> extSet;
+	for (int i = 0; i < nNumEndings; i++) {
+		CString ext(allFileEndings[i]);
+		ext.MakeLower();
+		extSet.insert(ext);
+	}
+
+	CFindFile fileFind;
+	if (fileFind.FindFile(m_sDirectory + _T("\\*.*"))) {
+		do {
+			if (!fileFind.IsDirectory()) {
+				CString fileName = fileFind.GetFileName();
+				int lastDot = fileName.ReverseFind(_T('.'));
+				if (lastDot >= 0) {
+					CString ext = fileName.Mid(lastDot + 1);
+					ext.MakeLower();
+					if (extSet.count(ext)) {
+						FILETIME lastWriteTime, creationTime;
+						fileFind.GetLastWriteTime(&lastWriteTime);
+						fileFind.GetCreationTime(&creationTime);
+						m_fileList.push_back(CFileDesc(fileFind.GetFilePath(), &lastWriteTime, &creationTime, fileFind.GetFileSize()));
+					}
 				}
 			}
-		}
+		} while (fileFind.FindNextFile());
 	}
 
 	m_fileList.sort();

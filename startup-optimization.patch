@@ -1,0 +1,108 @@
+diff --git a/jpegview-20260305/src/JPEGView/FileList.cpp b/jpegview-startup-opt/src/JPEGView/FileList.cpp
+index 996a774..757844d 100644
+--- a/src/JPEGView/FileList.cpp
++++ b/src/JPEGView/FileList.cpp
+@@ -4,6 +4,7 @@
+ #include "Helpers.h"
+ #include "DirectoryWatcher.h"
+ #include "Shlwapi.h"
++#include <set>
+ 
+ ///////////////////////////////////////////////////////////////////////////////////
+ // Helpers
+@@ -814,17 +815,37 @@ CFileList* CFileList::TryCreateFileList(const CString& directory, int nNewLevel)
+ 
+ void CFileList::FindFiles() {
+ 	m_fileList.clear();
+-	if (!m_sDirectory.IsEmpty()) {
+-		CFindFile fileFind;
+-		LPCTSTR* allFileEndings = GetSupportedFileEndingList();
+-		for (int i = 0; i < nNumEndings; i++) {
+-			if (fileFind.FindFile(m_sDirectory + _T("\\*.") + allFileEndings[i])) {
+-				AddToFileList(m_fileList, fileFind, allFileEndings[i]);
+-				while (fileFind.FindNextFile()) {
+-					AddToFileList(m_fileList, fileFind, allFileEndings[i]);
++	if (m_sDirectory.IsEmpty()) return;
++
++	// Build a set of allowed extensions (lower-case) for O(1) lookup.
++	// This replaces the original loop of ~46 separate FindFirstFile() kernel
++	// calls (one per extension) with a single *.* enumeration pass.
++	LPCTSTR* allFileEndings = GetSupportedFileEndingList();
++	std::set<CString> extSet;
++	for (int i = 0; i < nNumEndings; i++) {
++		CString ext(allFileEndings[i]);
++		ext.MakeLower();
++		extSet.insert(ext);
++	}
++
++	CFindFile fileFind;
++	if (fileFind.FindFile(m_sDirectory + _T("\\*.*"))) {
++		do {
++			if (!fileFind.IsDirectory()) {
++				CString fileName = fileFind.GetFileName();
++				int lastDot = fileName.ReverseFind(_T('.'));
++				if (lastDot >= 0) {
++					CString ext = fileName.Mid(lastDot + 1);
++					ext.MakeLower();
++					if (extSet.count(ext)) {
++						FILETIME lastWriteTime, creationTime;
++						fileFind.GetLastWriteTime(&lastWriteTime);
++						fileFind.GetCreationTime(&creationTime);
++						m_fileList.push_back(CFileDesc(fileFind.GetFilePath(), &lastWriteTime, &creationTime, fileFind.GetFileSize()));
++					}
+ 				}
+ 			}
+-		}
++		} while (fileFind.FindNextFile());
+ 	}
+ 
+ 	m_fileList.sort();
+diff --git a/jpegview-20260305/src/JPEGView/ICCProfileTransform.cpp b/jpegview-startup-opt/src/JPEGView/ICCProfileTransform.cpp
+index 93db69e..7f8152f 100644
+--- a/src/JPEGView/ICCProfileTransform.cpp
++++ b/src/JPEGView/ICCProfileTransform.cpp
+@@ -20,6 +20,12 @@ void* ICCProfileTransform::LabProfile = NULL;
+ void* ICCProfileTransform::CMYKProfile = NULL;
+ 
+ 
++void ICCProfileTransform::Prewarm() {
++	// Pre-initialize the sRGB profile on startup so the first image
++	// load doesn't pay the lcms2.dll load + profile creation cost.
++	GetsRGBProfile();
++}
++
+ void* ICCProfileTransform::GetsRGBProfile() {
+ 	if (sRGBProfile == NULL) {
+ 		// Use try-catch to avoid crash if lcms2.dll not present
+diff --git a/jpegview-20260305/src/JPEGView/ICCProfileTransform.h b/jpegview-startup-opt/src/JPEGView/ICCProfileTransform.h
+index 879b927..f5dd66f 100644
+--- a/src/JPEGView/ICCProfileTransform.h
++++ b/src/JPEGView/ICCProfileTransform.h
+@@ -44,5 +44,7 @@ private:
+ 	static void* GetsRGBProfile();
+ 	static void* GetLabProfile();
+ 	static void* GetCMYKProfile();
++	// Call once at startup to pre-initialize sRGB profile (avoids first-image stall)
++	static void Prewarm();
+ 
+ };
+diff --git a/jpegview-20260305/src/JPEGView/MainDlg.cpp b/jpegview-startup-opt/src/JPEGView/MainDlg.cpp
+index d8ee0e8..02bb894 100644
+--- a/src/JPEGView/MainDlg.cpp
++++ b/src/JPEGView/MainDlg.cpp
+@@ -36,6 +36,7 @@
+ #include "EXIFHelpers.h"
+ #include "RawMetadata.h"
+ #include "ProcessingThreadPool.h"
++#include "ICCProfileTransform.h"
+ #include "PaintMemDCMgr.h"
+ #include "PanelMgr.h"
+ #include "ZoomNavigatorCtl.h"
+@@ -381,6 +382,7 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
+ 
+ 	// create thread pool for processing requests on multiple CPU cores
+ 	CProcessingThreadPool::This().CreateThreadPoolThreads();
++	ICCProfileTransform::Prewarm(); // pre-load lcms2.dll and sRGB profile
+ 
+ 	// create JPEG provider and request first image - do no processing yet if not in fullscreen mode (as we do not know the size yet)
+ 	m_pJPEGProvider = new CJPEGProvider(m_hWnd, NUM_THREADS, READ_AHEAD_BUFFERS);	

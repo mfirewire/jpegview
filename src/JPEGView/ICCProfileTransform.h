@@ -44,5 +44,7 @@ private:
 	static void* GetsRGBProfile();
 	static void* GetLabProfile();
 	static void* GetCMYKProfile();
+	// Call once at startup to pre-initialize sRGB profile (avoids first-image stall)
+	static void Prewarm();
 
 };
