@@ -307,11 +307,10 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 			} else if (nColorMode == MODE_RGB) {
 				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 4 ? ICCProfileTransform::FORMAT_BGRA : ICCProfileTransform::FORMAT_BGR);
 			} else if (nChannels >= 4 && nColorMode == MODE_CMYK) {
-				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 5 ? ICCProfileTransform::FORMAT_AKYMC : ICCProfileTransform::FORMAT_YMCK);
-				
-				// Uncommenting this enables alpha channels in CMYK. It works for most images but causes weird bugs for one, so I disabled it.
-				// if (transform == NULL)
-					nChannels = 4;
+				// Alpha channel in CMYK is disabled; always treat as 4-channel YMCK
+				// so the transform format matches the data layout used below.
+				nChannels = 4;
+				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, ICCProfileTransform::FORMAT_YMCK);
 			}
 		}
 

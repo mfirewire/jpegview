@@ -1,0 +1,129 @@
+diff --git a/jpegview-20260305/src/JPEGView/SaveImage.cpp b/jpegview-patched/src/JPEGView/SaveImage.cpp
+index 453e811..f8d4844 100644
+--- a/src/JPEGView/SaveImage.cpp
++++ b/src/JPEGView/SaveImage.cpp
+@@ -270,6 +270,7 @@ static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, boo
+ 		size_t nSize;
+ 		int nQuality = CSettingsProvider::This().JXLSaveQuality();
+ 		pOutput = (uint8*)JxlReader::Compress((uint8*)pData, nWidth, nHeight, nSize, nQuality, bUseLosslessJXL);
++		if (pOutput == NULL) throw 1;
+ 		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
+ 		fclose(fptr);
+ 		JxlReader::Free(pOutput);
+@@ -488,7 +489,7 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
+ 			throw 1;
+ 		}
+ 
+-		unsigned char* pBuffer = new(std::nothrow) unsigned char[nFileSize];
++		pBuffer = new(std::nothrow) unsigned char[nFileSize];
+ 		if (pBuffer == NULL) {
+ 			throw 1;
+ 		}
+@@ -506,6 +507,7 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
+ 		uint8* pOutput = (uint8*)JxlReader::CompressJPEG(pBuffer, nLengthBytes, nSize);
+ 		delete[] pBuffer;
+ 		pBuffer = NULL;
++		if (pOutput == NULL) throw 1;
+ 		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
+ 		fclose(fptr);
+ 		JxlReader::Free(pOutput);
+diff --git a/jpegview-20260305/src/JPEGView/ICCProfileTransform.cpp b/jpegview-patched/src/JPEGView/ICCProfileTransform.cpp
+index 93db69e..f66f46f 100644
+--- a/src/JPEGView/ICCProfileTransform.cpp
++++ b/src/JPEGView/ICCProfileTransform.cpp
+@@ -39,13 +39,13 @@ void* ICCProfileTransform::GetLabProfile() {
+ 
+ void* ICCProfileTransform::GetCMYKProfile() {
+ 	if (CMYKProfile == NULL) {
+-		CHAR path[MAX_PATH + 10];
++		CHAR path[MAX_PATH + 16];
+ 		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
+ 		if (length > 0 && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+ 			PathRemoveFileSpecA(path);
+ 			lstrcatA(path, "\\cmyk.icm");
++			CMYKProfile = cmsOpenProfileFromFile(path, "r");
+ 		}
+-		CMYKProfile = cmsOpenProfileFromFile(path, "r");
+ 	}
+ 	return CMYKProfile;
+ }
+diff --git a/jpegview-20260305/src/JPEGView/PSDWrapper.cpp b/jpegview-patched/src/JPEGView/PSDWrapper.cpp
+index 214cab8..c46b259 100644
+--- a/src/JPEGView/PSDWrapper.cpp
++++ b/src/JPEGView/PSDWrapper.cpp
+@@ -307,11 +307,10 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
+ 			} else if (nColorMode == MODE_RGB) {
+ 				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 4 ? ICCProfileTransform::FORMAT_BGRA : ICCProfileTransform::FORMAT_BGR);
+ 			} else if (nChannels >= 4 && nColorMode == MODE_CMYK) {
+-				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 5 ? ICCProfileTransform::FORMAT_AKYMC : ICCProfileTransform::FORMAT_YMCK);
+-				
+-				// Uncommenting this enables alpha channels in CMYK. It works for most images but causes weird bugs for one, so I disabled it.
+-				// if (transform == NULL)
+-					nChannels = 4;
++				// Alpha channel in CMYK is disabled; always treat as 4-channel YMCK
++				// so the transform format matches the data layout used below.
++				nChannels = 4;
++				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, ICCProfileTransform::FORMAT_YMCK);
+ 			}
+ 		}
+ 
+diff --git a/jpegview-20260305/src/JPEGView/ImageLoadThread.cpp b/jpegview-patched/src/JPEGView/ImageLoadThread.cpp
+index 2400cd0..9a3a744 100644
+--- a/src/JPEGView/ImageLoadThread.cpp
++++ b/src/JPEGView/ImageLoadThread.cpp
+@@ -1064,6 +1064,7 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request) {
+ 	request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, NULL, 0, isOutOfMemory, isAnimatedGIF);
+ 	request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+ 	if (request->OutOfMemory && GetBitmapFormat(pBitmap) == IF_TIFF) {
++		request->OutOfMemory = false; // reset before WIC retry
+ 		DeleteCachedGDIBitmap();
+ 		return ProcessReadWICRequest(request);
+ 	}
+diff --git a/jpegview-20260305/src/JPEGView/JXLWrapper.cpp b/jpegview-patched/src/JPEGView/JXLWrapper.cpp
+index 5832965..664ecba 100644
+--- a/src/JPEGView/JXLWrapper.cpp
++++ b/src/JPEGView/JXLWrapper.cpp
+@@ -300,12 +300,14 @@ void* JxlReader::Compress(const void* buffer,
+ 	if (rgb_buffer == NULL) {
+ 		return NULL;
+ 	}
+-	memcpy(rgb_buffer, buffer, buffer_size);
++	// Single-pass BGR->RGB copy (avoids separate memcpy + swap passes)
+ 	for (int i = 0; i < height; i++) {
+-		for (int j = 0; j < width; j++) {
+-			size_t offset = (size_t)i * padded_width + j * 3;
+-			rgb_buffer[offset] = ((const uint8_t*)buffer)[offset+2];
+-			rgb_buffer[offset+2] = ((const uint8_t*)buffer)[offset];
++		const uint8_t* src = (const uint8_t*)buffer + (size_t)i * padded_width;
++		uint8_t* dst = rgb_buffer + (size_t)i * padded_width;
++		for (int j = 0; j < width; j++, src += 3, dst += 3) {
++			dst[0] = src[2]; // R <- B
++			dst[1] = src[1]; // G <- G
++			dst[2] = src[0]; // B <- R
+ 		}
+ 	}
+ 	if (JXL_ENC_SUCCESS !=
+@@ -351,7 +353,7 @@ void* JxlReader::CompressJPEG(const void* buffer, size_t input_len, size_t& outp
+ 
+ static void* DoCompress(JxlEncoder* enc, size_t& len) {
+ 	std::vector<uint8_t> compressed;
+-	compressed.resize(4096);
++	compressed.resize(1024 * 1024); // start at 1 MB to avoid repeated resize/copy
+ 	uint8_t* next_out = compressed.data();
+ 	size_t avail_out = compressed.size() - (next_out - compressed.data());
+ 	JxlEncoderStatus process_result = JXL_ENC_NEED_MORE_OUTPUT;
+diff --git a/jpegview-20260305/src/JPEGView/MainDlg.cpp b/jpegview-patched/src/JPEGView/MainDlg.cpp
+index d8ee0e8..5445580 100644
+--- a/src/JPEGView/MainDlg.cpp
++++ b/src/JPEGView/MainDlg.cpp
+@@ -1666,7 +1666,9 @@ void CMainDlg::ExecuteCommand(int nCommand) {
+ 			}
+ 			break;
+ 		case IDM_CONVERT_JXL:
+-			SaveImage(true, true);
++			if (m_pCurrentImage != NULL && m_pCurrentImage->GetImageFormat() == IF_JPEG) {
++				SaveImage(true, true);
++			}
+ 			break;
+ 		case IDM_AUTO_CORRECTION:
+ 			m_bAutoContrastSection = false;

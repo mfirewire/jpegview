@@ -300,12 +300,14 @@ void* JxlReader::Compress(const void* buffer,
 	if (rgb_buffer == NULL) {
 		return NULL;
 	}
-	memcpy(rgb_buffer, buffer, buffer_size);
+	// Single-pass BGR->RGB copy (avoids separate memcpy + swap passes)
 	for (int i = 0; i < height; i++) {
-		for (int j = 0; j < width; j++) {
-			size_t offset = (size_t)i * padded_width + j * 3;
-			rgb_buffer[offset] = ((const uint8_t*)buffer)[offset+2];
-			rgb_buffer[offset+2] = ((const uint8_t*)buffer)[offset];
+		const uint8_t* src = (const uint8_t*)buffer + (size_t)i * padded_width;
+		uint8_t* dst = rgb_buffer + (size_t)i * padded_width;
+		for (int j = 0; j < width; j++, src += 3, dst += 3) {
+			dst[0] = src[2]; // R <- B
+			dst[1] = src[1]; // G <- G
+			dst[2] = src[0]; // B <- R
 		}
 	}
 	if (JXL_ENC_SUCCESS !=
@@ -351,7 +353,7 @@ void* JxlReader::CompressJPEG(const void* buffer, size_t input_len, size_t& outp
 
 static void* DoCompress(JxlEncoder* enc, size_t& len) {
 	std::vector<uint8_t> compressed;
-	compressed.resize(4096);
+	compressed.resize(1024 * 1024); // start at 1 MB to avoid repeated resize/copy
 	uint8_t* next_out = compressed.data();
 	size_t avail_out = compressed.size() - (next_out - compressed.data());
 	JxlEncoderStatus process_result = JXL_ENC_NEED_MORE_OUTPUT;

@@ -39,13 +39,13 @@ void* ICCProfileTransform::GetLabProfile() {
 
 void* ICCProfileTransform::GetCMYKProfile() {
 	if (CMYKProfile == NULL) {
-		CHAR path[MAX_PATH + 10];
+		CHAR path[MAX_PATH + 16];
 		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
 		if (length > 0 && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
 			PathRemoveFileSpecA(path);
 			lstrcatA(path, "\\cmyk.icm");
+			CMYKProfile = cmsOpenProfileFromFile(path, "r");
 		}
-		CMYKProfile = cmsOpenProfileFromFile(path, "r");
 	}
 	return CMYKProfile;
 }

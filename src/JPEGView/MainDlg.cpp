@@ -1666,7 +1666,9 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			}
 			break;
 		case IDM_CONVERT_JXL:
-			SaveImage(true, true);
+			if (m_pCurrentImage != NULL && m_pCurrentImage->GetImageFormat() == IF_JPEG) {
+				SaveImage(true, true);
+			}
 			break;
 		case IDM_AUTO_CORRECTION:
 			m_bAutoContrastSection = false;

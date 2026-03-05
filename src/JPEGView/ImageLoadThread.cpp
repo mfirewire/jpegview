@@ -1064,6 +1064,7 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request) {
 	request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, NULL, 0, isOutOfMemory, isAnimatedGIF);
 	request->OutOfMemory = request->Image == NULL && isOutOfMemory;
 	if (request->OutOfMemory && GetBitmapFormat(pBitmap) == IF_TIFF) {
+		request->OutOfMemory = false; // reset before WIC retry
 		DeleteCachedGDIBitmap();
 		return ProcessReadWICRequest(request);
 	}

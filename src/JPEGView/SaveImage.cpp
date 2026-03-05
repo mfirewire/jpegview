@@ -270,6 +270,7 @@ static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, boo
 		size_t nSize;
 		int nQuality = CSettingsProvider::This().JXLSaveQuality();
 		pOutput = (uint8*)JxlReader::Compress((uint8*)pData, nWidth, nHeight, nSize, nQuality, bUseLosslessJXL);
+		if (pOutput == NULL) throw 1;
 		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
 		fclose(fptr);
 		JxlReader::Free(pOutput);
@@ -488,7 +489,7 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
 			throw 1;
 		}
 
-		unsigned char* pBuffer = new(std::nothrow) unsigned char[nFileSize];
+		pBuffer = new(std::nothrow) unsigned char[nFileSize];
 		if (pBuffer == NULL) {
 			throw 1;
 		}
@@ -506,6 +507,7 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
 		uint8* pOutput = (uint8*)JxlReader::CompressJPEG(pBuffer, nLengthBytes, nSize);
 		delete[] pBuffer;
 		pBuffer = NULL;
+		if (pOutput == NULL) throw 1;
 		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
 		fclose(fptr);
 		JxlReader::Free(pOutput);
