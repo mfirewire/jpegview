@@ -37,6 +37,8 @@ runs:
 
     - name: Replace resource vars
       if: ${{ inputs.patch-version }}
+      # 版本号打标只是外观修饰，sed 在 PowerShell 里的转义很脆，失败不应阻断构建
+      continue-on-error: true
       shell: powershell
       # Replace the version information for auto-GH builds so it's clear to me and others that this was not a formal release:
       # * replaces in JPEGView main window and About dialog
