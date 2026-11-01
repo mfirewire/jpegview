@@ -43,7 +43,9 @@ if(MSVC)
         $<$<CONFIG:Release>:/GS->
         $<$<CONFIG:Release>:/Gy>
         $<$<CONFIG:Release>:/Gw>
-        $<$<CONFIG:Release>:/GL>
+        # /GL 关闭：仓库里的预编译库（turbojpeg-static.lib 等）不是用同一套工具集
+        # 以 /GL 编出来的，开启后链接会报 C1047 "created by a different version of
+        # the compiler"。LTCG 在这种工程的收益通常只有个位数百分比，不值得为此重建全部依赖。
         $<$<CONFIG:Release>:/Oy>
         $<$<CONFIG:Release>:/GF>
         $<$<CONFIG:Release>:/Qpar>
@@ -54,7 +56,7 @@ if(MSVC)
     endif()
 
     add_link_options(
-        $<$<CONFIG:Release>:/LTCG>
+        # /LTCG 随 /GL 一起关闭，原因见上面的注释
         $<$<CONFIG:Release>:/OPT:REF>
         $<$<CONFIG:Release>:/OPT:ICF>
     )
