@@ -130,12 +130,18 @@ jobs:
         if: failure()
         shell: powershell
         run: |
-          if (Test-Path build_libheif.log) {
-            $lines = @(Get-Content build_libheif.log | Where-Object { $_.Trim() -ne "" })
-            Write-Output "===== last 25 lines of libheif build log ====="
-            $lines | Select-Object -Last 25 | ForEach-Object { Write-Output "::error::$_" }
-          } else {
+          if (-not (Test-Path build_libheif.log)) {
             Write-Output "::error::build_libheif.log not found - the batch file never ran"
+            exit 0
+          }
+          $lines = @(Get-Content build_libheif.log | Where-Object { $_.Trim() -ne "" })
+          # 构建脚本会吞掉 cmake/nmake 的返回码，只保留最后一句话，所以优先抓真正的错误行
+          $errs = @($lines | Where-Object { $_ -match '(?i)error|cannot|not found|failed|no such|拒绝|找不到' } | Select-Object -Last 8)
+          if ($errs.Count -gt 0) {
+            foreach ($e in $errs) { Write-Output "::error::$e" }
+          } else {
+            Write-Output "::error::没有匹配到 error 关键字的行，输出最后 8 行"
+            $lines | Select-Object -Last 8 | ForEach-Object { Write-Output "::error::$_" }
           }
 
       - name: Upload binaries
