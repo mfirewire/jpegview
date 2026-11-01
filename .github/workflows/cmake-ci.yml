@@ -45,16 +45,23 @@ jobs:
         if ($errs.Count -eq 0) { $errs = @($lines | Select-Object -Last 10) }
         foreach ($e in $errs) { Write-Output "::error::$e" }
 
+    - name: Verify the artifact folder is complete
+      if: matrix.config == 'Release'
+      shell: pwsh
+      run: |
+        # KeyMap.txt.default 这种扩展名不是 .txt，之前用 *.txt 通配就把它漏掉了，
+        # 结果 zip 里没有键位表，程序启动后所有快捷键静默失效。这里显式把关。
+        $need = @('JPEGView.exe', 'KeyMap.txt.default', 'symbols.km', 'JPEGView.ini', 'strings.txt')
+        $missing = @($need | Where-Object { -not (Test-Path "build/bin/Release/$_") })
+        if ($missing.Count -gt 0) {
+          $missing | ForEach-Object { Write-Output "::error::missing from build/bin/Release: $_" }
+          exit 1
+        }
+        Write-Output "artifact folder OK: $($need.Count) required files present"
+
     - name: Upload Artifacts (Release)
       if: matrix.config == 'Release'
       uses: actions/upload-artifact@v4
       with:
         name: JPEGView-Modern-x64-Release
-        path: |
-          build/bin/Release/*.exe
-          build/bin/Release/*.dll
-          build/bin/Release/*.ini
-          build/bin/Release/*.txt
-          build/bin/Release/*.km
-          build/bin/Release/*.html
-          build/bin/Release/*.png
+        path: build/bin/Release/*

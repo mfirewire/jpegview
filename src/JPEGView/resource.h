@@ -318,6 +318,8 @@
 
 // in the main menu
 // these position must be changed if menu items are inserted
+// 这些是 POPUPMENU 里顶层项的位置（分隔符也算一项）。2026-11-01 在 Keep parameters
+// 上方插入 “Recognize text (OCR)” 之后，它后面所有子菜单的索引整体 +1。
 #define SUBMENU_POS_OPENWITH 3
 #define SUBMENU_POS_MODDATE 9
 #define SUBMENU_POS_WALLPAPER 10
@@ -326,10 +328,10 @@
 #define SUBMENU_POS_MOVIE 25
 #define SUBMENU_POS_TRANSFORM 27
 #define SUBMENU_POS_TRANSFORM_LOSSLESS 28
-#define SUBMENU_POS_ZOOM 36
-#define SUBMENU_POS_AUTOZOOMMODE 37
-#define SUBMENU_POS_SETTINGS 39
-#define SUBMENU_POS_USER_COMMANDS 41
+#define SUBMENU_POS_ZOOM 37
+#define SUBMENU_POS_AUTOZOOMMODE 38
+#define SUBMENU_POS_SETTINGS 40
+#define SUBMENU_POS_USER_COMMANDS 42
 
 // in the crop menu
 #define SUBMENU_POS_CROPMODE 3

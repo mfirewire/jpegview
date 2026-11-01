@@ -1314,12 +1314,14 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 
 	HMENU hMenuTrackPopup = ::GetSubMenu(hMenu, 0);
 	HelpersGUI::TranslateMenuStrings(hMenuTrackPopup, m_pKeyMap);
-	// Append after translation to preserve the existing submenu positions.
-	::AppendMenu(hMenuTrackPopup, MF_SEPARATOR, 0, nullptr);
-	::AppendMenu(hMenuTrackPopup, MF_STRING | ((m_ocr && m_ocr->Active()) ? MF_CHECKED : 0) |
-		((m_pCurrentImage && !m_pCropCtl->IsCropping()) ? 0 : MF_GRAYED), IDM_OCR_TEXT,
-		CNLS::GetString(_T("Recognize text (OCR) / toggle text regions")));
-	
+	// OCR 的一项由资源里的菜单承载（位于 Keep parameters 上方），这里只同步勾选
+	// 与禁用状态。Prit36 原本在这一步动态 AppendMenu 追加一条，和资源里的那条
+	// 并存就变成右键菜单出现两个 OCR，所以追加逻辑已经去掉。
+	::CheckMenuItem(hMenuTrackPopup, IDM_OCR_TEXT, MF_BYCOMMAND | ((m_ocr && m_ocr->Active()) ? MF_CHECKED : MF_UNCHECKED));
+	if (m_pCurrentImage == NULL || m_pCropCtl->IsCropping()) {
+		::EnableMenuItem(hMenuTrackPopup, IDM_OCR_TEXT, MF_BYCOMMAND | MF_GRAYED);
+	}
+
 	if (m_pEXIFDisplayCtl->IsActive()) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_FILEINFO, MF_CHECKED);
 	if (m_bShowFileName) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_FILENAME, MF_CHECKED);
 	if (m_pNavPanelCtl->IsActive()) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_NAVPANEL, MF_CHECKED);
