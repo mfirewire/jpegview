@@ -47,7 +47,7 @@ jobs:
           echo "WARNING: setup-msbuild did not output includePath"
         }
 
-    - name: Locate ATL headers (atlbase.h) and add to IncludePath
+    - name: Locate ATL headers (atlbase.h) and lib (atls.lib) and add to IncludePath/LIB
       shell: powershell
       run: |
         $vsInstallDir = "${{ steps.setup-msbuild.outputs.vsInstallationPath }}"
@@ -61,22 +61,42 @@ jobs:
           "$vsInstallDir\VC\atlmfc\include",
           "$vsInstallDir\VC\Auxiliary\VS\include"
         )
-        $found = $false
+        $foundInc = $false
+        $foundLib = $false
+        $atlIncPath = ""
+        $atlLibPath = ""
         foreach ($pattern in $candidatePaths) {
           $matches = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
           foreach ($m in $matches) {
             $atlBase = Join-Path $m.FullName "atlbase.h"
-            if (Test-Path $atlBase) {
+            if (-not $foundInc -and (Test-Path $atlBase)) {
               echo "Found atlbase.h at: $atlBase"
-              echo "ATLINCLUDE=$($m.FullName)" >> $env:GITHUB_ENV
-              $found = $true
-              break
+              $atlIncPath = $m.FullName
+              $foundInc = $true
+            }
+            # Look for atls.lib in the corresponding lib arch dir
+            $msvcVer = $m.Parent.Name
+            $archDirs = @("x64", "x86")
+            foreach ($arch in $archDirs) {
+              $libCandidate = Join-Path (Join-Path (Join-Path $m.Parent.Parent.FullName "lib") $arch) "atls.lib"
+              if (-not $foundLib -and (Test-Path $libCandidate)) {
+                echo "Found atls.lib at: $libCandidate"
+                $atlLibPath = Split-Path $libCandidate -Parent
+                $foundLib = $true
+              }
             }
           }
-          if ($found) { break }
+          if ($foundInc -and $foundLib) { break }
         }
-        if (-not $found) {
+        if ($foundInc) {
+          echo "ATLINCLUDE=$atlIncPath" >> $env:GITHUB_ENV
+        } else {
           echo "WARNING: atlbase.h not found in common locations"
+        }
+        if ($foundLib) {
+          echo "ATLLIBPATH=$atlLibPath" >> $env:GITHUB_ENV
+        } else {
+          echo "WARNING: atls.lib not found in common locations"
         }
 
     - name: Merge IncludePath (setup-msbuild + ATL)
@@ -91,6 +111,22 @@ jobs:
         echo "INCLUDEPATH=$merged" >> $env:GITHUB_ENV
         echo "INCLUDE=$merged" >> $env:GITHUB_ENV
         echo "Final IncludePath: $merged"
+
+    - name: Merge LIB env var with ATL lib path
+      shell: powershell
+      run: |
+        $atlLib = "${{ env.ATLLIBPATH }}"
+        if ($atlLib) {
+          $existingLib = [Environment]::GetEnvironmentVariable("LIB", [EnvironmentVariableTarget]::Process)
+          if ($existingLib) {
+            echo "LIB=$atlLib;$existingLib" >> $env:GITHUB_ENV
+          } else {
+            echo "LIB=$atlLib" >> $env:GITHUB_ENV
+          }
+          echo "Final LIB: $atlLib"
+        } else {
+          echo "WARNING: No ATL lib path to add to LIB"
+        }
 
     - uses: ./.github/actions/setup-wix
 
