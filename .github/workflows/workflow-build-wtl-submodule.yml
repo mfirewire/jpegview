@@ -136,7 +136,37 @@ jobs:
       run: |
         echo (Optional) INCLUDE: %INCLUDE%
         echo (Optional) ATLLIBPATH: %ATLLIBPATH%
-        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" /p:AdditionalLibraryDirectories="%ATLLIBPATH%" src\\JPEGView.sln
+        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" /p:AdditionalLibraryDirectories="%ATLLIBPATH%" "/flp1:LogFile=build.err;ErrorsOnly" "/flp2:LogFile=build.log;Normal" src\\JPEGView.sln
+
+    # 把 msbuild 的错误行转成 GitHub annotation，这样 API 侧也能读到具体错误
+    - name: Surface build errors as annotations
+      if: failure()
+      shell: powershell
+      run: |
+        if (Test-Path build.err) {
+          $lines = @(Get-Content build.err | Where-Object { $_.Trim() -ne "" })
+          Write-Output "===== msbuild error lines: $($lines.Count) ====="
+          $n = 0
+          foreach ($l in $lines) {
+            $n++
+            if ($n -gt 12) { break }
+            Write-Output "::error::$l"
+          }
+          Write-Output "===== first 60 error lines (full) ====="
+          $lines | Select-Object -First 60 | ForEach-Object { Write-Output $_ }
+        } else {
+          Write-Output "::error::build.err not found - msbuild did not run or wrote no log"
+        }
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: buildlog-${{ inputs.platform-arch }}-${{ inputs.build-config }}
+        path: |
+          build.log
+          build.err
+        if-no-files-found: ignore
 
     - uses: ./.github/actions/upload-some-artifacts
       with:
