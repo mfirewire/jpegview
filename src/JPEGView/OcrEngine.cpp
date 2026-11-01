@@ -1,5 +1,13 @@
-#define NOMINMAX
 #include "stdafx.h"
+// stdafx.h 经 ATL/windows.h 引入 max/min 宏。本项目使用预编译头，
+// 写在 stdafx.h 之前的 #define NOMINMAX 会被 PCH 机制跳过而不生效，
+// 因此在这里直接 undef，否则下面的 std::min/std::max 会被宏展开成语法错误。
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
 #include "OcrEngine.h"
 #include <algorithm>
 #include <cmath>
@@ -106,7 +114,7 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
         // Try multiple languages so Chinese+English mixed text works without
         // user configuration.  Chinese engines usually also recognize English,
         // so zh-CN/zh-TW are tried first, then en-US, then the system default.
-        OcrEngine engine;
+        OcrEngine engine{ nullptr };
         const std::wstring preferredLanguages[] = {L"zh-CN", L"zh-TW", L"en-US"};
         for (const auto& lang : preferredLanguages) {
             try {
