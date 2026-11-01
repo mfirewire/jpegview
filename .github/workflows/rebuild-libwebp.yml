@@ -26,7 +26,24 @@ jobs:
 
       - name: Build libwebp static libs
         shell: cmd
-        run: extras\scripts\build-libwebp.bat
+        run: |
+          call extras\scripts\build-libwebp.bat > build_libwebp.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_libwebp.log
+          exit /b %RC%
+
+      # job log 的 API 是 403，只能靠 annotation 取信息
+      - name: Surface build failure as annotations
+        if: failure()
+        shell: powershell
+        run: |
+          if (Test-Path build_libwebp.log) {
+            $lines = @(Get-Content build_libwebp.log | Where-Object { $_.Trim() -ne "" })
+            Write-Output "===== last 20 lines of build log ====="
+            $lines | Select-Object -Last 20 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_libwebp.log not found - the batch file never ran"
+          }
 
       - name: List resulting libs
         shell: cmd
