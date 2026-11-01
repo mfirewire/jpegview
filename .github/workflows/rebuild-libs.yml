@@ -94,6 +94,30 @@ jobs:
           Write-Output $nasmDir >> $env:GITHUB_PATH
           Write-Output "nasm 安装于 $nasmDir，已写入 GITHUB_PATH"
 
+      # 脚本期望的两个源码位置在仓库里对不上：
+      #  - libde265 实际在 extras/third_party/libde265-1.1.3-src，脚本却找 libheif-1.23.7-src\libde265-1.1.3-src
+      #  - libavif 是未初始化的空子模块
+      # 这里补到位，脚本本身不动。
+      - name: Stage missing sources for libheif
+        shell: powershell
+        run: |
+          $deSrc = "extras/third_party/libde265-1.1.3-src"
+          $deDst = "extras/third_party/libheif-1.23.7-src/libde265-1.1.3-src"
+          if (-not (Test-Path $deDst)) {
+            if (-not (Test-Path $deSrc)) { throw "libde265 源码缺失：$deSrc" }
+            Copy-Item $deSrc $deDst -Recurse -Force
+            Write-Output "libde265 已复制到 $deDst"
+          }
+
+          $avif = "extras/third_party/libavif"
+          if (-not (Test-Path "$avif/CMakeLists.txt")) {
+            Remove-Item $avif -Recurse -Force -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v1.4.2.zip" -OutFile libavif.zip
+            Expand-Archive libavif.zip -DestinationPath libavif-tmp -Force
+            Move-Item libavif-tmp/libavif-1.4.2 $avif
+            Write-Output "libavif 1.4.2 已就位"
+          }
+
       - name: Build libheif + libavif + libde265
         shell: cmd
         run: |
