@@ -42,7 +42,11 @@ jobs:
 
     - uses: ./.github/actions/setup-wix
 
-    - uses: ./.github/actions/wtl-cache
+    # 原先是 ./.github/actions/wtl-cache：从 SourceForge 下载 WTL 到 WTL_Release\Include，
+    # 但 JPEGView.vcxproj 的 IncludePath 指向 deps\WTL-sf\Include（子模块路径），两边对不上，
+    # 导致 Debug 构建报 C1083: Cannot open include file: 'atlapp.h'。
+    # 改用与 Release 相同的子模块方式，保证两条路径一致。
+    - uses: ./.github/actions/wtl-submodule
 
     - uses: ./.github/actions/build-solution
       with:

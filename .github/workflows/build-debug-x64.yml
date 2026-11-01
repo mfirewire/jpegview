@@ -1,6 +1,10 @@
 name: Build Test x64 (Debug)
 
-on: [push, pull_request]
+# 手动触发：Debug 只在需要验证 Debug 配置能否编译时跑一次，不跟随每次 push。
+# 理由：Debug 与 Release 编的是同一份源码，差别只有 /MTd 与优化开关，
+# 每次 push 都跑等于用一半 CI 时间重复验证同一件事。
+on:
+  workflow_dispatch:
 
 jobs:
   call-workflow-build:

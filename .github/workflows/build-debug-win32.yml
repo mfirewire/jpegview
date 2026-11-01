@@ -1,6 +1,8 @@
 name: Build Test Win32 (Debug)
 
-on: [push, pull_request]
+# 手动触发，理由见 build-debug-x64.yml
+on:
+  workflow_dispatch:
 
 jobs:
   call-workflow-build:
