@@ -94,11 +94,11 @@ jobs:
 
     - uses: ./.github/actions/wtl-submodule
 
-    - uses: ./.github/actions/build-solution
-      with:
-        platform-arch: ${{ inputs.platform-arch }}
-        build-config: ${{ inputs.build-config }}
-        patch-version: false
+    - name: Build Solution
+      shell: cmd
+      run: |
+        echo (Optional) INCLUDE: %INCLUDE%
+        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" src\\JPEGView.sln
 
     - uses: ./.github/actions/upload-some-artifacts
       with:
