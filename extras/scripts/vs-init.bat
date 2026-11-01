@@ -10,7 +10,9 @@ IF /I "%~1" EQU "" (
 	exit /b 1
 )
 
+REM 2017/2019 install under "Program Files (x86)", 2022+ under "Program Files"
 SET XVS_BASE_COMMON=%ProgramFiles(x86)%\Microsoft Visual Studio
+IF NOT EXIST "%XVS_BASE_COMMON%" SET XVS_BASE_COMMON=%ProgramFiles%\Microsoft Visual Studio
 
 IF /I "%XVS_INIT_VER%" EQU "" GOTO SKIP_VER
 	REM need to do it this way so that () chars don't cause a syntax error

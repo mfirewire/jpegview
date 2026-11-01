@@ -1,0 +1,44 @@
+name: Rebuild libwebp
+
+# 手动触发。把 extras/third_party/libwebp-1.6.0-src 用官方 Makefile.vc 编成静态库
+# （RTLIBCFG=static，与 JPEGView 的 /MT 一致），覆盖 src/JPEGView/libwebp/lib{lib,lib64}/，
+# 产物作为 artifact 上传。不自动提交，先确认能编出正确的 .lib 再决定入库方式。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-libwebp.yml'
+      - 'extras/third_party/libwebp-1.6.0-src/**'
+      - 'extras/scripts/build-libwebp.bat'
+      - 'extras/scripts/vs-init.bat'
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Build libwebp static libs
+        shell: cmd
+        run: extras\scripts\build-libwebp.bat
+
+      - name: List resulting libs
+        shell: cmd
+        run: |
+          dir src\JPEGView\libwebp\lib\*.lib
+          dir src\JPEGView\libwebp\lib64\*.lib
+
+      - name: Upload static libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: libwebp-1.6.0-static
+          path: |
+            src/JPEGView/libwebp/lib/*.lib
+            src/JPEGView/libwebp/lib64/*.lib
+          if-no-files-found: error
