@@ -20,11 +20,22 @@ jobs:
       shell: powershell
       run: echo "short_sha=$(git rev-parse --short "${{ github.sha }}")" >> $env:GITHUB_ENV
     - name: Setup msbuild
+      id: setup-msbuild-win32
       uses: microsoft/setup-msbuild@v1.1
       with:
         # Use any available VS 2022+
         vs-version: '[17.0,]'
         msbuild-architecture: Win32
+    - name: Set IncludePath env var from setup-msbuild output (Win32)
+      shell: powershell
+      run: |
+        $includePath = "${{ steps.setup-msbuild-win32.outputs.includePath }}"
+        if ($includePath) {
+          echo "INCLUDEPATH=$includePath" >> $env:GITHUB_ENV
+          echo "IncludePath set to: $includePath"
+        } else {
+          echo "WARNING: setup-msbuild did not output includePath"
+        }
     - uses: ./.github/actions/setup-wix
     - uses: ./.github/actions/wtl-submodule
     - name: Build Solution Win32 Release
@@ -52,11 +63,22 @@ jobs:
       shell: powershell
       run: echo "short_sha=$(git rev-parse --short "${{ github.sha }}")" >> $env:GITHUB_ENV
     - name: Setup msbuild
+      id: setup-msbuild-x64
       uses: microsoft/setup-msbuild@v1.1
       with:
         # Use any available VS 2022+
         vs-version: '[17.0,]'
         msbuild-architecture: x64
+    - name: Set IncludePath env var from setup-msbuild output (x64)
+      shell: powershell
+      run: |
+        $includePath = "${{ steps.setup-msbuild-x64.outputs.includePath }}"
+        if ($includePath) {
+          echo "INCLUDEPATH=$includePath" >> $env:GITHUB_ENV
+          echo "IncludePath set to: $includePath"
+        } else {
+          echo "WARNING: setup-msbuild did not output includePath"
+        }
     - uses: ./.github/actions/setup-wix
     - uses: ./.github/actions/wtl-submodule
     - name: Build Solution x64 Release
