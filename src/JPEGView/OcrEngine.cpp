@@ -188,12 +188,13 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
                 w.line = lineIndex;
                 // OcrWord 的包围盒属性名是 BoundingRect（Windows.Foundation.Rect），不是 BoundingBox。
                 auto rect = word.BoundingRect();
-                w.corners = {
-                    {(float)rect.X, (float)rect.Y},
-                    {(float)(rect.X + rect.Width), (float)rect.Y},
-                    {(float)(rect.X + rect.Width), (float)(rect.Y + rect.Height)},
-                    {(float)rect.X, (float)(rect.Y + rect.Height)}
-                };
+                // std::array 是聚合类型，不能从 braced-init-list 直接赋值，逐元素写。
+                const float x0 = rect.X, y0 = rect.Y;
+                const float x1 = rect.X + rect.Width, y1 = rect.Y + rect.Height;
+                w.corners[0] = {x0, y0};
+                w.corners[1] = {x1, y0};
+                w.corners[2] = {x1, y1};
+                w.corners[3] = {x0, y1};
                 result.words.push_back(std::move(w));
             }
             ++lineIndex;
