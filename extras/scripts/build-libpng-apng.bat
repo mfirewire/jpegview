@@ -149,11 +149,11 @@ REM 链接 /MD 的 libpng16.lib 会报一堆 __imp__fwrite / __imp__remove 之�
 REM 我们只需要 zlib.lib 和 libpng16.lib，测试工具没有价值。
 REM zlib.vcxproj 里有 <Import Project="$(SolutionDir)zlib.props" />，
 REM 单独构建 vcxproj 时 SolutionDir 不会自动填，必须显式传入（结尾要带反斜杠）。
-SET XSLNDIR=%XLIB_DIR%\projects\vstudio\
+SET XSLNDIR=%XLIB_DIR%\projects\vstudio
 
-msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 /property:SolutionDir="%XSLNDIR%" "%XLIB_DIR%\projects\vstudio\zlib\zlib.vcxproj"
+msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 /property:SolutionDir="%XSLNDIR%\\" "%XLIB_DIR%\projects\vstudio\zlib\zlib.vcxproj"
 IF ERRORLEVEL 1 exit /b 1
-msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 /property:SolutionDir="%XSLNDIR%" "%XLIB_DIR%\projects\vstudio\libpng\libpng.vcxproj"
+msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 /property:SolutionDir="%XSLNDIR%\\" "%XLIB_DIR%\projects\vstudio\libpng\libpng.vcxproj"
 exit /b %ERRORLEVEL%
 
 
