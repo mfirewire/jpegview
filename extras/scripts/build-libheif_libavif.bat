@@ -5,7 +5,7 @@ REM this builds libheif and replaces the libs in the JPEGView src folder
 REM it also builds libavif as both share the same dav1d libs
 
 SET XSRC_DIR=%~dp0..\..\src\JPEGView\libheif
-SET XLIB_DIR=%~dp0..\third_party\libheif
+SET XLIB_DIR=%~dp0..\third_party\libheif-1.23.7-src
 SET XLIBAVIF_DIR=%~dp0..\third_party\libavif
 SET XAVIFSRC_DIR=%~dp0..\..\src\JPEGView\libavif
 SET XOUT_DIR=%~dp0libheif_libavif
@@ -44,7 +44,8 @@ python.exe -m pip install -U meson ninja
 
 
 REM libavif only depends on dav1d
-REM libheif depends on dav1d and libde
+REM libheif depends on dav1d and libde265
+REM libheif v1.23.7 + libde265 v1.1.3 sources in extras/third_party/libheif-1.23.7-src and libde265-1.1.3-src
 
 call :BUILD_COPY_DAV1D x86 ""
 IF ERRORLEVEL 1 exit /b 1
@@ -138,7 +139,7 @@ REM ============================================================================
 REM so the environments don't pollute each other
 setlocal
 
-SET XLIB_DIR=%XLIB_DIR%\libde265
+SET XLIB_DIR=%XLIB_DIR%\libde265-1.1.3-src
 
 SET XBUILD_DIR=%XOUT_DIR%\libde-%1
 
@@ -280,7 +281,7 @@ REM builds it the old way, not used at the moment, using qbnu's cmake way: https
 REM so the environments don't pollute each other
 setlocal
 
-SET XLIB_DIR=%XLIB_DIR%\libde265
+SET XLIB_DIR=%XLIB_DIR%\libde265-1.1.3-src
 
 REM it builds into its own directory, clear it before proceeding
 REM if upstream changes the build locations, then this will have to match what's in build.bat upstream

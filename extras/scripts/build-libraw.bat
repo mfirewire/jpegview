@@ -4,7 +4,7 @@ setlocal
 REM this builds LibRaw and replaces the dlls/libs in the JPEGView src folder
 
 SET XSRC_DIR=%~dp0..\..\src\JPEGView\libraw
-SET XLIB_DIR=%~dp0..\third_party\LibRaw
+SET XLIB_DIR=%~dp0..\third_party\LibRaw-0.22.3-src
 
 SET XVS_VER=2019
 IF /I "%XVS_INIT_VER%" NEQ "" (

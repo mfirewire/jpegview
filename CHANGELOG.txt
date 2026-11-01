@@ -1,6 +1,30 @@
 JPEGView Changelog
 ******************
 
+[1.3.47] 2026-11-01
+New features:
+- Add JXL encode null-check and ConvertToJXL JPEG-source guard (crash fixes)
+- Add CMYK ICC profile delayed-open + path buffer fix (MAX_PATH+16) with bundled cmyk.icm
+- Add PSD CMYK fixed 4-channel YMCK (avoid alpha-channel bugs)
+- Add TIFF OOM fallback to WIC reader (reset OutOfMemory before retry)
+- Add JXL single-pass BGR->RGB copy + 1 MB output pre-allocation (encode speed)
+Bugs fixed:
+- JXL save/convert no longer dereferences NULL output
+- TIFF read failure no longer sticks OutOfMemory flag
+- CMYK profile no longer opened on invalid path
+Changed behavior:
+- None (default runtime settings unchanged)
+Other changes:
+- Updated to library versions:
+  * libwebp 1.6.0 (CVE fixes, perf)
+  * libde265 1.1.3
+  * libheif 1.23.7
+  * LibRaw 0.22.3
+Engineering:
+- GitHub Actions auto Release + asset upload
+- ci-test.yml added
+- CHANGELOG/README synced with mfirewire patches
+
 [1.3.46] 2023-10-07
 New features:
 - Add support for more RAW image formats with LibRaw, ex: CR3 (ICC profiles are supported)

@@ -1,0 +1,173 @@
+/*
+ * HEIF codec.
+ * Copyright (c) 2022 Dirk Farin <dirk.farin@gmail.com>
+ *
+ * This file is part of libheif.
+ *
+ * libheif is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation, either version 3 of
+ * the License, or (at your option) any later version.
+ *
+ * libheif is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with libheif.  If not, see <http://www.gnu.org/licenses/>.
+ */
+#ifndef LIBHEIF_COMPRESSION_H
+#define LIBHEIF_COMPRESSION_H
+
+#include <vector>
+#include <cinttypes>
+#include <cstddef>
+#include <mutex>
+
+#include <error.h>
+#include <libheif/heif_uncompressed.h>
+
+struct heif_security_limits;
+
+// Counts bytes produced by MIME metadata decompression across all reads of one
+// file, including unsuccessful and repeated reads. Uncompressed image (unci)
+// decoding does not pass a budget to the decompressors.
+class MetadataDecompressionBudget
+{
+public:
+  void set_limit(const uint64_t* limit) { m_limit = limit; }
+
+  bool consume(size_t bytes)
+  {
+    const uint64_t limit = m_limit ? *m_limit : 0;
+    if (limit == 0 || bytes == 0) { return true; }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_used >= limit || bytes > limit - m_used) {
+      // Saturate on an over-budget attempt so later reads fail immediately.
+      if (m_used < limit) { m_used = limit; }
+      return false;
+    }
+    m_used += bytes;
+    return true;
+  }
+
+  bool exhausted() const
+  {
+    const uint64_t limit = m_limit ? *m_limit : 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return limit != 0 && m_used >= limit;
+  }
+
+private:
+  const uint64_t* m_limit = nullptr;
+  mutable std::mutex m_mutex;
+  uint64_t m_used = 0;
+};
+
+/**
+ * Convert heif_unci_compression enum to a fourcc code.
+ *
+ * @param method the compression method
+ * @return the corresponding fourcc code, or 0 for heif_unci_compression_off
+ */
+uint32_t unci_compression_to_fourcc(heif_unci_compression method);
+
+/**
+ * Compress data using the compression method identified by a fourcc code.
+ *
+ * @param fourcc_code the fourcc code for the compression method (e.g. "defl", "zlib", "brot")
+ * @param data pointer to the data to be compressed
+ * @param size the length of the input array in bytes
+ * @return the corresponding compressed data, or an error
+ */
+Result<std::vector<uint8_t>> compress_unci_fourcc(uint32_t fourcc_code,
+                                                   const uint8_t* data, size_t size);
+
+#if HAVE_ZLIB
+/**
+ * Compress data using zlib method.
+ * 
+ * This is the RFC 1950 format.
+ * 
+ * @param input pointer to the data to be compressed
+ * @param size the length of the input array in bytes
+ * @return the corresponding compressed data
+ */
+std::vector<uint8_t> compress_zlib(const uint8_t* input, size_t size);
+
+/**
+ * Compress data using deflate method.
+ * 
+ * This is the RFC 1951 format.
+ * 
+ * @param input pointer to the data to be compressed
+ * @param size the length of the input array in bytes
+ * @return the corresponding compressed data
+ */
+std::vector<uint8_t> compress_deflate(const uint8_t* input, size_t size);
+
+/**
+ * Decompress zlib compressed data.
+ *
+ * This is assumed to be in RFC 1950 format, which is the normal zlib format.
+ *
+ * @param compressed_input the compressed data to be decompressed
+ * @param limits security limits that bound the size of the decompressed data (may be nullptr)
+ * @param max_output_size the largest size the decompressed data may have. Decompression
+ *        stops with an error as soon as more data is produced. Use this when the expected
+ *        size is known in advance.
+ * @return the decompressed data or an error on failure (usually corrupt data)
+ * 
+ * @sa decompress_deflate
+ * @sa compress_zlib
+ */
+Result<std::vector<uint8_t>> decompress_zlib(const std::vector<uint8_t>& compressed_input,
+                                             const heif_security_limits* limits,
+                                             uint64_t max_output_size = UINT64_MAX,
+                                             MetadataDecompressionBudget* work_budget = nullptr);
+
+/**
+ * Decompress "deflate" compressed data.
+ *
+ * This is assumed to be in RFC 1951 format, which is the deflate format.
+ *
+ * @param compressed_input the compressed data to be decompressed
+ * @param limits security limits that bound the size of the decompressed data (may be nullptr)
+ * @param max_output_size the largest size the decompressed data may have. Decompression
+ *        stops with an error as soon as more data is produced. Use this when the expected
+ *        size is known in advance.
+ * @return the decompressed data or an error on failure (usually corrupt data)
+ * 
+ * @sa decompress_zlib
+ * @sa compress_deflate
+ */
+Result<std::vector<uint8_t>> decompress_deflate(const std::vector<uint8_t>& compressed_input,
+                                                const heif_security_limits* limits,
+                                                uint64_t max_output_size = UINT64_MAX,
+                                                MetadataDecompressionBudget* work_budget = nullptr);
+
+#endif
+
+#if HAVE_BROTLI
+/**
+ * Decompress Brotli compressed data.
+ *
+ * Brotli is described at https://brotli.org/
+ *
+ * @param compressed_input the compressed data to be decompressed
+ * @param limits security limits that bound the size of the decompressed data (may be nullptr)
+ * @param max_output_size the largest size the decompressed data may have. Decompression
+ *        stops with an error as soon as more data is produced. Use this when the expected
+ *        size is known in advance.
+ * @return the decompressed data or an error on failure (usually corrupt data)
+ */
+Result<std::vector<uint8_t>> decompress_brotli(const std::vector<uint8_t>& compressed_input,
+                                               const heif_security_limits* limits,
+                                               uint64_t max_output_size = UINT64_MAX,
+                                               MetadataDecompressionBudget* work_budget = nullptr);
+
+std::vector<uint8_t> compress_brotli(const uint8_t* input, size_t size);
+#endif
+
+#endif //LIBHEIF_COMPRESSION_H

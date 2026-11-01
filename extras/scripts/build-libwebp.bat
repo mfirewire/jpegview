@@ -4,7 +4,7 @@ setlocal
 REM this builds libwebp and replaces the libs in the JPEGView src folder
 
 SET XSRC_DIR=%~dp0..\..\src\JPEGView\libwebp
-SET XLIB_DIR=%~dp0..\third_party\libwebp
+SET XLIB_DIR=%~dp0..\third_party\libwebp-1.6.0-src
 SET XOUT_DIR=%~dp0libwebp
 
 IF EXIST "%XOUT_DIR%" (

@@ -28,6 +28,7 @@ private:
 	CString m_sCurrentFile;
 	BOOL m_bModificationTimeValid;
 	FILETIME m_modificationTimeCurrentFile;
+	__int64 m_lastFileChangedTick; // tick count of last WM_DISPLAYED_FILE_CHANGED_ON_DISK posted, to debounce bursty FS notifications
 
 	static void  __cdecl ThreadFunc(void* arg);
 };

@@ -1,6 +1,6 @@
-[![Documentation](https://img.shields.io/badge/Docs-Outdated-yellowgreen)](https://htmlpreview.github.io/?https://github.com/sylikc/jpegview/blob/master/src/JPEGView/Config/readme.html) [![Localization Progress](https://img.shields.io/badge/Localized-91%25-blueviolet)](#Localization) [![Build x64](https://github.com/sylikc/jpegview/actions/workflows/build-release-x64.yml/badge.svg?branch=master)](https://github.com/sylikc/jpegview/actions/workflows/build-release-x64.yml) [![OS Support](https://img.shields.io/badge/Windows-XP%20%7C%207%20%7C%208%20%7C%2010%20%7C%2011-blue)](#) [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue)](https://github.com/sylikc/jpegview/blob/master/LICENSE.txt)
+[![Documentation](https://img.shields.io/badge/Docs-Outdated-yellowgreen)](https://htmlpreview.github.io/?https://github.com/mfirewire/jpegview/blob/master/src/JPEGView/Config/readme.html) [![Localization Progress](https://img.shields.io/badge/Localized-91%25-blueviolet)](#Localization) [![Build x64](https://github.com/mfirewire/jpegview/actions/workflows/build-release-x64.yml/badge.svg?branch=master)](https://github.com/mfirewire/jpegview/actions/workflows/build-release-x64.yml) [![OS Support](https://img.shields.io/badge/Windows-XP%20%7C%207%20%7C%208%20%7C%2010%20%7C%2011-blue)](#) [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue)](https://github.com/mfirewire/jpegview/blob/master/LICENSE.txt)
 
-[![Latest GitHub Release](https://img.shields.io/github/v/release/sylikc/jpegview?label=GitHub&style=social)](https://github.com/sylikc/jpegview/releases)[![Downloads](https://badgen.net/github/assets-dl/sylikc/jpegview?cache=3600&color=grey&label=)](#) [![WinGet](https://repology.org/badge/version-for-repo/winget/jpegview.svg?allow_ignored=1&header=WinGet)](https://winstall.app/apps/sylikc.JPEGView) [![PortableApps](https://img.shields.io/badge/PortableApps-Current-green)](https://portableapps.com/apps/graphics_pictures/jpegview_portable) [![Scoop](https://repology.org/badge/version-for-repo/scoop/jpegview-fork.svg?header=Scoop)](https://scoop.sh/#/apps?q=%22jpegview-fork%22) [![Chocolatey](https://img.shields.io/chocolatey/v/jpegview)](https://community.chocolatey.org/packages/jpegview) [![Npackd](https://repology.org/badge/version-for-repo/npackd_stable/jpegview.svg?allow_ignored=1&header=Npackd)](https://www.npackd.org/p/jpegview)
+[![Latest GitHub Release](https://img.shields.io/github/v/release/mfirewire/jpegview?label=GitHub&style=social)](https://github.com/mfirewire/jpegview/releases)[![Downloads](https://badgen.net/github/assets-dl/mfirewire/jpegview?cache=3600&color=grey&label=)](#) [![WinGet](https://repology.org/badge/version-for-repo/winget/jpegview.svg?allow_ignored=1&header=WinGet)](https://winstall.app/apps/sylikc.JPEGView) [![PortableApps](https://img.shields.io/badge/PortableApps-Current-green)](https://portableapps.com/apps/graphics_pictures/jpegview_portable) [![Scoop](https://repology.org/badge/version-for-repo/scoop/jpegview-fork.svg?header=Scoop)](https://scoop.sh/#/apps?q=%22jpegview-fork%22) [![Chocolatey](https://img.shields.io/chocolatey/v/jpegview)](https://community.chocolatey.org/packages/jpegview) [![Npackd](https://repology.org/badge/version-for-repo/npackd_stable/jpegview.svg?allow_ignored=1&header=Npackd)](https://www.npackd.org/p/jpegview)
 
 # JPEGView - Image Viewer and Editor
 
@@ -44,11 +44,22 @@ Basic on-the-fly image processing is provided - allowing adjusting typical param
 * Basic image processing tools can be applied realtime during viewing
 * Movie/Slideshow mode - to play folder of JPEGs as movie
 
+### Performance & Stability
+
+* JXL encode: single-pass BGR→RGB copy + 1 MB output pre-allocation (faster save, fewer buffer resizes)
+* JXL save/convert: NULL-output guards prevent crashes on encode failure
+* TIFF read: out-of-memory now falls back to WIC reader instead of sticking in error state
+* CMYK ICC profile: delayed open + path buffer fix (MAX_PATH+16) avoids invalid-path crashes; bundled `Config/cmyk.icm`
+* PSD CMYK: fixed 4-channel YMCK avoids alpha-channel rendering bugs
+* Library updates: libwebp 1.6.0, libde265 1.1.3, libheif 1.23.7, LibRaw 0.22.3
+
+Default runtime settings (INI, key bindings, window behavior) are unchanged from this branch.
+
 # Installation
 
 ## Official Releases
 
-Official releases will be made to [sylikc's GitHub Releases](https://github.com/sylikc/jpegview/releases) page.  Each release includes:
+Official releases will be made to [mfirewire's GitHub Releases](https://github.com/mfirewire/jpegview/releases) page.  Each release includes:
 
 * **Archive Zip/7z** - Portable
 * **Windows Installer MSI** - For Installs
@@ -74,15 +85,15 @@ C:\> `winget search jpegview`
 ```
 Name     Id              Version  Source
 -----------------------------------------
-JPEGView sylikc.JPEGView 1.1.43  winget
+JPEGView mfirewire.JPEGView 1.3.47  winget
 ```
 
 C:\> `winget install jpegview`
 ```
-Found JPEGView [sylikc.JPEGView] Version 1.1.43
+Found JPEGView [mfirewire.JPEGView] Version 1.3.47
 This application is licensed to you by its owner.
 Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
-Downloading https://github.com/sylikc/jpegview/releases/download/v1.1.43/JPEGView64_en-us_1.1.43.msi
+Downloading https://github.com/mfirewire/jpegview/releases/download/v1.3.47/JPEGView64_en-us_1.3.47.msi
   ██████████████████████████████  4.23 MB / 4.23 MB
 Successfully verified installer hash
 Starting package install...
@@ -114,8 +125,8 @@ After installation, the configuration file is located at `%UserProfile%\scoop\pe
 
 ## What's New
 
-* See what has changed in the [latest releases](https://github.com/sylikc/jpegview/releases)
-* Or Check the [CHANGELOG.txt](https://github.com/sylikc/jpegview/blob/master/CHANGELOG.txt) to review new features in detail.
+* See what has changed in the [latest releases](https://github.com/mfirewire/jpegview/releases)
+* Or Check the [CHANGELOG.txt](https://github.com/mfirewire/jpegview/blob/master/CHANGELOG.txt) to review new features in detail.
 
 # Localization
 
@@ -154,13 +165,13 @@ JPEGView is currently translated/localized to 28 languages:
 | zh-tw | Chinese, Traditional (繁體中文) |
 | zh | Chinese, Simplified (简体中文) |
 
-See the [Localization wiki page](https://github.com/sylikc/jpegview/wiki/Localization#localization-status) for translation status for each language.
+See the [Localization wiki page](https://github.com/mfirewire/jpegview/wiki/Localization#localization-status) for translation status for each language.
 
 # Help / Documentation
 
 The JPEGView documentation is a little out of the date at the moment, but should still give a good summary of the features.
 
-This [readme.html](https://htmlpreview.github.io/?https://github.com/sylikc/jpegview/blob/master/src/JPEGView/Config/readme.html) is part of the JPEGView package.
+This [readme.html](https://htmlpreview.github.io/?https://github.com/mfirewire/jpegview/blob/master/src/JPEGView/Config/readme.html) is part of the JPEGView package.
 
 # Brief History
 
@@ -182,4 +193,4 @@ Special thanks to [qbnu](https://github.com/qbnu) for adding additional codec su
 * LibRaw support (all updated RAW formats, such as CR3)
 * Photoshop PSD support
 
-Thanks to all the _translators_ which keep JPEGView strings up-to-date in different languages!  See [CHANGELOG.txt](https://github.com/sylikc/jpegview/blob/master/CHANGELOG.txt) to find credits for translators at each release!
+Thanks to all the _translators_ which keep JPEGView strings up-to-date in different languages!  See [CHANGELOG.txt](https://github.com/mfirewire/jpegview/blob/master/CHANGELOG.txt) to find credits for translators at each release!

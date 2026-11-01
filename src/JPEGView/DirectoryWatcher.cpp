@@ -31,6 +31,7 @@ CDirectoryWatcher::CDirectoryWatcher(HWND hTargetWindow)
 	m_terminateEvent = ::CreateEvent(0, TRUE, FALSE, NULL);
 	m_newDirectoryEvent = ::CreateEvent(0, TRUE, FALSE, NULL);
 	m_bModificationTimeValid = FALSE;
+	m_lastFileChangedTick = 0;
 
 	m_hThread = (HANDLE)_beginthread(ThreadFunc, 0, this);
 }
@@ -163,6 +164,15 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 				}
 				::LeaveCriticalSection(&thisPtr->m_lock);
 
+				if (sendMessage) {
+					// Debounce: bursty filesystem notifications must not trigger repeated reloads.
+					__int64 now = ::GetTickCount64();
+					if (now - thisPtr->m_lastFileChangedTick < 800) {
+						sendMessage = false; // skip: too soon since last reload
+					} else {
+						thisPtr->m_lastFileChangedTick = now;
+					}
+				}
 				if (sendMessage) {
 					::PostMessage(thisPtr->m_hTargetWindow, WM_DISPLAYED_FILE_CHANGED_ON_DISK, 0, 0);
 				}
