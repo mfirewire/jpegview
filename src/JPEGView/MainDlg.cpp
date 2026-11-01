@@ -8,6 +8,7 @@
 #include <limits.h>
 
 #include "MainDlg.h"
+#include "OcrController.h"
 #include "HelpDlg.h"
 #include "FileList.h"
 #include "JPEGProvider.h"
@@ -283,6 +284,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 	m_pKeyMap = new CKeyMap(); // routine to load the keymap, it's not as simple as just loading one file anymore, but all logic handled by CKeyMap
 	m_pPrintImage = new CPrintImage(CSettingsProvider::This().PrintMargin(), CSettingsProvider::This().DefaultPrintWidth());
 	m_pHelpDlg = NULL;
+	m_pOcrController = new COcrController();
 }
 
 CMainDlg::~CMainDlg() {
@@ -295,6 +297,7 @@ CMainDlg::~CMainDlg() {
 	delete m_pCropCtl;
 	delete m_pPanelMgr; // this will delete all panel controllers and all panels
 	delete m_pKeyMap;
+	delete m_pOcrController;
 }
 
 void CMainDlg::SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 
@@ -578,6 +581,9 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 	m_pCropCtl->OnPaint(dc);
 	m_pPanelMgr->OnPostPaint(dc);
 
+	// OCR word bounding boxes / selection highlight (drawn on top of image)
+	if (m_pOcrController) m_pOcrController->Paint(*this, dc);
+
 	SetCursorForMoveSection();
 
 	return 0;
@@ -740,6 +746,11 @@ LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPar
 	return 0;
 }
 
+LRESULT CMainDlg::OnOcrCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+	if (m_pOcrController) m_pOcrController->Complete(*this);
+	return 0;
+}
+
 LRESULT CMainDlg::OnClose(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
 	GetWindowRect(m_windowRectOnClose);
 	bHandled = FALSE;
@@ -753,6 +764,10 @@ LRESULT CMainDlg::OnLButtonDown(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	bool bEatenByPanel = isCropping ? false : m_pPanelMgr->OnMouseLButton(MouseEvent_BtnDown, pointClicked.x, pointClicked.y);
 
 	if (!bEatenByPanel) {
+		// OCR word selection has priority when OCR result is active
+		if (m_pOcrController && m_pOcrController->MouseDown(*this, pointClicked)) {
+			return 0;
+		}
 		bool bCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 		bool bShift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
@@ -784,6 +799,7 @@ LRESULT CMainDlg::OnLButtonDown(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 }
 
 LRESULT CMainDlg::OnLButtonUp(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& /*bHandled*/) {
+	if (m_pOcrController) m_pOcrController->MouseUp();
 	if (m_bZoomMode) {
 		m_bZoomMode = false;
 		AdjustWindowToImage(false);
@@ -910,6 +926,10 @@ LRESULT CMainDlg::OnMouseMove(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, B
 	}
 
 	// Do dragging or cropping when needed, else pass event to panel manager and zoom navigator
+	// OCR word selection / hover has priority when OCR result is active
+	if (m_pOcrController && m_pOcrController->MouseMove(*this, CPoint(m_nMouseX, m_nMouseY))) {
+		return 0;
+	}
 	bool bMouseCursorSet = false;
 	if (m_bZoomMode) {
 		int nDX = m_nMouseX - m_nCapturedX;
@@ -1669,6 +1689,9 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			if (m_pCurrentImage != NULL && m_pCurrentImage->GetImageFormat() == IF_JPEG) {
 				SaveImage(true, true);
 			}
+			break;
+		case IDM_OCR:
+			if (m_pOcrController) m_pOcrController->Toggle(*this);
 			break;
 		case IDM_AUTO_CORRECTION:
 			m_bAutoContrastSection = false;
@@ -3488,6 +3511,7 @@ void CMainDlg::AnimateTransition() {
 void CMainDlg::CleanupAndTerminate() {
 	StopMovieMode();
 	StopAnimation();
+	if (m_pOcrController) m_pOcrController->Shutdown();
 	delete m_pJPEGProvider; // delete this early to properly shut down the loading threads
 	m_pJPEGProvider = NULL;
 	EndDialog(0);
