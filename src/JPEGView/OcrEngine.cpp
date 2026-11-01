@@ -167,10 +167,11 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
         // an earlier draft allocated a second unused buffer of gray.size() bytes here)
         const size_t planeSize = size_t(workWidth) * workHeight;
         auto planeBuffer = Buffer(planeSize);
-        Microsoft::WRL::ComPtr<IBufferByteAccess> planeAccess;
-        planeBuffer.as(planeAccess);
+        // 用 C++/WinRT 投影的 ABI 接口取缓冲区裸指针；全局 IBufferByteAccess
+        // （robuffer.h）在这套 SDK + 预编译头组合下会被条件编译跳过而不可见。
         uint8_t* planeData = nullptr;
-        planeAccess->Buffer(&planeData);
+        auto planeAccess = planeBuffer.as<ABI::Windows::Storage::Streams::IBufferByteAccess>();
+        winrt::check_hresult(planeAccess->Buffer(&planeData));
         std::memcpy(planeData, grayPtr, planeSize);
         planeBuffer.Length(planeSize);
 
