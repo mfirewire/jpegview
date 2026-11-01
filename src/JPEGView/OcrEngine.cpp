@@ -1,4 +1,5 @@
 #define NOMINMAX
+#include "stdafx.h"
 #include "OcrEngine.h"
 #include <algorithm>
 #include <cmath>

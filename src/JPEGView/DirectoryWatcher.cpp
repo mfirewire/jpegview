@@ -166,7 +166,7 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 
 				if (sendMessage) {
 					// Debounce: bursty filesystem notifications must not trigger repeated reloads.
-					__int64 now = ::GetTickCount64();
+					__int64 now = ::GetTickCount();
 					if (now - thisPtr->m_lastFileChangedTick < 800) {
 						sendMessage = false; // skip: too soon since last reload
 					} else {
