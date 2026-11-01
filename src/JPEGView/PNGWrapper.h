@@ -19,8 +19,9 @@ public:
 
 	static void DeleteCache();
 
-	// Returns true if PNG is unsupported by GDI+
-	static bool MustUseLibpng(const void* buffer, size_t sizebytes);
+	// True when this PNG must be handled by our internal decoder rather than
+	// GDI+ (huge images GDI+ cannot process, and APNGs GDI+ does not support).
+	static bool MustUseInternalDecoder(const void* buffer, size_t sizebytes);
 #endif
 	// Get EXIF Block
 	static void* GetEXIFBlock(void* buffer, size_t sizebytes);

@@ -105,6 +105,7 @@ target_include_directories(JPEGView PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/libavif/include
     ${CMAKE_CURRENT_SOURCE_DIR}/lcms2/include
     ${CMAKE_CURRENT_SOURCE_DIR}/libraw/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/libpng-apng/include
 )
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -122,6 +123,7 @@ target_link_directories(JPEGView PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/libavif/${LIB_ARCH_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/lcms2/${LIB_ARCH_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/libraw/${LIB_ARCH_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/libpng-apng/${LIB_ARCH_DIR}
     "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
 )
 
@@ -137,6 +139,8 @@ target_link_libraries(JPEGView PRIVATE
     avif
     lcms2
     libraw
+    libpng16
+    zlib
     gdiplus
     d2d1
     dwrite

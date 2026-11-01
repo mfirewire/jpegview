@@ -4,6 +4,7 @@
 
 #ifndef WINXP
 #include "png.h"
+#include "FastPng.h"
 #include "MaxImageDef.h"
 #include <stdexcept>
 
@@ -302,6 +303,27 @@ void* PngReader::ReadImage(int& width,
 	size_t sizebytes)
 {
 	exif_chunk = NULL;
+
+	// 快路径：只有"全新文件"才尝试，且排除 APNG 与超大图（这两类由 libpng 处理）。
+	// 取下一帧的调用传 buffer == NULL，必须落到下面的 libpng 逻辑。
+	// 静态 PNG 走 FastPng（libdeflate），APNG 走 libpng-apng，性能与功能各取所需。
+	if (buffer != NULL && sizebytes > 0 && !MustUseInternalDecoder(buffer, sizebytes)) {
+		FastPngImage fastImage;
+		if (FastPngDecode((const unsigned char*)buffer, sizebytes, fastImage) == 0) {
+			width = fastImage.width;
+			height = fastImage.height;
+			nchannels = 4;
+			has_animation = false;
+			frame_count = 1;
+			frame_time = 0;
+			exif_chunk = fastImage.exif_payload;
+			outOfMemory = false;
+			// 清掉上一次可能残留的动画状态，否则紧接着加载 APNG 会读到旧缓存
+			DeleteCacheInternal(false);
+			return fastImage.pixels;
+		}
+	}
+
 	if (!cache.buffer) {
 		if (sizebytes < 8)
 			return NULL;
@@ -379,7 +401,7 @@ void PngReader::DeleteCache() {
 	DeleteCacheInternal(true);
 }
 
-bool PngReader::MustUseLibpng(const void* bufferIn, size_t sizebytes) {
+bool PngReader::MustUseInternalDecoder(const void* bufferIn, size_t sizebytes) {
 	const char* buffer = (const char*)bufferIn;
 
 	// GDI+ fails if the uncompressed image size is over INT_MAX
