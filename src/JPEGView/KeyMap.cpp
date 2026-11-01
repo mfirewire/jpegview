@@ -281,6 +281,41 @@ void CKeyMap::AddDefaultEscapeHandling() {
 		// ESC key not in keymap - map to default command for ESC
 		m_keyMap[VK_ESCAPE] = IDM_DEFAULT_ESC;
 	}
+	ApplyIniOverrides();
+}
+
+// 用 INI 里的设置覆盖 KeyMap 中的快捷键（目前只有 OCR）。放在这里是因
+// 构造函数有三条出口（用户 KeyMap、EXE 目录 KeyMap、内置 .default），全部都会
+// 走到 AddDefaultEscapeHandling，保证覆盖一定生效。
+void CKeyMap::ApplyIniOverrides() {
+	CString sOcr = CSettingsProvider::This().OcrShortcut();
+	if (!sOcr.IsEmpty()) {
+		ApplyShortcutOverride(IDM_OCR_TEXT, sOcr);
+	}
+}
+
+void CKeyMap::ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut) {
+	if (sShortcut == NULL || *sShortcut == 0) return;
+	CString sBuffer(sShortcut);
+	sBuffer.TrimLeft();
+	sBuffer.TrimRight();
+	if (sBuffer.IsEmpty()) return;
+
+	// _ParseKeys 会把 '+' 就地替换成 0，必须给它可写缓冲
+	int nKeyCode = 0;
+	{
+		LPTSTR pBuffer = sBuffer.GetBuffer(sBuffer.GetLength());
+		nKeyCode = _ParseKeys(pBuffer);
+		sBuffer.ReleaseBuffer();
+	}
+	if (nKeyCode == 0) return;
+
+	// 先移除该命令已有映射，否则旧键和新键会同时生效
+	for (auto it = m_keyMap.begin(); it != m_keyMap.end(); ) {
+		if (it->second == nCommandId) it = m_keyMap.erase(it);
+		else ++it;
+	}
+	m_keyMap[nKeyCode] = nCommandId;
 }
 
 int CKeyMap::GetCommandIdForKey(int nVirtualKeyCode, bool bAlt, bool bCtrl, bool bShift) {

@@ -92,7 +92,16 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
         using namespace winrt::Windows::Graphics::Imaging;
         using winrt::Windows::Media::Ocr::OcrEngine;
         if (canceled.load()) return result;
-        auto engine = OcrEngine::TryCreateFromUserProfileLanguages();
+        // 显式优先中文引擎。系统首选语言是英文时，TryCreateFromUserProfileLanguages
+        // 会给出英文引擎，中文就完全识别不出来（这是中英混排失效的根因）。
+        // 中文引擎本身也能读英文和数字，所以按 zh-CN -> zh-TW -> en-US 依次尝试。
+        OcrEngine engine{ nullptr };
+        const wchar_t* preferredLanguages[] = { L"zh-CN", L"zh-TW", L"en-US" };
+        for (const wchar_t* lang : preferredLanguages) {
+            engine = OcrEngine::TryCreateFromLanguage(winrt::Windows::Globalization::Language(lang));
+            if (engine) break;
+        }
+        if (!engine) engine = OcrEngine::TryCreateFromUserProfileLanguages();
         if (!engine) {
             const auto languages = OcrEngine::AvailableRecognizerLanguages();
             if (languages.Size()) engine = OcrEngine::TryCreateFromLanguage(languages.GetAt(0));
@@ -182,12 +191,31 @@ bool Contains(const Word& word, Point point) {
     return !(positive && negative);
 }
 
+// 中日韩文字之间不插空格——中文排版本来就没有词间空格，硬加会让整段难以阅读。
+// 拉丁文字之间才需要分隔。范围覆盖假名、统一表意文字、兼容表意文字、全角标点与韩文音节。
+static bool NeedsSpaceBetween(wchar_t prev, wchar_t next) {
+    auto isCjk = [](wchar_t c) {
+        return (c >= 0x2E80 && c <= 0x9FFF)
+            || (c >= 0xF900 && c <= 0xFAFF)
+            || (c >= 0xFF00 && c <= 0xFFEF)
+            || (c >= 0xAC00 && c <= 0xD7AF);
+    };
+    return !(isCjk(prev) && isCjk(next));
+}
+
 std::wstring SelectedText(const std::vector<Word>& words, int first, int last) {
     if (first < 0 || last < 0 || size_t(first) >= words.size() || size_t(last) >= words.size()) return {};
     if (first > last) std::swap(first, last);
     std::wstring text;
     for (int i = first; i <= last; ++i) {
-        if (i != first) text += words[i].line == words[i - 1].line ? L" " : L"\r\n";
+        if (i != first) {
+            if (words[i].line != words[i - 1].line) {
+                text += L"\r\n";          // 跨行保留换行
+            } else if (!text.empty() && !words[i].text.empty() &&
+                       NeedsSpaceBetween(text.back(), words[i].text.front())) {
+                text += L' ';             // 仅非 CJK 之间加空格
+            }
+        }
         text += words[i].text;
     }
     return text;

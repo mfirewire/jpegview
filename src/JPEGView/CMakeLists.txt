@@ -157,6 +157,14 @@ target_link_libraries(JPEGView PRIVATE
     strmiids
 )
 
+# 嵌入 app.manifest。缺少 dpiAware 会让 Windows 把进程当作不感知 DPI 的老程序，
+# 在 125%/150% 缩放时整窗位图拉伸，所有 UI 字体发虚（Prit36 原版正是这个症状）。
+# 光把 .manifest 加进源文件不会传给链接器，必须显式 /MANIFESTINPUT。
+if(MSVC)
+    target_sources(JPEGView PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app.manifest)
+    target_link_options(JPEGView PRIVATE "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
+endif()
+
 if(MSVC)
     target_link_options(JPEGView PRIVATE
         "/DELAYLOAD:avif.dll"
