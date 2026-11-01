@@ -13,7 +13,9 @@ on:
     paths:
       - '.github/workflows/rebuild-libs.yml'
       - 'extras/scripts/build-libraw.bat'
+      - 'extras/scripts/build-libheif_libavif.bat'
       - 'extras/third_party/LibRaw-0.22.3-src/**'
+      - 'extras/third_party/libheif-1.23.7-src/**'
 
 permissions:
   contents: write
@@ -57,15 +59,54 @@ jobs:
           dir src\JPEGView\libraw\lib\*.lib src\JPEGView\libraw\bin\*.dll
           dir src\JPEGView\libraw\lib64\*.lib src\JPEGView\libraw\bin64\*.dll
 
+      # libheif 的构建脚本要求 dav1d 源码位于 libheif-1.23.7-src\dav1d，
+      # 而仓库里只有旧的子模块路径 extras/third_party/libheif/dav1d。这里现取 dav1d 1.5.4。
+      - name: Fetch dav1d source for libheif
+        shell: powershell
+        run: |
+          $dst = "extras/third_party/libheif-1.23.7-src/dav1d"
+          if (Test-Path $dst) {
+            Write-Output "dav1d 源码已存在，跳过下载"
+            exit 0
+          }
+          Invoke-WebRequest -Uri "https://github.com/videolan/dav1d/archive/refs/tags/1.5.4.zip" -OutFile dav1d.zip
+          Expand-Archive dav1d.zip -DestinationPath dav1d-tmp -Force
+          Move-Item dav1d-tmp/dav1d-1.5.4 $dst
+          Write-Output "dav1d 1.5.4 已就位"
+
+      - name: Check nasm
+        shell: cmd
+        run: |
+          where nasm.exe || choco install nasm -y --no-progress
+
+      - name: Build libheif + libavif + libde265
+        shell: cmd
+        run: |
+          call extras\scripts\build-libheif_libavif.bat > build_libheif.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_libheif.log
+          exit /b %RC%
+
+      - name: Surface libheif build failure as annotations
+        if: failure()
+        shell: powershell
+        run: |
+          if (Test-Path build_libheif.log) {
+            $lines = @(Get-Content build_libheif.log | Where-Object { $_.Trim() -ne "" })
+            Write-Output "===== last 25 lines of libheif build log ====="
+            $lines | Select-Object -Last 25 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_libheif.log not found - the batch file never ran"
+          }
+
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: libraw-0.22.3
+          name: rebuilt-libs
           path: |
-            src/JPEGView/libraw/lib/*.lib
-            src/JPEGView/libraw/lib64/*.lib
-            src/JPEGView/libraw/bin/*.dll
-            src/JPEGView/libraw/bin64/*.dll
+            src/JPEGView/libraw/**
+            src/JPEGView/libheif/**
+            src/JPEGView/libavif/**
           if-no-files-found: error
 
       - name: Commit rebuilt binaries
@@ -73,10 +114,10 @@ jobs:
         run: |
           git config user.name "mfirewire"
           git config user.email "mfirewire@gmail.com"
-          git add src/JPEGView/libraw
+          git add src/JPEGView/libraw src/JPEGView/libheif src/JPEGView/libavif
           if git diff --cached --quiet; then
             echo "没有变化，跳过提交"
             exit 0
           fi
-          git commit -m "build(deps): LibRaw 0.22.3 rebuilt in CI"
+          git commit -m "build(deps): LibRaw 0.22.3 / libheif 1.23.7 / libavif rebuilt in CI"
           git push
