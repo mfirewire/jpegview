@@ -45,6 +45,50 @@ jobs:
           echo "WARNING: setup-msbuild did not output includePath"
         }
 
+    - name: Locate ATL headers (atlbase.h) and add to IncludePath
+      shell: powershell
+      run: |
+        $vsInstallDir = "${{ steps.setup-msbuild.outputs.vsInstallationPath }}"
+        if (-not $vsInstallDir) {
+          $vsInstallDir = (vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
+        }
+        echo "VS Install Dir: $vsInstallDir"
+        # Search common ATL locations
+        $candidatePaths = @(
+          "$vsInstallDir\VC\Tools\MSVC\*\atlmfc\include",
+          "$vsInstallDir\VC\atlmfc\include",
+          "$vsInstallDir\VC\Auxiliary\VS\include"
+        )
+        $found = $false
+        foreach ($pattern in $candidatePaths) {
+          $matches = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
+          foreach ($m in $matches) {
+            $atlBase = Join-Path $m.FullName "atlbase.h"
+            if (Test-Path $atlBase) {
+              echo "Found atlbase.h at: $atlBase"
+              echo "ATLINCLUDE=$($m.FullName)" >> $env:GITHUB_ENV
+              $found = $true
+              break
+            }
+          }
+          if ($found) { break }
+        }
+        if (-not $found) {
+          echo "WARNING: atlbase.h not found in common locations"
+        }
+
+    - name: Merge IncludePath (setup-msbuild + ATL)
+      shell: powershell
+      run: |
+        $paths = @()
+        $setupPath = "${{ steps.setup-msbuild.outputs.includePath }}"
+        if ($setupPath) { $paths += $setupPath }
+        $atlPath = "${{ env.ATLINCLUDE }}"
+        if ($atlPath) { $paths += $atlPath }
+        $merged = ($paths -join ';')
+        echo "INCLUDEPATH=$merged" >> $env:GITHUB_ENV
+        echo "Final IncludePath: $merged"
+
     - uses: ./.github/actions/setup-wix
 
     - uses: ./.github/actions/wtl-submodule
