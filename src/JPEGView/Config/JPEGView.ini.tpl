@@ -10,6 +10,11 @@
 ; * These options control how JPEGView operates
 ; *****************************************************************************
 
+; Only set this to true if writing to the EXE directory makes sense, e.g. on an installation on
+; an USB memory stick. Never set it to true when the EXE is located in the 'Program Files' folder,
+; with Windows versions newer than Windows XP this would not work!
+StoreToEXEPath=true
+
 ; If set to true, only one single instance of JPEGView runs at any time, if false multiple instances are allowed
 ; Set to true to open all images in the same JPEGView window.
 SingleInstance=false
@@ -75,30 +80,46 @@ AllowFileDeletion=true
 ; * These options control how JPEGView looks
 ; *****************************************************************************
 
-; Language used in the user interface. Set to 'auto' to use the language of the operating system.
-; Other languages must use the ISO 639-1 language code (two letters)
-; Currently supported:
-; 'bel'   Belorussian
-; 'cs'    Czech
-; 'de'    German
-; 'el'    Greek
-; 'en'    English (default)
-; 'es'    Spanish (Spain)
-; 'es-ar' Spanish (latinoamerica)
-; 'eu'    Basque
-; 'fr'    French
-; 'it'    Italian
-; 'ja'    Japanese
-; 'ko'    Korean
-; 'pl'    Polish
-; 'pt'    Portuguese
-; 'pt-br' Portuguese (Brasil)
-; 'ro'    Romanian
-; 'ru'    Russian
-; 'sv'    Swedish
-; 'uk'    Ukrainian
-; 'zh'    Chinese
-; 'zh-tw' Chinese (Taiwan)
+; Specify language used in the user interface.
+;
+; Set to 'auto' to use the language of the operating system.
+;
+;   JPEGView will auto-detect and use the ISO 3166-1 country code (two letters) if the file exists:
+;     strings_<language>-<country>.txt
+;
+;   otherwise, fallback to just the ISO 639-1 language code if the file exists:
+;     strings_<language>.txt
+;
+; Currently supported languages:
+;  'be'    Belarusian
+;  'bg'    Bulgarian
+;  'cs'    Czech
+;  'de'    German
+;  'el'    Greek
+;  'en'    English (default)
+;  'es'    Spanish (Spain)
+;  'es-ar' Spanish (Argentina)
+;  'eu'    Basque
+;  'fi'    Finnish
+;  'fr'    French
+;  'hu'    Hungarian
+;  'it'    Italian
+;  'ja'    Japanese
+;  'ko'    Korean
+;  'pl'    Polish
+;  'pt'    Portuguese
+;  'pt-br' Portuguese (Brazil)
+;  'ro'    Romanian
+;  'ru'    Russian
+;  'sk'    Slovak
+;  'sl'    Slovenian
+;  'sr'    Serbian
+;  'sv'    Swedish
+;  'ta'    Tamil
+;  'tr'    Turkish
+;  'uk'    Ukrainian
+;  'zh'    Chinese, Simplified
+;  'zh-tw' Chinese, Traditional (Taiwan)
 Language=auto
 
 ; Background color, R G B, each component must be in [0..255], e.g. "128 128 128" for a middle gray
@@ -127,7 +148,7 @@ AllowEditGlobalSettings=false
 ; Start in full screen or windowed mode
 ; 'true' or 'false' to always start in full screen, respectively windowed mode
 ; 'auto' to choose best mode depending on image size of first image - windowed when it is small, full screen when it is large
-ShowFullScreen=auto
+ShowFullScreen=false
 
 ; If set to true, only one single instance of JPEGView runs in full screen mode, if false multiple instances are allowed
 ; The value is ignored if SingleInstance=true
@@ -186,7 +207,7 @@ ScaleFactorNavPanel=1.0
 
 ; Sorting order of the files when displaying the image files in a folder
 ; Can be LastModDate, CreationDate, FileName, FileSize or Random
-FileDisplayOrder=LastModDate
+FileDisplayOrder=FileName
 
 ; Sort files ascending (increasing, e.g. A->Z, 0->9) or descending (decreasing, e.g. Z->A, 9->0)
 FileSortAscending=true
@@ -215,9 +236,9 @@ BeepSoundAlert=false
 ; - MOUSE NAVIGATION OPTIONS
 ; -----------------------------------------------
 
-; If true, the mouse wheel can be used to navigate forward and backward and zoom must be done with Ctrl-MouseWheel
+; If true, the mouse wheel can be used to zoom and navigate forward and backward must be done with Ctrl-MouseWheel
 ; If false, zoom is done with the mousewheel (no Ctrl required)
-NavigateWithMouseWheel=false
+NavigateWithMouseWheel=true
 
 ; If true, the extended mouse buttons (Forward and backward) are reversed compared to Internet explorer
 ; This is useful to put the 'go to next image' functionality to the button that is better reachable
@@ -279,7 +300,8 @@ MinimalDisplayTime=0
 ForceGDIPlus=false
 
 ; If true, embedded ICC color profiles are used for JPEG, PNG and TIFF. This forces using GDI+ and therefore
-; results in much slower loading of JPEGs! Only set to true if you really need this.
+; results in much slower loading of images! Only set to true if you really need this.
+; (ICC color profiles are not supported for Animated PNG)
 UseEmbeddedColorProfiles=false
 
 ; -----------------------------------------------
@@ -338,8 +360,9 @@ Sharpen=0.3
 ; *****************************************************************************
 
 ; Default parameters for unsharp masking: Radius Amount Threshold
-; Note that no unsharp masking can be applied automatically to every image - this setting only provides the default parameters
-; when entering the unsharp mask mode
+; Note: unsharp masking cannot be applied automatically to every image
+;   This setting only provides the default parameters
+;   when entering the unsharp mask mode
 UnsharpMaskParameters=1.0 1.0 4.0
 
 ; Default parameters for controlling rotation and perspective correction
@@ -529,15 +552,15 @@ SlideShowEffectTime=250
 ; * These options control whether or not to bypass confimation dialogs
 ; *****************************************************************************
 
-; If set to true, Ctrl-S overrides the original file on disk, applying the current processings without
+; If set to true, Ctrl-S overwrites the original file on disk, applying the current processings without
 ; showing a dialog or prompting the user to confirm.
-; CAUTION: Use at your own risk! Be aware that the original image file is overridden and cannot be restored anymore!
+; CAUTION: Use at your own risk! Be aware that the original image file is overwritten and cannot be restored!
 OverwriteOriginalFileWithoutSaveDialog=false
 
-; If set to true, lossless JPEG transformations will trim the image as needed without prompting the user.
+; If set to true, lossless JPEG transformations will crop the image as needed without prompting the user.
 ; This will remove 15 pixel rows/columns at the image borders in worst case.
-; CAUTION: Use at your own risk! Be aware that the original image file is overridden and the trimmed borders cannot be restored anymore!
-TrimWithoutPromptLosslessJPEG=false
+; CAUTION: Use at your own risk! Be aware that the original image file is overwritten and the cropped borders cannot be restored!
+CropWithoutPromptLosslessJPEG=false
 
 ; Type of confirmation required when deleting a file with the 'x' button on the navigation panel
 ; Possible values: Never, OnlyWhenNoRecycleBin, Always
@@ -644,8 +667,7 @@ Units=auto
 ; User commands must be named UserCmd# where # stands for a number.
 ; The first user command has the number zero (UserCmd0) and the numbering of the commands must be continuous.
 
-; IMPORTANT: UserCmd0 is already used in the global INI.  Start with UserCmd1 unless you want to override the Delete image command from the global INI.
-
+UserCmd0="KeyCode: Shift+Del Cmd: 'cmd /c del %filename%' Confirm: 'Do you really want to permanently delete the file %filename%?' HelpText: 'Shift+Del\tDelete current file on disk permanently' Flags: 'WaitForTerminate ReloadFileList MoveToNext'"
 
 ; Here are some examples for user commands
 ;UserCmd1="KeyCode: P  Cmd: 'C:\WINDOWS\system32\mspaint.exe /p %filename%' Menuitem: 'Print Image' Confirm: 'Do you really want to print the file %filename%?' HelpText: 'P\tPrint current image'"
@@ -666,6 +688,8 @@ Units=auto
 ;     OpenWith#="Cmd: '%Cmd%' Menuitem: '%menu%' [KeyCode: %Key%] [Confirm: '%confirm%'] [Flags: '%flags%']"
 ;
 ; For an explanation of the different options, refer to the user command documentation above.
+;
+; NOTE: Open with commands should typically be added to the user INI file, not to this global INI file
 ;
 ; Example for a menu entry that opens the current image in MS Paint:
 ;OpenWith0="Cmd: 'C:\WINDOWS\system32\mspaint.exe %filename%' Menuitem: 'Microsoft Paint' Flags: 'ShellExecute'"
