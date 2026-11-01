@@ -166,20 +166,19 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
         // Build a SoftwareBitmap from the gray buffer (exact-size work plane only;
         // an earlier draft allocated a second unused buffer of gray.size() bytes here)
         const size_t planeSize = size_t(workWidth) * workHeight;
-        auto planeBuffer = Buffer(planeSize);
-        // 用 C++/WinRT 投影的 ABI 接口取缓冲区裸指针；全局 IBufferByteAccess
-        // （robuffer.h）在这套 SDK + 预编译头组合下会被条件编译跳过而不可见。
-        uint8_t* planeData = nullptr;
-        auto planeAccess = planeBuffer.as<ABI::Windows::Storage::Streams::IBufferByteAccess>();
-        winrt::check_hresult(planeAccess->Buffer(&planeData));
-        std::memcpy(planeData, grayPtr, planeSize);
-        planeBuffer.Length(planeSize);
+        // 用 DataWriter 拷贝字节，全程走 C++/WinRT 投影 API。
+        // 不走 IBufferByteAccess（robuffer.h，本 TU 里不可见）也不走
+        // ABI::Windows::Storage::Streams::IBufferByteAccess（ABI 命名空间未引入）。
+        DataWriter writer;
+        writer.WriteBytes(winrt::array_view<const uint8_t>(grayPtr, grayPtr + planeSize));
+        auto planeBuffer = writer.DetachBuffer();
 
         SoftwareBitmap bitmap = SoftwareBitmap::CreateCopyFromBuffer(planeBuffer, BitmapPixelFormat::Gray8, workWidth, workHeight);
 
         auto ocrResult = engine.RecognizeAsync(bitmap).get();
 
-        result.language = ocrResult.Language().LanguageTag();
+        // OcrResult 没有 Language 属性；识别语言在引擎上（RecognizerLanguage）。
+        result.language = engine.RecognizerLanguage().LanguageTag();
 
         size_t lineIndex = 0;
         for (auto line : ocrResult.Lines()) {
@@ -187,7 +186,8 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
                 Word w;
                 w.text = word.Text();
                 w.line = lineIndex;
-                auto rect = word.BoundingBox();
+                // OcrWord 的包围盒属性名是 BoundingRect（Windows.Foundation.Rect），不是 BoundingBox。
+                auto rect = word.BoundingRect();
                 w.corners = {
                     {(float)rect.X, (float)rect.Y},
                     {(float)(rect.X + rect.Width), (float)rect.Y},
