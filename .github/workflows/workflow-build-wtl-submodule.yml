@@ -135,7 +135,8 @@ jobs:
       shell: cmd
       run: |
         echo (Optional) INCLUDE: %INCLUDE%
-        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" src\\JPEGView.sln
+        echo (Optional) ATLLIBPATH: %ATLLIBPATH%
+        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" /p:AdditionalLibraryDirectories="%ATLLIBPATH%" src\\JPEGView.sln
 
     - uses: ./.github/actions/upload-some-artifacts
       with:
