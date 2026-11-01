@@ -22,7 +22,8 @@ jobs:
     - name: Setup msbuild
       uses: microsoft/setup-msbuild@v1.1
       with:
-        vs-version: '[17.0,18.0)'
+        # Use any available VS 2022+
+        vs-version: '[17.0,]'
         msbuild-architecture: Win32
     - uses: ./.github/actions/setup-wix
     - uses: ./.github/actions/wtl-submodule
@@ -53,7 +54,8 @@ jobs:
     - name: Setup msbuild
       uses: microsoft/setup-msbuild@v1.1
       with:
-        vs-version: '[17.0,18.0)'
+        # Use any available VS 2022+
+        vs-version: '[17.0,]'
         msbuild-architecture: x64
     - uses: ./.github/actions/setup-wix
     - uses: ./.github/actions/wtl-submodule
