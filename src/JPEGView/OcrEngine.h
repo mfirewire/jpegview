@@ -1,3 +1,4 @@
+#ifdef JPEGVIEW_OCR
 #pragma once
 
 #include <array>
@@ -36,3 +37,4 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled);
 bool Contains(const Word& word, Point point);
 std::wstring SelectedText(const std::vector<Word>& words, int first, int last);
 }
+#endif // JPEGVIEW_OCR

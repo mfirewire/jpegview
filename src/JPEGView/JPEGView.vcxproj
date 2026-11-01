@@ -388,8 +388,6 @@
     <ClCompile Include="CropSizeDlg.cpp" />
     <ClCompile Include="FileOpenDialog.cpp" />
     <ClCompile Include="MainDlg.cpp" />
-    <ClCompile Include="OcrEngine.cpp" />
-    <ClCompile Include="OcrController.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyFilterAVX.h" />
@@ -481,8 +479,6 @@
     <ClInclude Include="CropSizeDlg.h" />
     <ClInclude Include="FileOpenDialog.h" />
     <ClInclude Include="MainDlg.h" />
-    <ClInclude Include="OcrEngine.h" />
-    <ClInclude Include="OcrController.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>

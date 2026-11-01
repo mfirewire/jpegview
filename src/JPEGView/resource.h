@@ -230,7 +230,6 @@
 #define IDM_MIRROR_H_LOSSLESS 9430		// :KeyMap: Lossless JPEG transformation: mirror image horizontally
 #define IDM_MIRROR_V_LOSSLESS 9440		// :KeyMap: Lossless JPEG transformation: mirror image vertically
 #define IDM_CONVERT_JXL		9450		// :KeyMap: Lossless JPEG transformation: convert to JPEG XL
-#define IDM_OCR			9460		// :KeyMap: start/stop OCR text recognition on current image
 #define IDM_AUTO_CORRECTION	10000		// :KeyMap: toggle auto color and contrast correction
 #define IDM_AUTO_CORRECTION_SECTION	10100		// :KeyMap: auto contrast correction on visible section only
 #define IDM_LDC				10500		// :KeyMap: toggle local density correction (lighten shadows, darken highlights)
