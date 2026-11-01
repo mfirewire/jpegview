@@ -143,6 +143,13 @@ setlocal
 
 call "%~dp0vs-init.bat" %1
 
+REM pnglibconf.h 平时是解决方案里的 pnglibconf 项目生成的。我们现在只编 libpng.vcxproj，
+REM 少了这一步会报 C1083。直接用官方预置文件（APNG 补丁会一并更新它）。
+IF NOT EXIST "%XLIB_DIR%\pnglibconf.h" (
+	copy /y "%XLIB_DIR%\scripts\pnglibconf.h.prebuilt" "%XLIB_DIR%\pnglibconf.h"
+	IF ERRORLEVEL 1 exit /b 1
+)
+
 REM 只编 zlib 和 libpng 两个库项目，不编整个解决方案：
 REM 解决方案里还挂着 pngtest / pngunknown / pngvalid 等测试程序，它们仍用 /MT，
 REM 链接 /MD 的 libpng16.lib 会报一堆 __imp__fwrite / __imp__remove 之类的符号缺失。
