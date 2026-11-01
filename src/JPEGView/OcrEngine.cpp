@@ -17,8 +17,10 @@
 
 // WinRT/WRL requires NTDDI_VERSION >= NTDDI_VISTA (Windows Vista),
 // but stdafx.h sets _WIN32_WINNT=0x0501 for XP compatibility.
+// Use NTDDI_WIN10: robuffer.h / MemoryBuffer.h hide IBufferByteAccess behind
+// NTDDI_WIN8 guards, and Windows.Media.Ocr itself only exists on Windows 10+.
 #undef NTDDI_VERSION
-#define NTDDI_VERSION NTDDI_VISTA
+#define NTDDI_VERSION NTDDI_WIN10
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Imaging.h>
@@ -161,9 +163,8 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
             grayPtr = workGray.data();
         }
 
-        // Build a SoftwareBitmap from the gray buffer
-        auto buffer = Buffer(image.gray.size() <= workGray.size() ? workGray.size() : image.gray.size());
-        // The buffer above may be larger than needed; create exact-size buffer for the work plane
+        // Build a SoftwareBitmap from the gray buffer (exact-size work plane only;
+        // an earlier draft allocated a second unused buffer of gray.size() bytes here)
         const size_t planeSize = size_t(workWidth) * workHeight;
         auto planeBuffer = Buffer(planeSize);
         Microsoft::WRL::ComPtr<IBufferByteAccess> planeAccess;
