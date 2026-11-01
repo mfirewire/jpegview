@@ -5,6 +5,7 @@
 #include "JPEGImage.h"
 #include "HelpersGUI.h"
 #include "NLS.h"
+#include "SettingsProvider.h"
 #include <mutex>
 #include <thread>
 #include <cmath>
@@ -67,8 +68,10 @@ void COcrController::Toggle(CMainDlg& main) {
         m_job = job;
         m_result = {};
         m_anchor = m_end = -1;
-        std::thread([job, snapshot = std::move(snapshot)]() {
-            auto result = Ocr::Recognize(snapshot, job->canceled);
+        // 设置只在 UI 线程读一次，工作线程拿到的是一份纯字符串列表。
+        auto languages = Ocr::SplitLanguageList(std::wstring(CSettingsProvider::This().OcrLanguages()));
+        std::thread([job, snapshot = std::move(snapshot), languages = std::move(languages)]() {
+            auto result = Ocr::Recognize(snapshot, languages, job->canceled);
             std::lock_guard lock(job->mutex);
             job->result = std::move(result);
             job->done = true;
@@ -193,8 +196,17 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
         ::SetTextColor(dc, RGB(255, 255, 255));
         ::SetBkColor(dc, RGB(30, 35, 40));
         ::SetBkMode(dc, OPAQUE);
-        const wchar_t* text = busy ? L"Recognizing text..." : L"OCR: drag across words | Ctrl+A select all | Ctrl+C copy | Esc hide";
-        ::TextOutW(dc, HelpersGUI::ScaleToScreen(12), HelpersGUI::ScaleToScreen(36), text, int(wcslen(text)));
+        // 显示实际用到的语言标签，方便判断"这段文字为什么认不出来"
+        std::wstring text;
+        if (busy) {
+            text = L"Recognizing text...";
+        } else {
+            text = L"OCR";
+            const std::wstring& tag = m_result.languageTag.empty() ? m_result.language : m_result.languageTag;
+            if (!tag.empty()) { text += L" ["; text += tag; text += L"]"; }
+            text += L": drag across words | Ctrl+A select all | Ctrl+C copy | Esc hide";
+        }
+        ::TextOutW(dc, HelpersGUI::ScaleToScreen(12), HelpersGUI::ScaleToScreen(36), text.c_str(), int(text.size()));
         ::RestoreDC(dc, saved);
     }
 }

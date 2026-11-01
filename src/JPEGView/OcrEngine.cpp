@@ -4,8 +4,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cwctype>
 #include <memory>
 #include <stdexcept>
+#include <wchar.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Globalization.h>
@@ -84,7 +86,80 @@ Snapshot MakeSnapshot(const void* pixels, int width, int height, int channels) {
     return result;
 }
 
-Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
+namespace {
+// 图片里是别的文种时，首选引擎常常一个字都认不出来，这时才需要换下一个。
+// 天花板压住最坏情况：N 个语言包不等于 N 倍等待时间。
+constexpr int MaxLanguageAttempts = 3;
+
+// Windows 的 OCR 引擎一次只吃一种语言包，不存在"同时多语言识别"。所以这里能做的
+// 只是排序：INI 里配置的标签排前面（允许 zh-CN 这类简写去匹配 zh-Hans-CN），系统
+// 已安装但没被列出的语言全部追加在后面 —— 装了什么就能用什么，没有白名单。
+std::vector<std::wstring> BuildLanguageCandidates(const std::vector<std::wstring>& preferred) {
+    std::vector<std::wstring> installed;
+    for (const auto& language : winrt::Windows::Media::Ocr::OcrEngine::AvailableRecognizerLanguages())
+        installed.emplace_back(language.LanguageTag().c_str());
+
+    auto lower = [](std::wstring text) {
+        for (auto& c : text) c = wchar_t(std::towlower(c));
+        return text;
+    };
+    auto primary = [&lower](const std::wstring& tag) {
+        const size_t dash = tag.find(L'-');
+        return lower(dash == std::wstring::npos ? tag : tag.substr(0, dash));
+    };
+
+    std::vector<std::wstring> candidates;
+    std::vector<bool> consumed(installed.size(), false);
+    auto push = [&candidates](const std::wstring& tag) {
+        if (tag.empty()) return;
+        for (const auto& existing : candidates)
+            if (_wcsicmp(existing.c_str(), tag.c_str()) == 0) return;
+        candidates.push_back(tag);
+    };
+
+    for (const auto& wanted : preferred) {
+        bool matched = false;
+        for (size_t i = 0; i < installed.size() && !matched; ++i) {
+            if (_wcsicmp(installed[i].c_str(), wanted.c_str()) == 0) {
+                push(installed[i]);
+                consumed[i] = true;
+                matched = true;
+            }
+        }
+        // zh-CN 对不上 zh-Hans-CN，退一步比主语言子标签
+        for (size_t i = 0; i < installed.size() && !matched; ++i) {
+            if (!consumed[i] && primary(installed[i]) == primary(wanted)) {
+                push(installed[i]);
+                consumed[i] = true;
+                matched = true;
+            }
+        }
+        // 没匹配到也照样试一次：Language() 可能把它解析到已安装的区域变体
+        if (!matched) push(wanted);
+    }
+    for (size_t i = 0; i < installed.size(); ++i)
+        if (!consumed[i]) push(installed[i]);
+    return candidates;
+}
+}
+
+std::vector<std::wstring> SplitLanguageList(const std::wstring& list) {
+    std::vector<std::wstring> tags;
+    size_t start = 0;
+    while (start <= list.size()) {
+        const size_t end = list.find_first_of(L",;", start);
+        const std::wstring item = list.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+        const size_t first = item.find_first_not_of(L" \t");
+        const size_t last = item.find_last_not_of(L" \t");
+        if (first != std::wstring::npos) tags.push_back(item.substr(first, last - first + 1));
+        if (end == std::wstring::npos) break;
+        start = end + 1;
+    }
+    return tags;
+}
+
+Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferredLanguages,
+                 const std::atomic<bool>& canceled) {
     Result result;
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
@@ -92,21 +167,10 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
         using namespace winrt::Windows::Graphics::Imaging;
         using winrt::Windows::Media::Ocr::OcrEngine;
         if (canceled.load()) return result;
-        // 显式优先中文引擎。系统首选语言是英文时，TryCreateFromUserProfileLanguages
-        // 会给出英文引擎，中文就完全识别不出来（这是中英混排失效的根因）。
-        // 中文引擎本身也能读英文和数字，所以按 zh-CN -> zh-TW -> en-US 依次尝试。
-        OcrEngine engine{ nullptr };
-        const wchar_t* preferredLanguages[] = { L"zh-CN", L"zh-TW", L"en-US" };
-        for (const wchar_t* lang : preferredLanguages) {
-            engine = OcrEngine::TryCreateFromLanguage(winrt::Windows::Globalization::Language(lang));
-            if (engine) break;
-        }
-        if (!engine) engine = OcrEngine::TryCreateFromUserProfileLanguages();
-        if (!engine) {
-            const auto languages = OcrEngine::AvailableRecognizerLanguages();
-            if (languages.Size()) engine = OcrEngine::TryCreateFromLanguage(languages.GetAt(0));
-        }
-        if (!engine) {
+        // 引擎按候选顺序逐个试。中文引擎本身能读英文和数字，英文引擎完全读不出汉字，
+        // 所以顺序很重要 —— 这也是中英混排曾经失效的根因。
+        const auto candidates = BuildLanguageCandidates(preferredLanguages);
+        if (candidates.empty()) {
             result.error = L"No Windows OCR language is installed. Add a supported language in Windows Settings > Time & language > Language & region.";
             return result;
         }
@@ -132,45 +196,79 @@ Result Recognize(const Snapshot& image, const std::atomic<bool>& canceled) {
                 else for (int x = 0; x < width; ++x) row[x] = source[x * image.width / width];
             }
         }
-        if (canceled.load()) return result;
-        auto operation = engine.RecognizeAsync(bitmap);
         // WinRT permits only one completion handler. Keep the event alive if
         // cancellation returns before the operation finishes on another thread.
         auto completed = std::make_shared<winrt::handle>(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
         if (!*completed) winrt::throw_last_error();
-        operation.Completed([completed](const auto&, auto) { ::SetEvent(completed->get()); });
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        for (;;) {
-            if (canceled.load() || std::chrono::steady_clock::now() >= deadline) {
-                operation.Cancel();
-                if (!canceled.load()) result.error = L"Text recognition timed out. Try a smaller image.";
-                return result;
+        std::wstring honoredName, honoredTag;
+        int attempts = 0;
+        for (const auto& tag : candidates) {
+            if (attempts >= MaxLanguageAttempts) break;
+            OcrEngine engine{ nullptr };
+            try {
+                engine = OcrEngine::TryCreateFromLanguage(winrt::Windows::Globalization::Language(tag));
+            } catch (const winrt::hresult_error&) {
+                continue;   // 标签写错或语言包已卸载：跳过，别让一条坏配置拖垮整次识别
             }
-            const DWORD status = ::WaitForSingleObject(completed->get(), 50);
-            if (status == WAIT_OBJECT_0) break;
-            if (status == WAIT_FAILED) winrt::throw_last_error();
-        }
-        auto recognized = operation.GetResults();
-        if (canceled.load()) return result;
-        result.language = engine.RecognizerLanguage().DisplayName().c_str();
-        const auto textAngle = recognized.TextAngle();
-        const double angle = textAngle ? textAngle.Value() * 3.14159265358979323846 / 180.0 : 0.0;
-        const double cosine = std::cos(angle), sine = std::sin(angle);
-        size_t lineIndex = 0;
-        for (const auto& line : recognized.Lines()) {
-            for (const auto& word : line.Words()) {
-                const auto bounds = word.BoundingRect();
-                Word value{std::wstring(word.Text()), {{{bounds.X, bounds.Y}, {bounds.X + bounds.Width, bounds.Y},
-                    {bounds.X + bounds.Width, bounds.Y + bounds.Height}, {bounds.X, bounds.Y + bounds.Height}}}, lineIndex};
-                // Windows reports bounds in its deskewed image; restore the image angle.
-                for (auto& p : value.corners) {
-                    const double x = p.x - width * 0.5, y = p.y - height * 0.5;
-                    p.x = float((x * cosine - y * sine + width * 0.5) * image.imageWidth / width);
-                    p.y = float((x * sine + y * cosine + height * 0.5) * image.imageHeight / height);
+            if (!engine) continue;
+            ++attempts;
+            const std::wstring display(engine.RecognizerLanguage().DisplayName().c_str());
+            const std::wstring languageTag(engine.RecognizerLanguage().LanguageTag().c_str());
+            if (honoredName.empty()) { honoredName = display; honoredTag = languageTag; }
+            if (canceled.load()) return result;
+
+            ::ResetEvent(completed->get());
+            auto operation = engine.RecognizeAsync(bitmap);
+            operation.Completed([completed](const auto&, auto) { ::SetEvent(completed->get()); });
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            for (;;) {
+                if (canceled.load() || std::chrono::steady_clock::now() >= deadline) {
+                    operation.Cancel();
+                    if (!canceled.load()) result.error = L"Text recognition timed out. Try a smaller image.";
+                    return result;
                 }
-                result.words.push_back(std::move(value));
+                const DWORD status = ::WaitForSingleObject(completed->get(), 50);
+                if (status == WAIT_OBJECT_0) break;
+                if (status == WAIT_FAILED) winrt::throw_last_error();
             }
-            ++lineIndex;
+            auto recognized = operation.GetResults();
+            if (canceled.load()) return result;
+
+            result.words.clear();
+            const auto textAngle = recognized.TextAngle();
+            const double angle = textAngle ? textAngle.Value() * 3.14159265358979323846 / 180.0 : 0.0;
+            const double cosine = std::cos(angle), sine = std::sin(angle);
+            size_t lineIndex = 0;
+            for (const auto& line : recognized.Lines()) {
+                for (const auto& word : line.Words()) {
+                    const auto bounds = word.BoundingRect();
+                    Word value{std::wstring(word.Text()), {{{bounds.X, bounds.Y}, {bounds.X + bounds.Width, bounds.Y},
+                        {bounds.X + bounds.Width, bounds.Y + bounds.Height}, {bounds.X, bounds.Y + bounds.Height}}}, lineIndex};
+                    // Windows reports bounds in its deskewed image; restore the image angle.
+                    for (auto& p : value.corners) {
+                        const double x = p.x - width * 0.5, y = p.y - height * 0.5;
+                        p.x = float((x * cosine - y * sine + width * 0.5) * image.imageWidth / width);
+                        p.y = float((x * sine + y * cosine + height * 0.5) * image.imageHeight / height);
+                    }
+                    result.words.push_back(std::move(value));
+                }
+                ++lineIndex;
+            }
+            if (!result.words.empty()) {
+                result.language = display;
+                result.languageTag = languageTag;
+                break;      // 认出字就用这个引擎，不再往下试
+            }
+        }
+        // 候选列表里一个都创建不出引擎：说明配置的标签和已装的语言包全对不上
+        if (attempts == 0) {
+            result.error = L"No Windows OCR language is installed. Add a supported language in Windows Settings > Time & language > Language & region.";
+            return result;
+        }
+        // 一个引擎都没认出字时保留首选引擎的名字，"未找到文字"提示才有东西可显示
+        if (result.words.empty()) {
+            result.language = honoredName;
+            result.languageTag = honoredTag;
         }
     } catch (const winrt::hresult_error& error) {
         if (!canceled.load()) result.error = L"Windows text recognition failed: " + std::wstring(error.message());

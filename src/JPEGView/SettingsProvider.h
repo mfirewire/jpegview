@@ -23,6 +23,8 @@ public:
 	bool StoreToEXEPath() { return m_bStoreToEXEPath; }
 	// OCR 快捷键，默认 Ctrl+Q；INI 中的 OcrShortcut 会替换 KeyMap.txt 里的绑定
 	LPCTSTR OcrShortcut() { return m_sOcrShortcut; }
+	// OCR 语言优先级列表（逗号分隔的 BCP-47 标签）。留空 = 用系统已装的 OCR 语言。
+	LPCTSTR OcrLanguages() { return m_sOcrLanguages; }
 	double Contrast() { return m_dContrast; }
 	double Gamma() { return m_dGamma; }
 	double Saturation() { return m_dSaturation; }
@@ -194,6 +196,7 @@ private:
 	bool m_bUserINIExists;
 	bool m_bStoreToEXEPath;
 	CString m_sOcrShortcut;
+	CString m_sOcrLanguages;
 	int m_nNextOpenWithIndex;
 
 	double m_dContrast;

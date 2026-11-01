@@ -266,6 +266,16 @@ MouseWheelZoomSpeed=1.0
 ; Format is the same as KeyMap.txt: modifiers joined with '+', e.g. Ctrl+Q, Ctrl+Alt+O, F8
 OcrShortcut=Ctrl+Q
 
+; OCR language priority list. Windows OCR runs ONE language pack at a time, so
+; this is an order, not a filter: the tags are tried in turn and the first engine
+; that actually recognizes something wins. Every other OCR language installed on
+; the machine is appended automatically, so adding a language pack in Windows
+; Settings > Time & language > Language & region is enough to make it usable -
+; no need to touch this file. Use BCP-47 tags separated by commas.
+; Leave empty to use only the installed languages, in Windows' own order.
+; Examples: ja,zh-CN,en-US   /   de-DE,fr-FR   /   zh-Hans-CN,en-US
+OcrLanguages=zh-CN,zh-TW,en-US
+
 
 
 ; *****************************************************************************

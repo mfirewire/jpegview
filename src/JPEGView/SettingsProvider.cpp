@@ -91,6 +91,11 @@ CSettingsProvider::CSettingsProvider(void) {
 	// IDM_OCR_TEXT 的映射，所以用户改快捷键只需改 INI，不必去找 KeyMap.txt。
 	m_sOcrShortcut = GetString(_T("OcrShortcut"), _T("Ctrl+Q"));
 
+	// OCR 语言优先级：默认中文在前，因为 Windows 的中文引擎本身能读英文和数字，
+	// 反过来英文引擎完全读不出汉字。系统装了别的 OCR 语言包会自动追加在后面，
+	// 所以这里只是排序，不是白名单。
+	m_sOcrLanguages = GetString(_T("OcrLanguages"), _T("zh-CN,zh-TW,en-US"));
+
 	if (!m_bStoreToEXEPath) {
 		// User INI file
 		m_sIniNameUser = CString(Helpers::JPEGViewAppDataPath()) + m_sIniFileTitle;
