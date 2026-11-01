@@ -6,6 +6,12 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+
+// WinRT/WRL requires NTDDI_VERSION >= NTDDI_VISTA (Windows Vista),
+// but stdafx.h sets _WIN32_WINNT=0x0501 for XP compatibility.
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION NTDDI_VISTA
+#endif
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Imaging.h>
