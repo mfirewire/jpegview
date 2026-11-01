@@ -103,8 +103,10 @@ void* TurboJpeg::ReadImage(int& width,
 	nchannels = 4;
 	chromoSubsampling = TJSAMP_420;
 
-	// Fast path: multi-threaded band decode for baseline 8-bit JPEGs
-	{
+	// Fast path: multi-threaded band decode for baseline 8-bit JPEGs.
+	// Any failure - including an exception thrown inside the parallel decoder -
+	// must fall through to the single-threaded decode below, never escape.
+	try {
 		int nSub = -1;
 		LateResampleCtx lr;
 		ParallelJPEG::ProgressFn progress = nullptr;
@@ -132,6 +134,9 @@ void* TurboJpeg::ReadImage(int& width,
 			}
 			return pParallel;
 		}
+	} catch (...) {
+		width = height = 0;
+		// fall through to the single-threaded decoder
 	}
 
 	// Single-threaded fallback

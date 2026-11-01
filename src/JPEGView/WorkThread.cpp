@@ -105,7 +105,14 @@ unsigned int __stdcall CWorkThread::ThreadFunc(void* arg) {
 
 		// process this request
 		if (requestHandled != NULL) {
-			thisPtr->ProcessRequest(*requestHandled);
+			// An exception escaping a worker thread runs into std::terminate, whose
+			// abort() is a fastfail on the UCRT: the process vanishes with no error
+			// dialog and no event log entry. A failed request must degrade to
+			// "request failed" - this thread has to survive to serve the next one.
+			try {
+				thisPtr->ProcessRequest(*requestHandled);
+			} catch (...) {
+			}
 			requestHandled->Processed = true;
 
 			if (!thisPtr->m_bTerminate) {

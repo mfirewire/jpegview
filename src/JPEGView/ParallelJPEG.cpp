@@ -771,6 +771,7 @@ static bool SpeculativeWalk(const WalkerConf& cfg, ScanInfo& si, int nSlices) {
 		std::vector<std::thread> ths;
 		for (int i = 0; i < nSlices; i++) {
 			ths.emplace_back([&, i]() {
+				try {
 				long B = (i == 0) ? cfg.sosEnd : splits[i];
 				if (i == 0) {
 					WalkSlice(cfg, B, splits[1], 0, work[0]);
@@ -798,6 +799,11 @@ static bool SpeculativeWalk(const WalkerConf& cfg, ScanInfo& si, int nSlices) {
 						}
 						return;
 					}
+				}
+				} catch (...) {
+					// work[i].walked stays false, so Phase B fails and the caller
+					// falls back to single-threaded decoding. Never let an exception
+					// escape this thread: it would terminate the whole process.
 				}
 			});
 		}
@@ -1118,7 +1124,11 @@ static unsigned char* DecodeProgressiveShared(const unsigned char* buf, size_t s
 		int last = min(height, mcuRows*(t+1)/workers*mcuHeight);
 		if (first >= last) continue;
 		threads.emplace_back([&,first,last] {
-			if (!OutputProgressiveBand(buf,sz,cinfo,arrays,first,last,out,pitch)) ok = false;
+			try {
+				if (!OutputProgressiveBand(buf,sz,cinfo,arrays,first,last,out,pitch)) ok = false;
+			} catch (...) {
+				ok = false;
+			}
 		});
 	}
 	for (auto& thread : threads) thread.join();
@@ -1218,9 +1228,9 @@ static unsigned char* DecodeProgressive(const unsigned char* buf, size_t sz, int
 			std::vector<unsigned char> p2(static_cast<size_t>(w2) * h2);
 
 			std::atomic<bool> ok(true);
-			std::thread th0([&]() { if (!decodePlane(s0.data(), s0.size(), w0, h0, p0.data())) ok = false; });
-			std::thread th1([&]() { if (!decodePlane(s1.data(), s1.size(), w1, h1, p1.data())) ok = false; });
-			std::thread th2([&]() { if (!decodePlane(s2.data(), s2.size(), w2, h2, p2.data())) ok = false; });
+			std::thread th0([&]() { try { if (!decodePlane(s0.data(), s0.size(), w0, h0, p0.data())) ok = false; } catch (...) { ok = false; } });
+			std::thread th1([&]() { try { if (!decodePlane(s1.data(), s1.size(), w1, h1, p1.data())) ok = false; } catch (...) { ok = false; } });
+			std::thread th2([&]() { try { if (!decodePlane(s2.data(), s2.size(), w2, h2, p2.data())) ok = false; } catch (...) { ok = false; } });
 
 			th0.join();
 			th1.join();
@@ -1237,6 +1247,7 @@ static unsigned char* DecodeProgressive(const unsigned char* buf, size_t sz, int
 					int y0 = t * rows_per_th;
 					int y1 = min(height, y0 + rows_per_th);
 					conv_threads.emplace_back([&, y0, y1]() {
+						try {
 						if (subsampling == 0) { // 4:4:4
 							for (int y = y0; y < y1; y++) {
 								const unsigned char* pY = p0.data() + static_cast<size_t>(y) * w0;
@@ -1322,6 +1333,7 @@ static unsigned char* DecodeProgressive(const unsigned char* buf, size_t sz, int
 								}
 							}
 						}
+						} catch (...) { ok = false; }
 					});
 				}
 				for (auto& th : conv_threads) th.join();
@@ -1494,17 +1506,25 @@ unsigned char* Decode(const void* buffer, int sizebytes, int& width, int& height
 	for (size_t i = 0; i < bands.size(); i++) {
 		int rowA = bands[i].first, rowB = bands[i].second;
 		threads.emplace_back([&, rowA, rowB]() {
-			if (!ok.load()) return;
-			long bandTopPx = static_cast<long>(rowA) * si.mcuHeight;
-			bool bandOk = decodeBand(buf, sz, si, rowA, rowB, out, pitch, static_cast<int>(bandTopPx));
-			{
-				// Publish under the same mutex as the wait predicate; otherwise
-				// notification can race between its check and cv.wait().
+			try {
+				if (!ok.load()) return;
+				long bandTopPx = static_cast<long>(rowA) * si.mcuHeight;
+				bool bandOk = decodeBand(buf, sz, si, rowA, rowB, out, pitch, static_cast<int>(bandTopPx));
+				{
+					// Publish under the same mutex as the wait predicate; otherwise
+					// notification can race between its check and cv.wait().
+					std::lock_guard<std::mutex> lk(mtx);
+					if (!bandOk) ok = false;
+					else bandsDone.fetch_add(1);
+				}
+				cv.notify_all();
+			} catch (...) {
+				// An escaping exception would terminate the process, and the main
+				// thread would never see this band counted. Mark failure and wake it.
 				std::lock_guard<std::mutex> lk(mtx);
-				if (!bandOk) ok = false;
-				else bandsDone.fetch_add(1);
+				ok = false;
+				cv.notify_all();
 			}
-			cv.notify_all();
 		});
 	}
 
