@@ -74,10 +74,25 @@ jobs:
           Move-Item dav1d-tmp/dav1d-1.5.4 $dst
           Write-Output "dav1d 1.5.4 已就位"
 
-      - name: Check nasm
-        shell: cmd
+      # dav1d 的汇编需要 nasm。choco 装完后当前 shell 的 PATH 不会刷新，
+      # 必须写进 GITHUB_PATH，否则后续 step 里 build 脚本的 "where nasm.exe" 仍然失败。
+      - name: Ensure nasm on PATH
+        shell: powershell
         run: |
-          where nasm.exe || choco install nasm -y --no-progress
+          if (Get-Command nasm.exe -ErrorAction SilentlyContinue) {
+            Write-Output "nasm 已在 PATH"
+            Get-Command nasm.exe | Select-Object -ExpandProperty Source
+            exit 0
+          }
+          choco install nasm -y --no-progress
+          $nasmDir = "C:\Program Files\NASM"
+          if (-not (Test-Path $nasmDir)) {
+            $found = Get-ChildItem "C:\Program Files*" -Directory -Filter "NASM*" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $nasmDir = $found.FullName }
+          }
+          if (-not (Test-Path "$nasmDir\nasm.exe")) { throw "nasm.exe 安装后仍找不到（$nasmDir）" }
+          Write-Output $nasmDir >> $env:GITHUB_PATH
+          Write-Output "nasm 安装于 $nasmDir，已写入 GITHUB_PATH"
 
       - name: Build libheif + libavif + libde265
         shell: cmd
