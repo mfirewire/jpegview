@@ -8,7 +8,10 @@ on:
 jobs:
   build-win32:
     name: Build Win32 Release
-    runs-on: windows-latest
+    # Temporary pin: windows-latest moved to VS2026, which lacks both the v143 ATL headers
+    # and stdext::hash_map. Revert to windows-latest once hash_map is migrated to
+    # unordered_map, since the windows-2022 image will eventually be retired.
+    runs-on: windows-2022
     outputs:
       short_sha: ${{ env.short_sha }}
     steps:
@@ -51,7 +54,10 @@ jobs:
 
   build-x64:
     name: Build x64 Release
-    runs-on: windows-latest
+    # Temporary pin: windows-latest moved to VS2026, which lacks both the v143 ATL headers
+    # and stdext::hash_map. Revert to windows-latest once hash_map is migrated to
+    # unordered_map, since the windows-2022 image will eventually be retired.
+    runs-on: windows-2022
     outputs:
       short_sha: ${{ env.short_sha }}
     steps:
@@ -95,7 +101,10 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-win32, build-x64]
-    runs-on: windows-latest
+    # Temporary pin: windows-latest moved to VS2026, which lacks both the v143 ATL headers
+    # and stdext::hash_map. Revert to windows-latest once hash_map is migrated to
+    # unordered_map, since the windows-2022 image will eventually be retired.
+    runs-on: windows-2022
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
