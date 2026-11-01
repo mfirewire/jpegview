@@ -54,7 +54,8 @@ jobs:
         if (-not $vsInstallDir) {
           $vsInstallDir = (vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
         }
-        echo "VS Install Dir: $vsInstallDir"
+        $buildArch = "${{ inputs.platform-arch }}"
+        echo "VS Install Dir: $vsInstallDir | Build Arch: $buildArch"
         # Find atlbase.h
         $incPatterns = @(
           "$vsInstallDir\VC\Tools\MSVC\*\atlmfc\include",
@@ -81,15 +82,20 @@ jobs:
         } else {
           echo "WARNING: atlbase.h not found in common locations"
         }
-        # Find atls.lib directly via wildcard (avoid fragile parent navigation)
+        # Find atls.lib matching the build architecture (x64/x86), not ARM
+        $archMap = @{ "x64" = "x64"; "x86" = "x86"; "Win32" = "x86" }
+        $targetArch = $archMap[$buildArch]
+        if (-not $targetArch) { $targetArch = "x64" }
         $libPattern = "$vsInstallDir\VC\Tools\MSVC\*\atlmfc\lib\*\atls.lib"
-        $libMatches = Get-ChildItem -Path $libPattern -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($libMatches) {
-          $atlLibPath = Split-Path $libMatches.FullName -Parent
-          echo "Found atls.lib at: $($libMatches.FullName)"
+        $libMatch = Get-ChildItem -Path $libPattern -ErrorAction SilentlyContinue |
+          Where-Object { $_.Directory.Name -eq $targetArch } |
+          Select-Object -First 1
+        if ($libMatch) {
+          $atlLibPath = Split-Path $libMatch.FullName -Parent
+          echo "Found atls.lib ($targetArch) at: $($libMatch.FullName)"
           echo "ATLLIBPATH=$atlLibPath" >> $env:GITHUB_ENV
         } else {
-          echo "WARNING: atls.lib not found in common locations"
+          echo "WARNING: atls.lib for arch '$targetArch' not found"
         }
 
     - name: Merge IncludePath (setup-msbuild + ATL)
