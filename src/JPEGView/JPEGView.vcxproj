@@ -129,7 +129,7 @@
       <TargetMachine>MachineX86</TargetMachine>
       <DelayLoadDLLs>WICLoader.dll;jxl.dll;jxl_threads.dll;heif.dll;avif.dll;lcms2.dll;libraw.dll</DelayLoadDLLs>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
-      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IGNORE:4099 /NODEFAULTLIB:atls.lib %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
@@ -178,7 +178,7 @@
       <SubSystem>Windows</SubSystem>
       <DelayLoadDLLs>WICLoader.dll;jxl.dll;jxl_threads.dll;heif.dll;avif.dll;lcms2.dll;libraw.dll</DelayLoadDLLs>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
-      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IGNORE:4099 /NODEFAULTLIB:atls.lib %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
@@ -233,7 +233,7 @@
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
       <DelayLoadDLLs>WICLoader.dll;jxl.dll;jxl_threads.dll;heif.dll;avif.dll;lcms2.dll;libraw.dll</DelayLoadDLLs>
       <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IGNORE:4099 /NODEFAULTLIB:atls.lib %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
@@ -286,7 +286,7 @@
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
       <DelayLoadDLLs>WICLoader.dll;jxl.dll;jxl_threads.dll;heif.dll;avif.dll;lcms2.dll;libraw.dll</DelayLoadDLLs>
       <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IGNORE:4099 /NODEFAULTLIB:atls.lib %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
