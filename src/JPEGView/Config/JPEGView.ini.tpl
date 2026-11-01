@@ -239,6 +239,12 @@ DefaultSelectionMode=true
 ; Zoom speed with mouse wheel, 1.0 means default speed, smaller values slower zoom, larger faster zoom
 MouseWheelZoomSpeed=1.0
 
+; Shortcut for OCR (text recognition) on the current image.
+; Default is Ctrl+Q. This value REPLACES the IDM_OCR binding in KeyMap.txt,
+; so the two never fight - change it here and leave KeyMap.txt alone.
+; Format is the same as KeyMap.txt: modifiers joined with '+', e.g. Ctrl+Q, Ctrl+Alt+O, F8
+OcrShortcut=Ctrl+Q
+
 
 
 ; *****************************************************************************
