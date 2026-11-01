@@ -32,4 +32,8 @@ private:
 	stdext::hash_map<int, int> m_keyMap;
 
 	void AddDefaultEscapeHandling();
+	// 应用 INI 中的快捷键覆盖（见 SettingsProvider::OcrShortcut）
+	void ApplyIniOverrides();
+	// 把某个命令绑定到指定快捷键字符串（如 "Ctrl+Q"），替换它原有的映射
+	void ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut);
 };

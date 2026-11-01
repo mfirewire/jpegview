@@ -21,6 +21,8 @@ public:
 
 	// The methods correspond to the INI file settings
 	bool StoreToEXEPath() { return m_bStoreToEXEPath; }
+	// 快捷键 for OCR，默认 "Ctrl+Q"，可在 INI 中用 OcrShortcut 覆盖（KeyMap.txt 的映射会被它替换）
+	LPCTSTR OcrShortcut() { return m_sOcrShortcut; }
 	double Contrast() { return m_dContrast; }
 	double Gamma() { return m_dGamma; }
 	double Saturation() { return m_dSaturation; }
@@ -192,6 +194,7 @@ private:
 	CString m_sIniFileTitle;
 	bool m_bUserINIExists;
 	bool m_bStoreToEXEPath;
+	CString m_sOcrShortcut;
 	int m_nNextOpenWithIndex;
 
 	double m_dContrast;

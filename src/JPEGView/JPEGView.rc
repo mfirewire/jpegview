@@ -401,6 +401,7 @@ BEGIN
         END
         MENUITEM "Auto correction",             IDM_AUTO_CORRECTION
         MENUITEM "Local density correction",    IDM_LDC
+        MENUITEM "Recognize text (OCR)",         IDM_OCR
         MENUITEM "Keep parameters",             IDM_KEEP_PARAMETERS
         MENUITEM SEPARATOR
         MENUITEM "Save parameters to DB",       IDM_SAVE_PARAM_DB

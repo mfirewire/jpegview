@@ -87,6 +87,10 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_sIniNameUser = m_sIniNameGlobal;
 	m_bStoreToEXEPath = GetBool(_T("StoreToEXEPath"), false);
 
+	// OCR 快捷键：默认 Ctrl+Q。KeyMap 会用它替换 KeyMap.txt 中对 IDM_OCR 的映射，
+	// 因此用户改快捷键只需改 INI，不必去找 KeyMap.txt。
+	m_sOcrShortcut = GetString(_T("OcrShortcut"), _T("Ctrl+Q"));
+
 	if (!m_bStoreToEXEPath) {
 		// User INI file
 		m_sIniNameUser = CString(Helpers::JPEGViewAppDataPath()) + m_sIniFileTitle;

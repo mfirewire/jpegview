@@ -81,4 +81,4 @@ R                       IDM_ROTATE_90_LOSSLESS_CONFIRM
 T                       IDM_ROTATE_270_LOSSLESS_CONFIRM
 W                       IDM_EXPLORE
 Shift+F12               IDM_ALWAYS_ON_TOP
-Ctrl+Shift+O            IDM_OCR
+Ctrl+Q                  IDM_OCR
