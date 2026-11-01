@@ -35,7 +35,6 @@ runs:
         echo "Commit: ${{ github.sha }}"
         echo "GH Trigger: ${{ github.event_name }}"
 
-
     - name: Replace resource vars
       if: ${{ inputs.patch-version }}
       shell: powershell
@@ -46,9 +45,9 @@ runs:
         # needed on older runners (or when testing locally): $env:Path += ";C:\Program Files\Git\usr\bin"
         Get-Command sed.exe | Format-List
         $GIT_SHORT_HASH=$(git.exe rev-parse --short "${{ github.sha }}")
-        $APPEND_VER_STR="\(~GHdevtest ${{ github.repository_owner }}\/$GIT_SHORT_HASH\)"
-        # " doesn't have to be escaped in linux but needs to be escaped in windows powershell with `, powershell also needs that extra \\\ when \\ will do in linux
-        sed.exe -i -r -e "s/(#define JPEGVIEW_VERSION \`"[0-9, ]+)(\\\0\`")/\1 $APPEND_VER_STR\2/g" -e "s/(#define JPEGVIEW_TITLE \`"JPEGView)(\`")/\1 $APPEND_VER_STR\2/g" src/JPEGView/resource.h
+        $APPEND_VER_STR="`(~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH`)"
+        # " doesn't have to be escaped in linux but needs to be escaped in windows powershell with `, powershell also needs that extra \\\\ when \\ will do in linux
+        sed.exe -i -r -e "s/(#define JPEGVIEW_VERSION `"`[0-9, ]+)(\\0`")/\1 $APPEND_VER_STR\2/g" -e "s/(#define JPEGVIEW_TITLE `"`JPEGVIEW)(\`")/\1 $APPEND_VER_STR\2/g" src/JPEGView/resource.h
         sed.exe -i -r -e "s/(\<Product.*ApplicationName\))/\1 $APPEND_VER_STR/g" src/JPEGView.Setup/Product.wxs
         # see output
         Select-String -Path src/JPEGView/resource.h -Pattern "JPEGVIEW_"
@@ -57,10 +56,6 @@ runs:
 
     - name: Build Solution
       shell: cmd
-      env:
-        # equivalent to SET IncludePath=${{ env.include_path }}
-        # IncludePath variable must be unquoted!
-        IncludePath: ${{ env.include_path }}
       run: |
-        echo (Optional) IncludePath: %IncludePath%
+        echo (Optional) INCLUDE: %INCLUDE%
         msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" src\JPEGView.sln
