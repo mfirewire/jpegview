@@ -876,9 +876,12 @@
             Tip: Ctrl-C also enables to paste the current image file to a new location in the Windows Explorer using Ctrl-V.
 
             <h3><a name="OCR"></a>Recognizing and Copying Text</h3>
-            Click <b>OCR</b> in the navigation panel, or choose <b>Recognize text (OCR)</b> in the context menu.
-            Press <kbd>O</kbd> to start OCR or toggle the recognized text regions.
+            Choose <b>Recognize text (OCR)</b> in the context menu, or press <kbd>Ctrl+Q</kbd>
+            (the shortcut is configurable with <code>OcrShortcut</code> in the INI and also bound in KeyMap.txt).
+            Pressing it again hides the recognized text regions.
             Recognition runs locally only when requested, using an installed Windows OCR language.
+            The languages to try, in order, come from <code>OcrLanguages</code> in the INI; every other OCR
+            language installed on the machine is used automatically as a fallback.
             Drag across highlighted words to select text; <kbd>Ctrl+A</kbd> selects all recognized text and
             <kbd>Ctrl+C</kbd> copies it. Press <kbd>Esc</kbd> to hide the regions or cancel recognition.
             Click OCR again to show cached regions for the current image. Changing images or image geometry clears the results.
