@@ -979,8 +979,7 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 	//   Ctrl+C  复制当前选取的文字（原绑定 IDM_COPY，复制图像）
 	//   Esc     隐藏识别结果与高亮框（原绑定 IDM_DEFAULT_ESC）
 	if (m_pOcrController && m_pOcrController->Active()) {
-		if (bCtrl && !bAlt && wParam == 'A') {
-			m_pOcrController->SelectAll();
+		if (bCtrl && !bAlt && wParam == 'A' && m_pOcrController->SelectAll()) {
 			Invalidate(FALSE);
 			return 1;
 		}

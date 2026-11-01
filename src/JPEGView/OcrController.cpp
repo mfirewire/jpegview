@@ -135,10 +135,11 @@ bool COcrController::MouseUp() {
     return selecting;
 }
 
-void COcrController::SelectAll() {
-    if (!m_active || m_result.words.empty()) return;
+bool COcrController::SelectAll() {
+    if (!m_active || m_result.words.empty()) return false;
     m_anchor = 0;
     m_end = int(m_result.words.size()) - 1;
+    return true;
 }
 
 bool COcrController::Copy(HWND window) {

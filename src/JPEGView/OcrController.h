@@ -21,7 +21,8 @@ public:
     bool Active() const { return m_active; }
     bool Selecting() const { return m_selecting; }
     bool Busy() const;
-    void SelectAll();
+    // 选中全部识别出的词；没有识别结果时返回 false，调用方应回落到原有按键行为
+    bool SelectAll();
     bool Copy(HWND window);
 private:
     struct Job;
