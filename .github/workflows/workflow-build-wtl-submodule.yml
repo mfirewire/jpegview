@@ -90,6 +90,17 @@ jobs:
         echo "INCLUDE=$merged" >> $env:GITHUB_ENV
         echo "Final IncludePath: $merged"
 
+    - name: Install ATL component (required by WTL)
+      shell: cmd
+      run: |
+        echo Installing ATL component...
+        "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" --modify --installPath "${{ steps.setup-msbuild.outputs.vsInstallationPath }}" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --wait --norestart
+        if %ERRORLEVEL% NEQ 0 (
+          echo WARNING: ATL component install failed, build may still fail
+        ) else (
+          echo ATL component installed successfully
+        )
+
     - uses: ./.github/actions/setup-wix
 
     - uses: ./.github/actions/wtl-submodule
