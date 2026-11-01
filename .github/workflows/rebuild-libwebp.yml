@@ -4,6 +4,7 @@ name: Rebuild libwebp
 # （RTLIBCFG=static，与 JPEGView 的 /MT 一致），覆盖 src/JPEGView/libwebp/lib{lib,lib64}/。
 # 编译成功且链接通过后，把产物提交回仓库；这次的提交会触发一次常规构建，
 # 相当于自动验证新 .lib 能否与 JPEGView 正常链接。
+# 触发方式：workflow_dispatch 手动，或改动下面的 paths 里任一文件。
 
 on:
   workflow_dispatch:
