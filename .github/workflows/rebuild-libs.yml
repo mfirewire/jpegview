@@ -1,0 +1,82 @@
+name: Rebuild third-party libs
+
+# 手动触发。逐个把 extras/third_party/*-src 里的源码编成静态库/DLL 并覆盖
+# src/JPEGView/lib*/ 下的预编译产物，成功后自动提交。
+#
+# 目前接入：LibRaw 0.22.3（libraw.lib + libraw.dll）
+# 待接入：libheif/libavif/libde265（cmake，依赖 dav1d）、lcms2、libpng-apng
+#        —— 后两者需要先把 .gitmodules 里的子模块指针升到新版本。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-libs.yml'
+      - 'extras/scripts/build-libraw.bat'
+      - 'extras/third_party/LibRaw-0.22.3-src/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Build LibRaw
+        shell: cmd
+        run: |
+          call extras\scripts\build-libraw.bat > build_libraw.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_libraw.log
+          exit /b %RC%
+
+      - name: Surface build failure as annotations
+        if: failure()
+        shell: powershell
+        run: |
+          if (Test-Path build_libraw.log) {
+            $lines = @(Get-Content build_libraw.log | Where-Object { $_.Trim() -ne "" })
+            Write-Output "===== last 25 lines of build log ====="
+            $lines | Select-Object -Last 25 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_libraw.log not found - the batch file never ran"
+          }
+
+      - name: Show resulting binaries
+        shell: cmd
+        run: |
+          dir src\JPEGView\libraw\lib\*.lib src\JPEGView\libraw\bin\*.dll
+          dir src\JPEGView\libraw\lib64\*.lib src\JPEGView\libraw\bin64\*.dll
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: libraw-0.22.3
+          path: |
+            src/JPEGView/libraw/lib/*.lib
+            src/JPEGView/libraw/lib64/*.lib
+            src/JPEGView/libraw/bin/*.dll
+            src/JPEGView/libraw/bin64/*.dll
+          if-no-files-found: error
+
+      - name: Commit rebuilt binaries
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add src/JPEGView/libraw
+          if git diff --cached --quiet; then
+            echo "没有变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "build(deps): LibRaw 0.22.3 rebuilt in CI"
+          git push
