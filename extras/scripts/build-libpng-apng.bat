@@ -51,6 +51,9 @@ IF EXIST "%XOUT_DIR_64%" (
 call :PATCH_PNG
 IF ERRORLEVEL 1 exit /b 1
 
+call :FLIP_CRT_TO_DLL
+IF ERRORLEVEL 1 exit /b 1
+
 
 call :BUILD_PNG x86 Win32
 IF ERRORLEVEL 1 exit /b 1
@@ -89,6 +92,31 @@ echo === HEADER FILES SYNCHRONIZED ===
 exit /b 0
 
 
+
+
+
+:FLIP_CRT_TO_DLL
+REM 主程序现在由 CMake 编译，没有设置 MSVC_RUNTIME_LIBRARY，走默认的 /MD（动态 CRT）。
+REM libpng / zlib 的 Release 配置默认是 /MT（静态 CRT）。两套 CRT 各有自己的堆，
+REM 跨 CRT 传 malloc 出来的指针会在运行时崩，且这种问题 CI 抓不到。
+REM 这里把两个工程的 Release 配置改成 MultiThreadedDLL，与主程序保持一致。
+setlocal
+SET PATH=%ProgramFiles%\Git\usr\bin;%PATH%
+
+SET XPNGVCX=%XLIB_DIR%\projects\vstudio\libpng\libpng.vcxproj
+SET XZLIBVCX=%XLIB_DIR%\projects\vstudio\zlib\zlib.vcxproj
+
+for %%F in ("%XPNGVCX%" "%XZLIBVCX%") do (
+	IF NOT EXIST %%F (
+		echo ERROR: project file not found: %%F
+		exit /b 1
+	)
+	sed.exe -i "s|<RuntimeLibrary>MultiThreaded</RuntimeLibrary>|<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>|g" %%F
+	IF ERRORLEVEL 1 exit /b 1
+	echo + CRT switched to /MD in %%~nxF
+)
+
+exit /b 0
 
 
 

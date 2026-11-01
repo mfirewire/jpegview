@@ -1,0 +1,95 @@
+name: Rebuild libpng-apng
+
+# 手动触发。把 libpng 1.6.58 + APNG 补丁重新编译成 /MD 的静态库，
+# 覆盖 src/JPEGView/libpng-apng/lib{64}/，成功后自动提交。
+#
+# 为什么需要重编：Prit36 迁到 CMake 后没有设置 MSVC_RUNTIME_LIBRARY，主程序是 /MD；
+# 而仓库里原有的 libpng16.lib / zlib.lib 是 /MT 编的。两套 CRT 各自维护堆，
+# 跨 CRT 释放内存会在运行时崩，所以必须用 /MD 重编。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-libpng.yml'
+      - 'extras/scripts/build-libpng-apng.bat'
+      - 'extras/third_party/libpng-apng.src-patch/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 只拉需要的两个子模块，避免把 WTL 等无关仓库一起拖下来
+      - name: Init libpng and zlib submodules
+        shell: bash
+        run: |
+          git submodule update --init \
+            extras/third_party/libpng-apng.src-patch/libpng \
+            extras/third_party/libpng-apng.src-patch/zlib
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      # 脚本会往这三个目录复制产物，而 Prit36 把整个 libpng-apng 目录删掉了
+      - name: Prepare output directories
+        shell: pwsh
+        run: |
+          foreach ($d in @(
+            "src/JPEGView/libpng-apng/lib",
+            "src/JPEGView/libpng-apng/lib64",
+            "src/JPEGView/libpng-apng/include")) {
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+          }
+
+      - name: Build libpng-apng
+        shell: cmd
+        run: |
+          call extras\scripts\build-libpng-apng.bat > build_libpng.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_libpng.log
+          exit /b %RC%
+
+      - name: Surface build failure as annotations
+        if: failure()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build_libpng.log)) { Write-Output "::error::build_libpng.log not found"; exit 0 }
+          $lines = @(Get-Content build_libpng.log)
+          $errs = @($lines | Where-Object { $_ -match '(?i)error|fatal|cannot|not found|failed' } | Select-Object -Last 10)
+          if ($errs.Count -eq 0) { $errs = @($lines | Select-Object -Last 10) }
+          foreach ($e in $errs) { Write-Output "::error::$e" }
+
+      - name: Show resulting binaries
+        shell: cmd
+        run: |
+          dir src\JPEGView\libpng-apng\lib\*.lib
+          dir src\JPEGView\libpng-apng\lib64\*.lib
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpng-apng-md
+          path: src/JPEGView/libpng-apng/**
+          if-no-files-found: error
+
+      - name: Commit rebuilt binaries
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add src/JPEGView/libpng-apng
+          if git diff --cached --quiet; then
+            echo "没有变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "build(deps): libpng 1.6.58 + APNG rebuilt with /MD"
+          git push
