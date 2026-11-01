@@ -116,6 +116,22 @@ for %%F in ("%XPNGVCX%" "%XZLIBVCX%") do (
 	echo + CRT switched to /MD in %%~nxF
 )
 
+REM zlib 的 compress.c / uncompr.c 直接使用了 NULL 却没有 include <stddef.h>，
+REM 新版 MSVC 下会报 C2065。老版本靠隐式声明能过，现在不行，这里补上。
+SET XZLIB_SRC=%~dp0..\third_party\libpng-apng.src-patch\zlib
+for %%F in ("%XZLIB_SRC%\compress.c" "%XZLIB_SRC%\uncompr.c") do (
+	IF NOT EXIST %%F (
+		echo ERROR: zlib source not found: %%F
+		exit /b 1
+	)
+	findstr /C:"#include <stddef.h>" %%F >nul 2>&1
+	IF ERRORLEVEL 1 (
+		sed.exe -i "1i #include <stddef.h>" %%F
+		IF ERRORLEVEL 1 exit /b 1
+		echo + added <stddef.h> include to %%~nxF
+	)
+)
+
 exit /b 0
 
 
