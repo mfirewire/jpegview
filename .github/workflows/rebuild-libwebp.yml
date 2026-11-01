@@ -1,8 +1,9 @@
 name: Rebuild libwebp
 
 # 手动触发。把 extras/third_party/libwebp-1.6.0-src 用官方 Makefile.vc 编成静态库
-# （RTLIBCFG=static，与 JPEGView 的 /MT 一致），覆盖 src/JPEGView/libwebp/lib{lib,lib64}/，
-# 产物作为 artifact 上传。不自动提交，先确认能编出正确的 .lib 再决定入库方式。
+# （RTLIBCFG=static，与 JPEGView 的 /MT 一致），覆盖 src/JPEGView/libwebp/lib{lib,lib64}/。
+# 编译成功且链接通过后，把产物提交回仓库；这次的提交会触发一次常规构建，
+# 相当于自动验证新 .lib 能否与 JPEGView 正常链接。
 
 on:
   workflow_dispatch:
@@ -13,6 +14,9 @@ on:
       - 'extras/scripts/build-libwebp.bat'
       - 'extras/scripts/vs-init.bat'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
@@ -20,6 +24,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v3
@@ -59,3 +65,17 @@ jobs:
             src/JPEGView/libwebp/lib/*.lib
             src/JPEGView/libwebp/lib64/*.lib
           if-no-files-found: error
+
+      # 不加 [skip ci]：这一步的提交会触发常规构建，正好用来验证新 .lib 能否链接
+      - name: Commit rebuilt libs
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add src/JPEGView/libwebp/lib src/JPEGView/libwebp/lib64
+          if git diff --cached --quiet; then
+            echo "没有变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "build(deps): libwebp 1.6.0 static libs rebuilt in CI"
+          git push
