@@ -143,7 +143,13 @@ setlocal
 
 call "%~dp0vs-init.bat" %1
 
-msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 "%XLIB_DIR%\projects\vstudio\vstudio.sln"
+REM 只编 zlib 和 libpng 两个库项目，不编整个解决方案：
+REM 解决方案里还挂着 pngtest / pngunknown / pngvalid 等测试程序，它们仍用 /MT，
+REM 链接 /MD 的 libpng16.lib 会报一堆 __imp__fwrite / __imp__remove 之类的符号缺失。
+REM 我们只需要 zlib.lib 和 libpng16.lib，测试工具没有价值。
+msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 "%XLIB_DIR%\projects\vstudio\zlib\zlib.vcxproj"
+IF ERRORLEVEL 1 exit /b 1
+msbuild.exe /property:Platform=%2 /property:configuration="Release Library" /property:PlatformToolset=v143 "%XLIB_DIR%\projects\vstudio\libpng\libpng.vcxproj"
 exit /b %ERRORLEVEL%
 
 
