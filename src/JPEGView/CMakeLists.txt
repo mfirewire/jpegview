@@ -190,11 +190,19 @@ set_target_properties(JPEGView PROPERTIES
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(RUNTIME_DLL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/x64/Release")
+    set(RUNTIME_DLL_ARCH_DIR "bin64")
 else()
     set(RUNTIME_DLL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/x86/Release")
+    set(RUNTIME_DLL_ARCH_DIR "bin")
 endif()
 
-file(GLOB RUNTIME_DLLS "${RUNTIME_DLL_DIR}/*.dll")
+# 第三方 DLL 实际躺在各自的 lib*/bin64 下（libheif/bin64/heif.dll 之类），
+# bin/x64/Release 是 vcxproj 时代留下的集中存放点，多数检出里根本不存在 ——
+# 只扫后者的话一个 DLL 都不会被复制，产物目录里就只剩 exe。
+file(GLOB RUNTIME_DLLS
+    "${RUNTIME_DLL_DIR}/*.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib*/${RUNTIME_DLL_ARCH_DIR}/*.dll"
+)
 foreach(DLL_PATH ${RUNTIME_DLLS})
     get_filename_component(DLL_NAME "${DLL_PATH}" NAME)
     if(NOT DLL_NAME STREQUAL "WICLoader.dll")
@@ -214,7 +222,12 @@ set(CONFIG_FILES
     "symbols.km"
     "KeyMap-README.html"
     "readme.html"
+    "NavPanel.png"
 )
+# 本地化字符串表也要随产物走，否则中文界面会退回二进制里内置的英文字符串
+file(GLOB CONFIG_STRINGS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/Config"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Config/strings*.txt")
+list(APPEND CONFIG_FILES ${CONFIG_STRINGS})
 foreach(CFG_FILE ${CONFIG_FILES})
     add_custom_command(TARGET JPEGView POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

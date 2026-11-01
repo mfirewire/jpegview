@@ -53,3 +53,8 @@ jobs:
         path: |
           build/bin/Release/*.exe
           build/bin/Release/*.dll
+          build/bin/Release/*.ini
+          build/bin/Release/*.txt
+          build/bin/Release/*.km
+          build/bin/Release/*.html
+          build/bin/Release/*.png
