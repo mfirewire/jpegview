@@ -55,17 +55,15 @@ jobs:
           $vsInstallDir = (vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
         }
         echo "VS Install Dir: $vsInstallDir"
-        # Search common ATL locations
-        $candidatePaths = @(
+        # Find atlbase.h
+        $incPatterns = @(
           "$vsInstallDir\VC\Tools\MSVC\*\atlmfc\include",
           "$vsInstallDir\VC\atlmfc\include",
           "$vsInstallDir\VC\Auxiliary\VS\include"
         )
         $foundInc = $false
-        $foundLib = $false
         $atlIncPath = ""
-        $atlLibPath = ""
-        foreach ($pattern in $candidatePaths) {
+        foreach ($pattern in $incPatterns) {
           $matches = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
           foreach ($m in $matches) {
             $atlBase = Join-Path $m.FullName "atlbase.h"
@@ -73,27 +71,22 @@ jobs:
               echo "Found atlbase.h at: $atlBase"
               $atlIncPath = $m.FullName
               $foundInc = $true
-            }
-            # Look for atls.lib in the corresponding lib arch dir
-            $msvcVer = $m.Parent.Name
-            $archDirs = @("x64", "x86")
-            foreach ($arch in $archDirs) {
-              $libCandidate = Join-Path (Join-Path (Join-Path $m.Parent.Parent.FullName "lib") $arch) "atls.lib"
-              if (-not $foundLib -and (Test-Path $libCandidate)) {
-                echo "Found atls.lib at: $libCandidate"
-                $atlLibPath = Split-Path $libCandidate -Parent
-                $foundLib = $true
-              }
+              break
             }
           }
-          if ($foundInc -and $foundLib) { break }
+          if ($foundInc) { break }
         }
         if ($foundInc) {
           echo "ATLINCLUDE=$atlIncPath" >> $env:GITHUB_ENV
         } else {
           echo "WARNING: atlbase.h not found in common locations"
         }
-        if ($foundLib) {
+        # Find atls.lib directly via wildcard (avoid fragile parent navigation)
+        $libPattern = "$vsInstallDir\VC\Tools\MSVC\*\atlmfc\lib\*\atls.lib"
+        $libMatches = Get-ChildItem -Path $libPattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($libMatches) {
+          $atlLibPath = Split-Path $libMatches.FullName -Parent
+          echo "Found atls.lib at: $($libMatches.FullName)"
           echo "ATLLIBPATH=$atlLibPath" >> $env:GITHUB_ENV
         } else {
           echo "WARNING: atls.lib not found in common locations"
