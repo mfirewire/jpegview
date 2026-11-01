@@ -58,4 +58,4 @@ runs:
       shell: cmd
       run: |
         echo (Optional) INCLUDE: %INCLUDE%
-        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" src\JPEGView.sln
+        msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" src\JPEGView.sln
