@@ -974,6 +974,27 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 	if (m_pPanelMgr->OnKeyDown((unsigned int)wParam, bShift, bAlt, bCtrl)) {
 		return 1; // a panel has handled the key
 	}
+	// OCR 激活时优先消费这几个键，未激活时一律落到原有逻辑：
+	//   Ctrl+A  全选识别出的所有词（原绑定 IDM_EXCHANGE_PROC_PARAMS）
+	//   Ctrl+C  复制当前选取的文字（原绑定 IDM_COPY，复制图像）
+	//   Esc     隐藏识别结果与高亮框（原绑定 IDM_DEFAULT_ESC）
+	if (m_pOcrController && m_pOcrController->Active()) {
+		if (bCtrl && !bAlt && wParam == 'A') {
+			m_pOcrController->SelectAll();
+			Invalidate(FALSE);
+			return 1;
+		}
+		if (wParam == VK_ESCAPE) {
+			m_pOcrController->Reset();
+			Invalidate(FALSE);
+			return 1;
+		}
+		// Copy 在没有选区时返回 false，此时不拦截，继续走原来的复制图像逻辑
+		if (bCtrl && !bAlt && wParam == 'C' && m_pOcrController->Copy(m_hWnd)) {
+			Invalidate(FALSE);
+			return 1;
+		}
+	}
 	bool bHandled = false;
 	if (wParam == VK_ESCAPE && CloseHelpDlg()) {
 		bHandled = true;

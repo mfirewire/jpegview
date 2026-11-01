@@ -170,7 +170,9 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
     // Selection range (inclusive)
     int selFirst = m_anchor, selLast = m_end;
     if (selFirst > selLast) std::swap(selFirst, selLast);
-    bool haveSelection = m_selecting && selFirst >= 0 && selLast >= 0 && selFirst < int(m_result.words.size()) && selLast < int(m_result.words.size());
+    // 选区在松开鼠标后必须保持可见，否则 Ctrl+C 复制的内容用户看不到。
+    // 因此这里只看 anchor/end 是否有效，不看是否正在拖动。
+    bool haveSelection = selFirst >= 0 && selLast >= 0 && selFirst < int(m_result.words.size()) && selLast < int(m_result.words.size());
 
     HPEN hBoxPen = ::CreatePen(PS_SOLID, 1, RGB(0, 120, 215));
     HBRUSH hSelBrush = ::CreateSolidBrush(RGB(0, 120, 215, 60));
