@@ -26,11 +26,30 @@ IF NOT EXIST "%XVS_BASE_COMMON%" (
 
 SET XVS_VCVARS_BAT=
 
-REM because the directories in theory should come out in order
-REM it'll automatically pick up the LAST vcvarsall.bat (in theory)
-FOR /F "usebackq tokens=*" %%I IN (`dir /b /on /s "%XVS_BASE_COMMON%\vcvarsall.bat"`) DO (
-	echo + Found VCVARSALL.BAT at: %%I
-	SET XVS_VCVARS_BAT=%%I
+REM Prefer vswhere: shipped with every VS 2017+, and it reports the real
+REM installation path, so it does not care whether VS lives under
+REM "Program Files" or "Program Files (x86)".
+SET XVS_WHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe
+IF EXIST "%XVS_WHERE%" (
+	FOR /F "usebackq tokens=*" %%I IN (`"%XVS_WHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) DO (
+		IF EXIST "%%I\VC\Auxiliary\Build\vcvarsall.bat" (
+			echo + Found VCVARSALL.BAT via vswhere: %%I\VC\Auxiliary\Build\vcvarsall.bat
+			SET XVS_VCVARS_BAT=%%I\VC\Auxiliary\Build\vcvarsall.bat
+		)
+	)
+)
+
+REM Fallback for installations without vswhere: recursive search under the base
+IF "%XVS_VCVARS_BAT%"=="" (
+	FOR /F "usebackq tokens=*" %%I IN (`dir /b /on /s "%XVS_BASE_COMMON%\vcvarsall.bat" 2^>nul`) DO (
+		echo + Found VCVARSALL.BAT at: %%I
+		SET XVS_VCVARS_BAT=%%I
+	)
+)
+
+IF "%XVS_VCVARS_BAT%"=="" (
+	echo ERROR: vcvarsall.bat not found, cannot set up the build environment
+	exit /b 1
 )
 
 
