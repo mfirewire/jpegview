@@ -49,8 +49,7 @@ jobs:
       with:
         name: jpegview-win32-${{ env.short_sha }}
         path: |
-          src/JPEGView/bin/x86/Release/*.exe
-          src/JPEGView/bin/x86/Release/*.dll
+          src/JPEGView/bin/x86/Release/*
 
   build-x64:
     name: Build x64 Release
@@ -95,8 +94,7 @@ jobs:
       with:
         name: jpegview-x64-${{ env.short_sha }}
         path: |
-          src/JPEGView/bin/x64/Release/*.exe
-          src/JPEGView/bin/x64/Release/*.dll
+          src/JPEGView/bin/x64/Release/*
 
   release:
     name: Create GitHub Release
@@ -134,7 +132,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref_name }}
-        name: ${{ github.ref_name }} - All 11 third-party libraries upgraded. ICC color management for JPEG/PNG. OCR text recognition restored and hardened.
+        name: ${{ github.ref_name }} - All 11 third-party libraries upgraded. ICC color management for JPEG/PNG. OCR text recognition added.
         draft: false
         prerelease: false
         files: |
