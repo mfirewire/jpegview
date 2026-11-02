@@ -737,6 +737,9 @@ LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPar
 		StopMovieMode();
 		StopAnimation();
 		MouseOn();
+		// 换图前清掉上一张图的识别结果，否则旧图的词框和文字会叠在新图上，
+		// Ctrl+C 还会复制到上一张图的内容。
+		if (m_pOcrController) m_pOcrController->Reset();
 		if (m_sStartupFile.IsEmpty()) {
 			OpenFile(false, false);
 		} else {

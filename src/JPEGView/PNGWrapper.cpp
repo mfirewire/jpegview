@@ -355,8 +355,10 @@ void* PngReader::ReadImage(int& width,
 	unsigned int exif_size = 0;
 	bool read_two = cache.frame_index < cache.first;
 	void* pixels = ReadNextFrame(&exif, &exif_size);
-	if (pixels && read_two)
+	if (pixels && read_two) {
+		free(pixels); // hidden first frame is skipped; release it before reading the next
 		pixels = ReadNextFrame(&exif, &exif_size);
+	}
 	
 	width = cache.width;
 	height = cache.height;

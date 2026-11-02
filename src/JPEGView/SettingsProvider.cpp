@@ -87,15 +87,6 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_sIniNameUser = m_sIniNameGlobal;
 	m_bStoreToEXEPath = GetBool(_T("StoreToEXEPath"), false);
 
-	// OCR 快捷键：默认 Ctrl+Q。KeyMap 会用它替换 KeyMap.txt 中对 IDM_OCR 的映射，
-	// 因此用户改快捷键只需改 INI，不必去找 KeyMap.txt。
-	m_sOcrShortcut = GetString(_T("OcrShortcut"), _T("Ctrl+Q"));
-
-	// OCR 语言优先级：默认中文在前，因为 Windows 的中文引擎本身能读英文和数字，
-	// 反过来英文引擎完全读不出汉字。系统装了别的 OCR 语言包会自动追加在后面，
-	// 所以这里只是排序，不是白名单。
-	m_sOcrLanguages = GetString(_T("OcrLanguages"), _T("zh-CN,zh-TW,en-US"));
-
 	if (!m_bStoreToEXEPath) {
 		// User INI file
 		m_sIniNameUser = CString(Helpers::JPEGViewAppDataPath()) + m_sIniFileTitle;
@@ -103,6 +94,16 @@ CSettingsProvider::CSettingsProvider(void) {
 	} else {
 		Helpers::SetJPEGViewAppDataPath(m_sEXEPath);
 	}
+
+	// OCR 快捷键：默认 Ctrl+Q。KeyMap 会用它替换 KeyMap.txt 中对 IDM_OCR 的映射，
+	// 因此用户改快捷键只需改 INI，不必去找 KeyMap.txt。
+	// 必须放在 m_bUserINIExists 赋值之后，否则 GetString 永远查不到用户 INI。
+	m_sOcrShortcut = GetString(_T("OcrShortcut"), _T("Ctrl+Q"));
+
+	// OCR 语言优先级：默认中文在前，因为 Windows 的中文引擎本身能读英文和数字，
+	// 反过来英文引擎完全读不出汉字。系统装了别的 OCR 语言包会自动追加在后面，
+	// 所以这里只是排序，不是白名单。
+	m_sOcrLanguages = GetString(_T("OcrLanguages"), _T("zh-CN,zh-TW,en-US"));
 
 	// Get "My documents" path
 	CString sMyDocumentsFolder;

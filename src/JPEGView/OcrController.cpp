@@ -6,6 +6,7 @@
 #include "HelpersGUI.h"
 #include "NLS.h"
 #include "SettingsProvider.h"
+#include <gdiplus.h>
 #include <mutex>
 #include <thread>
 #include <cmath>
@@ -101,7 +102,9 @@ void COcrController::Complete(CMainDlg& main) {
 }
 
 int COcrController::Hit(CMainDlg& main, CPoint point) const {
-    float x = float(point.x - main.GetDIBOffset().x), y = float(point.y - main.GetDIBOffset().y);
+    // ScreenToImage 内部自己完成屏幕到图像的换算（含居中偏移），
+    // 与其他调用者（CropCtl 等）一致，直接传屏幕坐标即可。
+    float x = float(point.x), y = float(point.y);
     if (!main.ScreenToImage(x, y)) return -1;
     for (size_t i = 0; i < m_result.words.size(); ++i)
         if (Ocr::Contains(m_result.words[i], {x, y})) return int(i);
@@ -201,7 +204,6 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
     bool haveSelection = selFirst >= 0 && selLast >= 0 && selFirst < int(m_result.words.size()) && selLast < int(m_result.words.size());
 
     HPEN hBoxPen = ::CreatePen(PS_SOLID, 1, RGB(0, 120, 215));
-    HBRUSH hSelBrush = ::CreateSolidBrush(RGB(0, 120, 215, 60));
     HPEN hSelPen = ::CreatePen(PS_SOLID, 2, RGB(0, 120, 215));
     HPEN hOldPen = (HPEN)::SelectObject(dc, hBoxPen);
     HBRUSH hOldBrush = (HBRUSH)::SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -223,7 +225,18 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
         bool selected = haveSelection && int(i) >= selFirst && int(i) <= selLast;
         if (selected) {
             ::SelectObject(dc, hSelPen);
-            ::SelectObject(dc, hSelBrush);
+            ::SelectObject(dc, GetStockObject(NULL_BRUSH));
+            // 半透明填充：GDI 的 brush 没有 alpha，RGB 宏也没有第 4 个参数，
+            // 所以这里用 GDI+ 画淡蓝填充，边框仍由上面的 pen 描。
+            Gdiplus::Graphics g(dc);
+            Gdiplus::SolidBrush fill(Gdiplus::Color(60, 0, 120, 215));
+            Gdiplus::PointF gp[4] = {
+                { (float)pts[0].x, (float)pts[0].y },
+                { (float)pts[1].x, (float)pts[1].y },
+                { (float)pts[2].x, (float)pts[2].y },
+                { (float)pts[3].x, (float)pts[3].y },
+            };
+            g.FillPolygon(&fill, gp, 4);
         } else {
             ::SelectObject(dc, hBoxPen);
             ::SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -243,5 +256,4 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
     ::SelectObject(dc, hOldBrush);
     ::DeleteObject(hBoxPen);
     ::DeleteObject(hSelPen);
-    ::DeleteObject(hSelBrush);
 }
