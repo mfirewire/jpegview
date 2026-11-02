@@ -42,6 +42,11 @@ IF EXIST "%XOUT_DIR_64%" (
 call :PATCH_PNG
 IF ERRORLEVEL 1 exit /b 1
 
+REM zlib 1.3.2 的 compress.c / uncompr.c 用了 NULL 却没 include <stddef.h>，
+REM 新版 MSVC 直接报 C2065。补一行，幂等。
+call :ENSURE_ZLIB_STDDEF
+IF ERRORLEVEL 1 exit /b 1
+
 
 call :BUILD_PNG x86 Win32
 IF ERRORLEVEL 1 exit /b 1
@@ -148,3 +153,17 @@ SET XERROR=%ERRORLEVEL%
 popd
 
 exit /b %XERROR%
+
+:ENSURE_ZLIB_STDDEF
+setlocal
+SET XZLIB_DIR=%XPATCH_DIR%\zlib
+for %%F in ("%XZLIB_DIR%\compress.c" "%XZLIB_DIR%\uncompr.c") do (
+	findstr /C:"#include <stddef.h>" "%%~fF" >nul 2>&1
+	if errorlevel 1 (
+		> "%%~fF.new" echo #include ^<stddef.h^>
+		type "%%~fF" >> "%%~fF.new"
+		move /y "%%~fF.new" "%%~fF" >nul
+		echo + added stddef.h include to %%~nxF
+	)
+)
+exit /b 0
