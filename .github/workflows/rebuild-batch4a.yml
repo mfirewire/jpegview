@@ -37,6 +37,9 @@ jobs:
         run: |
           fail() { echo "::error::$1"; exit 1; }
           git submodule update --init extras/third_party/libjpeg-turbo || fail "submodule update failed"
+          # zlib headers are needed because 3.2.x is configured against our zlib
+          # instead of its own in-tree copy (see build-libjpegturbo.bat).
+          git submodule update --init extras/third_party/libpng-apng.src-patch/zlib || fail "zlib submodule update failed"
           cd extras/third_party/libjpeg-turbo || fail "dir missing"
           if ! git checkout -q 3.2.1 2>/dev/null; then
             git fetch --depth 1 origin refs/tags/3.2.1:refs/tags/3.2.1 || fail "cannot fetch 3.2.1"
@@ -46,6 +49,7 @@ jobs:
           grep -m1 'set(VERSION ' CMakeLists.txt || fail "version line missing"
           # 3.x moved the public headers into src/
           test -f src/turbojpeg.h || fail "src/turbojpeg.h missing - not a 3.x tree?"
+          test -f ../libpng-apng.src-patch/zlib/zlib.h || fail "zlib.h missing"
 
       - name: Install nasm
         shell: pwsh
@@ -110,14 +114,19 @@ jobs:
             else { Write-Output ("{0}  {1} bytes" -f $f, (Get-Item $f).Length) }
           }
 
-          # 3.2.x embeds zlib/libspng for the PNG paths. 3.2.1 claims the symbols
-          # are hidden; verify the static lib does not export a bare inflate that
-          # would collide with the zlib.lib JPEGView already links.
+          # 3.2.x embeds zlib/libspng for the PNG paths. With WITH_SYSTEM_ZLIB=ON
+          # the zlib objects must be gone, otherwise linking against JPEGView's
+          # own zlib.lib fails with "z_errmsg already defined". Catch it here
+          # instead of waiting for the next regular build to go red.
           $bytes = [System.IO.File]::ReadAllBytes("src/JPEGView/libjpeg-turbo/lib64/turbojpeg-static.lib")
           $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-          foreach ($sym in @("_inflate", "_deflate")) {
-            if ($text -match [regex]::Escape($sym)) { Write-Output "::warning::$sym appears in turbojpeg-static.lib - check for a zlib symbol clash" }
+          foreach ($sym in @("zutil.c.obj", "z_errmsg")) {
+            if ($text -match [regex]::Escape($sym)) {
+              Write-Output "::error::$sym still embedded in turbojpeg-static.lib - WITH_SYSTEM_ZLIB did not take effect"
+              $fail = 1
+            }
           }
+          if ($text -notmatch 'spng') { Write-Output "::warning::no spng objects found; PNG loading may be disabled" }
           if ($fail) { exit 1 }
 
       - name: Commit
