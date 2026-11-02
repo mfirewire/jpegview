@@ -737,9 +737,6 @@ LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPar
 		StopMovieMode();
 		StopAnimation();
 		MouseOn();
-		// 换图前清掉上一张图的识别结果，否则旧图的词框和文字会叠在新图上，
-		// Ctrl+C 还会复制到上一张图的内容。
-		if (m_pOcrController) m_pOcrController->Reset();
 		if (m_sStartupFile.IsEmpty()) {
 			OpenFile(false, false);
 		} else {
@@ -2200,6 +2197,9 @@ bool CMainDlg::OpenFileWithDialog(bool bFullScreen, bool bAfterStartup) {
 void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	StopMovieMode();
 	StopAnimation();
+	// 打开新文件时清掉上一张图的识别结果。拖放、打开对话框、第二实例传文件
+	// 都走这里；翻页走 GotoImage，在那里另行清理。
+	if (m_pOcrController) m_pOcrController->Reset();
 	// recreate file list based on image opened
 	Helpers::ESorting eOldSorting = m_pFileList->GetSorting();
 	bool oOldAscending = m_pFileList->IsSortedAscending();
@@ -2567,6 +2567,11 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 			return; // not placed on a new image, don't do anything
 		}
 	}
+
+	// 换图（翻页/切换/重载）时清掉上一张图的识别结果，否则旧图的词框和文字
+	// 会叠在新图上，Ctrl+C 还会复制到上一张图的内容。翻页走这里，打开文件走
+	// OpenFile，两条收口都清理才算覆盖全部换图路径。
+	if (m_pOcrController) m_pOcrController->Reset();
 
 	if (ePos != POS_Current && ePos != POS_NextAnimation && ePos != POS_Clipboard && ePos != POS_AwayFromCurrent) {
 		MouseOff();
