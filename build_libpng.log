@@ -1,0 +1,885 @@
+C:\Program Files\Git\usr\bin\bash.exe
+C:\Program Files\Git\bin\bash.exe
+C:\Windows\System32\bash.exe
+C:\Program Files\Git\usr\bin\patch.exe
+C:\Strawberry\c\bin\patch.exe
+--- Patching libpng with apng support ---
+patching file LICENSE
+patching file pngread.c
+patching file pngget.c
+patching file png.c
+patching file png.h
+patching file pngpriv.h
+patching file pnginfo.h
+patching file pngstruct.h
+patching file pngwrite.c
+patching file pngpread.c
+patching file pngset.c
+patching file pngrutil.c
+patching file pngwutil.c
+patching file scripts/symbols.def
+--- Patching libpng with 64-bit support ---
+patching file projects/vstudio/libpng/libpng.vcxproj
+patching file projects/vstudio/pnglibconf/pnglibconf.vcxproj
+patching file projects/vstudio/pngstest/pngstest.vcxproj
+patching file projects/vstudio/pngtest/pngtest.vcxproj
+patching file projects/vstudio/pngunknown/pngunknown.vcxproj
+patching file projects/vstudio/pngvalid/pngvalid.vcxproj
+patching file projects/vstudio/vstudio.sln
+patching file projects/vstudio/zlib/zlib.vcxproj
++ added stddef.h include to compress.c
++ added stddef.h include to uncompr.c
++ Found VCVARSALL.BAT via vswhere: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat
+== Using: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat ==
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.43
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x86'
+MSBuild version 17.14.60+43b635718 for .NET Framework
+Build started 11/2/2026 3:01:52 AM.
+
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" on node 1 (default targets).
+ValidateSolutionConfiguration:
+  Building solution configuration "Release Library|Win32".
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\zlib\zlib.vcxproj" (2) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release Library\".
+  Creating directory "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\".
+  Creating directory "Release Library\zlib.tlog\".
+InitializeBuildStatus:
+  Creating "Release Library\zlib.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release Library\zlib.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D Z_SOLO /Gm- /EHsc /MT /GS- /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\zlib.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\..\zlib\adler32.c ..\..\..\..\zlib\compress.c ..\..\..\..\zlib\crc32.c ..\..\..\..\zlib\deflate.c ..\..\..\..\zlib\infback.c ..\..\..\..\zlib\inffast.c ..\..\..\..\zlib\inflate.c ..\..\..\..\zlib\inftrees.c ..\..\..\..\zlib\trees.c ..\..\..\..\zlib\uncompr.c ..\..\..\..\zlib\zutil.c
+  adler32.c
+  compress.c
+  crc32.c
+  deflate.c
+  infback.c
+  inffast.c
+  inflate.c
+  inftrees.c
+  trees.c
+  uncompr.c
+  zutil.c
+Lib:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\Lib.exe /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\zlib.lib" /NOLOGO /MACHINE:X86 /LTCG "Release Library\adler32.obj"
+  "Release Library\compress.obj"
+  "Release Library\crc32.obj"
+  "Release Library\deflate.obj"
+  "Release Library\infback.obj"
+  "Release Library\inffast.obj"
+  "Release Library\inflate.obj"
+  "Release Library\inftrees.obj"
+  "Release Library\trees.obj"
+  "Release Library\uncompr.obj"
+  "Release Library\zutil.obj"
+  zlib.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\zlib.lib
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\zlib.bsc" "Release Library\adler32.sbr" "Release Library\compress.sbr" "Release Library\crc32.sbr" "Release Library\deflate.sbr" "Release Library\infback.sbr" "Release Library\inffast.sbr" "Release Library\inflate.sbr" "Release Library\inftrees.sbr" "Release Library\trees.sbr" "Release Library\uncompr.sbr" "Release Library\zutil.sbr"
+FinalizeBuildStatus:
+  Deleting file "Release Library\zlib.tlog\unsuccessfulbuild".
+  Touching "Release Library\zlib.tlog\zlib.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\zlib\zlib.vcxproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pnglibconf\pnglibconf.vcxproj" (3) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release\".
+  Creating directory "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release\".
+  Creating directory "Release\pnglibconf.tlog\".
+InitializeBuildStatus:
+  Creating "Release\pnglibconf.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release\pnglibconf.tlog\unsuccessfulbuild".
+FinalizeBuildStatus:
+  Deleting file "Release\pnglibconf.tlog\unsuccessfulbuild".
+  Touching "Release\pnglibconf.tlog\pnglibconf.lastbuildstate".
+CustomBuildStep:
+  Generating pnglibconf.h
+  copy ..\..\..\scripts\pnglibconf.h.prebuilt ..\..\..\pnglibconf.h
+  :VCEnd
+          1 file(s) copied.
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pnglibconf\pnglibconf.vcxproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (4) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (4) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj" (5) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release Library\".
+  Creating directory "Release Library\libpng.tlog\".
+InitializeBuildStatus:
+  Creating "Release Library\libpng.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release Library\libpng.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CRT_SECURE_NO_WARNINGS /D _MBCS /GF /Gm- /EHsc /MT /GS /Gy /fp:precise /fp:except- /Zc:wchar_t- /Zc:forScope /Zc:inline /Yc"pngpriv.h" /Fp"Release Library\libpng16.pch" /Fo"Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\libpng16.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\png.c
+  png.c
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CRT_SECURE_NO_WARNINGS /D _MBCS /GF /Gm- /EHsc /MT /GS /Gy /fp:precise /fp:except- /Zc:wchar_t- /Zc:forScope /Zc:inline /Fo"Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\libpng16.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\arm\arm_init.c ..\..\..\arm\filter_neon_intrinsics.c ..\..\..\arm\palette_neon_intrinsics.c
+  arm_init.c
+  filter_neon_intrinsics.c
+  palette_neon_intrinsics.c
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CRT_SECURE_NO_WARNINGS /D _MBCS /GF /Gm- /EHsc /MT /GS /Gy /fp:precise /fp:except- /Zc:wchar_t- /Zc:forScope /Zc:inline /Yu"pngpriv.h" /Fp"Release Library\libpng16.pch" /Fo"Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\libpng16.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\pngerror.c ..\..\..\pngget.c ..\..\..\pngmem.c ..\..\..\pngpread.c ..\..\..\pngread.c ..\..\..\pngrio.c ..\..\..\pngrtran.c ..\..\..\pngrutil.c ..\..\..\pngset.c ..\..\..\pngtrans.c ..\..\..\pngwio.c ..\..\..\pngwrite.c ..\..\..\pngwtran.c ..\..\..\pngwutil.c
+  pngerror.c
+  pngget.c
+  pngmem.c
+  pngpread.c
+  pngread.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(4202,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  pngrio.c
+  pngrtran.c
+  pngrutil.c
+  pngset.c
+  pngtrans.c
+  pngwio.c
+  pngwrite.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2042,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  pngwtran.c
+  pngwutil.c
+Lib:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\Lib.exe /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\libpng16.lib" /NOLOGO /MACHINE:X86 /LTCG "Release Library\arm_init.obj"
+  "Release Library\filter_neon_intrinsics.obj"
+  "Release Library\palette_neon_intrinsics.obj"
+  "Release Library\png.obj"
+  "Release Library\pngerror.obj"
+  "Release Library\pngget.obj"
+  "Release Library\pngmem.obj"
+  "Release Library\pngpread.obj"
+  "Release Library\pngread.obj"
+  "Release Library\pngrio.obj"
+  "Release Library\pngrtran.obj"
+  "Release Library\pngrutil.obj"
+  "Release Library\pngset.obj"
+  "Release Library\pngtrans.obj"
+  "Release Library\pngwio.obj"
+  "Release Library\pngwrite.obj"
+  "Release Library\pngwtran.obj"
+  "Release Library\pngwutil.obj"
+  libpng.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\libpng16.lib
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\libpng16.bsc" "Release Library\arm_init.sbr" "Release Library\filter_neon_intrinsics.sbr" "Release Library\palette_neon_intrinsics.sbr" "Release Library\png.sbr" "Release Library\pngerror.sbr" "Release Library\pngget.sbr" "Release Library\pngmem.sbr" "Release Library\pngpread.sbr" "Release Library\pngread.sbr" "Release Library\pngrio.sbr" "Release Library\pngrtran.sbr" "Release Library\pngrutil.sbr" "Release Library\pngset.sbr" "Release Library\pngtrans.sbr" "Release Library\pngwio.sbr" "Release Library\pngwrite.sbr" "Release Library\pngwtran.sbr" "Release Library\pngwutil.sbr"
+FinalizeBuildStatus:
+  Deleting file "Release Library\libpng.tlog\unsuccessfulbuild".
+  Touching "Release Library\libpng.tlog\libpng.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (6) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (6) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj" (7) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release Library\".
+  Creating directory "Release Library\pngtest.tlog\".
+InitializeBuildStatus:
+  Creating "Release Library\pngtest.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release Library\pngtest.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _CRT_SECURE_NO_WARNINGS /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Release Library\\" /Fd"Release Library\vc142.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\pngtest.c
+  pngtest.c
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngtest.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngtest.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"Release Library\pngtest.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngtest.lib" /MACHINE:X86 /SAFESEH "Release Library\pngtest.obj"
+  Generating code
+  Finished generating code
+  pngtest.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngtest.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngtest.bsc" "Release Library\pngtest.sbr"
+CustomBuildStep:
+  Executing PNG test program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngtest.exe" ..\..\..\pngtest.png "Release Library\pngout.png"
+  :VCEnd
+  
+   Testing libpng version 1.6.59+apng
+     with zlib   version 1.3.2
+  
+  libpng version 1.6.59+apng
+  Copyright (c) 2018-2026 Cosmin Truta
+  Copyright (c) 1998-2002,2004,2006-2018 Glenn Randers-Pehrson
+  Copyright (c) 1996-1997 Andreas Dilger
+  Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.
+  Portions Copyright (c) 2006-2007 Andrew Smith
+  Portions Copyright (c) 2008-2026 Max Stepin
+   library (10659): libpng version 1.6.59+apng
+   pngtest (10659): libpng version 1.6.59+apng
+  
+   Testing ..\..\..\pngtest.png: eXIf type MM, 52 bytes
+  
+   Pass 0: rwrwrwrwrwrwrwrwrw
+   Pass 1: rwrwrwrwrwrwrwrwrw
+   Pass 2: rwrwrwrwrwrwrwrw
+   Pass 3: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+   Pass 4: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+   Pass 5: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+           rwrwrwrw
+   Pass 6: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+           rwrwrwrwrw eXIf type MM, 52 bytes
+   eXIf type MM, 52 bytes
+  
+   PASS (9782 zero samples)
+   tIME = 7 Jun 1996 17:58:08 +0000
+   libpng passes test
+   Default limits:
+    width_max  = 1000000
+    height_max = 1000000
+    cache_max  = 1000
+    malloc_max = 8000000
+FinalizeBuildStatus:
+  Deleting file "Release Library\pngtest.tlog\unsuccessfulbuild".
+  Touching "Release Library\pngtest.tlog\pngtest.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (8) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (8) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj" (9) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release Library\".
+  Creating directory "Release Library\pngvalid.tlog\".
+InitializeBuildStatus:
+  Creating "Release Library\pngvalid.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release Library\pngvalid.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _CRT_SECURE_NO_WARNINGS /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Release Library\\" /Fd"Release Library\vc142.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\contrib\libtests\pngvalid.c
+  pngvalid.c
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngvalid.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngvalid.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"Release Library\pngvalid.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngvalid.lib" /MACHINE:X86 /SAFESEH "Release Library\pngvalid.obj"
+  Generating code
+  Finished generating code
+  pngvalid.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngvalid.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngvalid.bsc" "Release Library\pngvalid.sbr"
+CustomBuildStep:
+  Executing PNG validation program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngvalid.exe" --touch "Release Library\pngvalid.out"
+  :VCEnd
+  Gamma correction error summary
+  
+  The printed value is the maximum error in the pixel values
+  calculated by the libpng gamma correction code.  The error
+  is calculated as the difference between the output pixel
+  value (always an integer) and the ideal value from the
+  libpng specification (typically not an integer).
+  
+  Expect this value to be less than .5 for 8 bit formats,
+  less than 1 for formats with fewer than 8 bits and a small
+  number (typically less than 5) for the 16 bit formats.
+  For performance reasons the value for 16 bit formats
+  increases when the image file includes an sBIT chunk.
+  
+  Basic gamma correction:
+    2 bit gray:  0.50495
+    4 bit gray:  0.81888
+    8 bit gray:  0.49933
+    8 bit color: 0.49933
+    indexed:     0.00000
+   16 bit gray:  0.74080
+   16 bit color: 0.74080
+  
+  Gamma correction with sBIT:
+   16 bit gray:  0.74058
+   16 bit color: 0.74058
+  
+  Gamma correction with 16 to 8 bit reduction:
+   16 bit gray:  1.97052
+   16 bit color: 1.97052
+  
+  Gamma correction with background:
+    8 bit gray:  19.34140
+    8 bit color: 17.44857
+   16 bit gray:  3.52430
+   16 bit color: 82.37971
+  
+  Gamma correction with alpha mode:
+    8 bit gray:  17.48251
+    8 bit color: 17.48251
+   16 bit gray:  309.24044
+   16 bit color: 310.97330
+  PASS: pngvalid --touch Release Library\pngvalid.out (floating point arithmetic)
+FinalizeBuildStatus:
+  Deleting file "Release Library\pngvalid.tlog\unsuccessfulbuild".
+  Touching "Release Library\pngvalid.tlog\pngvalid.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (10) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (10) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj" (11) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release Library\".
+  Creating directory "Release Library\pngstest.tlog\".
+InitializeBuildStatus:
+  Creating "Release Library\pngstest.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release Library\pngstest.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _CRT_SECURE_NO_WARNINGS /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Release Library\\" /Fd"Release Library\vc142.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\contrib\libtests\pngstest.c
+  pngstest.c
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngstest.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngstest.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"Release Library\pngstest.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngstest.lib" /MACHINE:X86 /SAFESEH "Release Library\pngstest.obj"
+  Generating code
+  Finished generating code
+  pngstest.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngstest.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngstest.bsc" "Release Library\pngstest.sbr"
+CustomBuildStep:
+  Executing libpng simplified API test program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngstest.exe" --strict --log --touch "Release Library\pngstest.out" ../../../contrib/pngsuite/basn0g01.png ../../../contrib/pngsuite/basn0g02.png ../../../contrib/pngsuite/basn0g04.png ../../../contrib/pngsuite/basn0g08.png ../../../contrib/pngsuite/basn0g16.png ../../../contrib/pngsuite/basn2c08.png ../../../contrib/pngsuite/basn2c16.png ../../../contrib/pngsuite/basn3p01.png ../../../contrib/pngsuite/basn3p02.png ../../../contrib/pngsuite/basn3p04.png ../../../contrib/pngsuite/basn3p08.png ../../../contrib/pngsuite/basn4a08.png ../../../contrib/pngsuite/basn4a16.png ../../../contrib/pngsuite/basn6a08.png ../../../contrib/pngsuite/basn6a16.png ../../../contrib/pngsuite/ftbbn0g01.png ../../../contrib/pngsuite/ftbbn0g02.png ../../../contrib/pngsuite/ftbbn0g04.png ../../../contrib/pngsuite/ftbbn2c16.png ../../../contrib/pngsuite/ftbbn3p08.png ../../../contrib/pngsuite/ftbgn2c16.png ../../../contrib/pngsuite/ftbgn3p08.png ../../../contrib/pngsuite/ftbrn2c08.png ../../../contrib/pngsuite/ftbwn0g16.png ../../../contrib/pngsuite/ftbwn3p08.png ../../../contrib/pngsuite/ftbyn3p08.png ../../../contrib/pngsuite/ftp0n0g08.png ../../../contrib/pngsuite/ftp0n2c08.png ../../../contrib/pngsuite/ftp0n3p08.png ../../../contrib/pngsuite/ftp1n3p08.png
+  :VCEnd
+  PASS: ../../../contrib/pngsuite/basn0g01.png
+  PASS: ../../../contrib/pngsuite/basn0g02.png
+  PASS: ../../../contrib/pngsuite/basn0g04.png
+  PASS: ../../../contrib/pngsuite/basn0g08.png
+  PASS: ../../../contrib/pngsuite/basn0g16.png
+  PASS: ../../../contrib/pngsuite/basn2c08.png
+  PASS: ../../../contrib/pngsuite/basn2c16.png
+  PASS: ../../../contrib/pngsuite/basn3p01.png
+  PASS: ../../../contrib/pngsuite/basn3p02.png
+  PASS: ../../../contrib/pngsuite/basn3p04.png
+  PASS: ../../../contrib/pngsuite/basn3p08.png
+  PASS: ../../../contrib/pngsuite/basn4a08.png
+  PASS: ../../../contrib/pngsuite/basn4a16.png
+  PASS: ../../../contrib/pngsuite/basn6a08.png
+  PASS: ../../../contrib/pngsuite/basn6a16.png
+  PASS: ../../../contrib/pngsuite/ftbbn0g01.png
+  PASS: ../../../contrib/pngsuite/ftbbn0g02.png
+  PASS: ../../../contrib/pngsuite/ftbbn0g04.png
+  PASS: ../../../contrib/pngsuite/ftbbn2c16.png
+  PASS: ../../../contrib/pngsuite/ftbbn3p08.png
+  PASS: ../../../contrib/pngsuite/ftbgn2c16.png
+  PASS: ../../../contrib/pngsuite/ftbgn3p08.png
+  PASS: ../../../contrib/pngsuite/ftbrn2c08.png
+  PASS: ../../../contrib/pngsuite/ftbwn0g16.png
+  PASS: ../../../contrib/pngsuite/ftbwn3p08.png
+  PASS: ../../../contrib/pngsuite/ftbyn3p08.png
+  PASS: ../../../contrib/pngsuite/ftp0n0g08.png
+  PASS: ../../../contrib/pngsuite/ftp0n2c08.png
+  PASS: ../../../contrib/pngsuite/ftp0n3p08.png
+  PASS: ../../../contrib/pngsuite/ftp1n3p08.png
+FinalizeBuildStatus:
+  Deleting file "Release Library\pngstest.tlog\unsuccessfulbuild".
+  Touching "Release Library\pngstest.tlog\pngstest.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (12) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (12) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj" (13) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "Release Library\".
+  Creating directory "Release Library\pngunknown.tlog\".
+InitializeBuildStatus:
+  Creating "Release Library\pngunknown.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "Release Library\pngunknown.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _CRT_SECURE_NO_WARNINGS /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Release Library\\" /Fd"Release Library\vc142.pdb" /FR"Release Library\\" /external:W3 /Gd /TC /analyze- /FC /errorReport:queue ..\..\..\contrib\libtests\pngunknown.c
+  pngunknown.c
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"Release Library\pngunknown.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.lib" /MACHINE:X86 /SAFESEH "Release Library\pngunknown.obj"
+  Generating code
+  Finished generating code
+  pngunknown.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX86\x86\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.bsc" "Release Library\pngunknown.sbr"
+CustomBuildStep:
+  Executing PNG validation program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe" --strict --default --touch "Release Library\pngunknown.out" ../../../pngtest.png
+  :VCEnd
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe discard
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe save
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe if-safe
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe vpAg
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe sTER
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe IDAT
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\Release Library\pngunknown.exe sAPI
+FinalizeBuildStatus:
+  Deleting file "Release Library\pngunknown.tlog\unsuccessfulbuild".
+  Touching "Release Library\pngunknown.tlog\pngunknown.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default targets).
+
+Build succeeded.
+
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default target) (1) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (default target) (4) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj" (default target) (5) ->
+(ClCompile target) -> 
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(4202,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2042,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+
+    2 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:36.47
++ Found VCVARSALL.BAT via vswhere: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat
+== Using: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat ==
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.43
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+MSBuild version 17.14.60+43b635718 for .NET Framework
+Build started 11/2/2026 3:02:29 AM.
+
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" on node 1 (default targets).
+ValidateSolutionConfiguration:
+  Building solution configuration "Release Library|x64".
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\zlib\zlib.vcxproj" (2) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release Library\".
+  Creating directory "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\".
+  Creating directory "x64\Release Library\zlib.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release Library\zlib.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release Library\zlib.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D Z_SOLO /Gm- /EHsc /MT /GS- /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"x64\Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\zlib.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /wd4127 /wd4131 /wd4242 /wd4244 /FC /errorReport:queue ..\..\..\..\zlib\adler32.c ..\..\..\..\zlib\compress.c ..\..\..\..\zlib\crc32.c ..\..\..\..\zlib\deflate.c ..\..\..\..\zlib\infback.c ..\..\..\..\zlib\inffast.c ..\..\..\..\zlib\inflate.c ..\..\..\..\zlib\inftrees.c ..\..\..\..\zlib\trees.c ..\..\..\..\zlib\uncompr.c ..\..\..\..\zlib\zutil.c
+  adler32.c
+  compress.c
+  crc32.c
+  deflate.c
+  infback.c
+  inffast.c
+  inflate.c
+  inftrees.c
+  trees.c
+  uncompr.c
+  zutil.c
+Lib:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\Lib.exe /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\zlib.lib" /NOLOGO /MACHINE:X64 /LTCG "x64\Release Library\adler32.obj"
+  "x64\Release Library\compress.obj"
+  "x64\Release Library\crc32.obj"
+  "x64\Release Library\deflate.obj"
+  "x64\Release Library\infback.obj"
+  "x64\Release Library\inffast.obj"
+  "x64\Release Library\inflate.obj"
+  "x64\Release Library\inftrees.obj"
+  "x64\Release Library\trees.obj"
+  "x64\Release Library\uncompr.obj"
+  "x64\Release Library\zutil.obj"
+  zlib.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\zlib.lib
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\zlib.bsc" "x64\Release Library\adler32.sbr" "x64\Release Library\compress.sbr" "x64\Release Library\crc32.sbr" "x64\Release Library\deflate.sbr" "x64\Release Library\infback.sbr" "x64\Release Library\inffast.sbr" "x64\Release Library\inflate.sbr" "x64\Release Library\inftrees.sbr" "x64\Release Library\trees.sbr" "x64\Release Library\uncompr.sbr" "x64\Release Library\zutil.sbr"
+FinalizeBuildStatus:
+  Deleting file "x64\Release Library\zlib.tlog\unsuccessfulbuild".
+  Touching "x64\Release Library\zlib.tlog\zlib.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\zlib\zlib.vcxproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pnglibconf\pnglibconf.vcxproj" (3) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release\".
+  Creating directory "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release\".
+  Creating directory "x64\Release\pnglibconf.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release\pnglibconf.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\pnglibconf.tlog\unsuccessfulbuild".
+FinalizeBuildStatus:
+  Deleting file "x64\Release\pnglibconf.tlog\unsuccessfulbuild".
+  Touching "x64\Release\pnglibconf.tlog\pnglibconf.lastbuildstate".
+CustomBuildStep:
+  Generating pnglibconf.h
+  copy ..\..\..\scripts\pnglibconf.h.prebuilt ..\..\..\pnglibconf.h
+  :VCEnd
+          1 file(s) copied.
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pnglibconf\pnglibconf.vcxproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (4) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (4) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj" (5) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release Library\".
+  Creating directory "x64\Release Library\libpng.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release Library\libpng.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release Library\libpng.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _MBCS /GF /Gm- /EHsc /MT /GS /Gy /fp:precise /fp:except- /Zc:wchar_t- /Zc:forScope /Zc:inline /Yc"pngpriv.h" /Fp"x64\Release Library\libpng16.pch" /Fo"x64\Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\libpng16.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\png.c
+  png.c
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _MBCS /GF /Gm- /EHsc /MT /GS /Gy /fp:precise /fp:except- /Zc:wchar_t- /Zc:forScope /Zc:inline /Fo"x64\Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\libpng16.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\arm\arm_init.c ..\..\..\arm\filter_neon_intrinsics.c ..\..\..\arm\palette_neon_intrinsics.c
+  arm_init.c
+  filter_neon_intrinsics.c
+  palette_neon_intrinsics.c
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _MBCS /GF /Gm- /EHsc /MT /GS /Gy /fp:precise /fp:except- /Zc:wchar_t- /Zc:forScope /Zc:inline /Yu"pngpriv.h" /Fp"x64\Release Library\libpng16.pch" /Fo"x64\Release Library\\" /Fd"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\libpng16.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\pngerror.c ..\..\..\pngget.c ..\..\..\pngmem.c ..\..\..\pngpread.c ..\..\..\pngread.c ..\..\..\pngrio.c ..\..\..\pngrtran.c ..\..\..\pngrutil.c ..\..\..\pngset.c ..\..\..\pngtrans.c ..\..\..\pngwio.c ..\..\..\pngwrite.c ..\..\..\pngwtran.c ..\..\..\pngwutil.c
+  pngerror.c
+  pngget.c
+  pngmem.c
+  pngpread.c
+  pngread.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(1461,21): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(1477,43): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(4202,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  pngrio.c
+  pngrtran.c
+  pngrutil.c
+  pngset.c
+  pngtrans.c
+  pngwio.c
+  pngwrite.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(536,11): warning C4996: 'gmtime': This function or variable may be unsafe. Consider using gmtime_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2042,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2413,21): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2441,46): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2454,43): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  pngwtran.c
+  pngwutil.c
+Lib:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\Lib.exe /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\libpng16.lib" /NOLOGO /MACHINE:X64 /LTCG "x64\Release Library\arm_init.obj"
+  "x64\Release Library\filter_neon_intrinsics.obj"
+  "x64\Release Library\palette_neon_intrinsics.obj"
+  "x64\Release Library\png.obj"
+  "x64\Release Library\pngerror.obj"
+  "x64\Release Library\pngget.obj"
+  "x64\Release Library\pngmem.obj"
+  "x64\Release Library\pngpread.obj"
+  "x64\Release Library\pngread.obj"
+  "x64\Release Library\pngrio.obj"
+  "x64\Release Library\pngrtran.obj"
+  "x64\Release Library\pngrutil.obj"
+  "x64\Release Library\pngset.obj"
+  "x64\Release Library\pngtrans.obj"
+  "x64\Release Library\pngwio.obj"
+  "x64\Release Library\pngwrite.obj"
+  "x64\Release Library\pngwtran.obj"
+  "x64\Release Library\pngwutil.obj"
+  libpng.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\libpng16.lib
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\libpng16.bsc" "x64\Release Library\arm_init.sbr" "x64\Release Library\filter_neon_intrinsics.sbr" "x64\Release Library\palette_neon_intrinsics.sbr" "x64\Release Library\png.sbr" "x64\Release Library\pngerror.sbr" "x64\Release Library\pngget.sbr" "x64\Release Library\pngmem.sbr" "x64\Release Library\pngpread.sbr" "x64\Release Library\pngread.sbr" "x64\Release Library\pngrio.sbr" "x64\Release Library\pngrtran.sbr" "x64\Release Library\pngrutil.sbr" "x64\Release Library\pngset.sbr" "x64\Release Library\pngtrans.sbr" "x64\Release Library\pngwio.sbr" "x64\Release Library\pngwrite.sbr" "x64\Release Library\pngwtran.sbr" "x64\Release Library\pngwutil.sbr"
+FinalizeBuildStatus:
+  Deleting file "x64\Release Library\libpng.tlog\unsuccessfulbuild".
+  Touching "x64\Release Library\libpng.tlog\libpng.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (6) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (6) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj" (7) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release Library\".
+  Creating directory "x64\Release Library\pngtest.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release Library\pngtest.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release Library\pngtest.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"x64\Release Library\\" /Fd"x64\Release Library\vc142.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\pngtest.c
+  pngtest.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(882,16): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(888,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1408,13): warning C4996: 'strncpy': This function or variable may be unsafe. Consider using strncpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1619,13): warning C4996: 'strncpy': This function or variable may be unsafe. Consider using strncpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1720,16): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1726,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngtest.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngtest.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"x64\Release Library\pngtest.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngtest.lib" /MACHINE:X64 "x64\Release Library\pngtest.obj"
+  Generating code
+  Finished generating code
+  pngtest.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngtest.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngtest.bsc" "x64\Release Library\pngtest.sbr"
+CustomBuildStep:
+  Executing PNG test program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngtest.exe" ..\..\..\pngtest.png "x64\Release Library\pngout.png"
+  :VCEnd
+  
+   Testing libpng version 1.6.59+apng
+     with zlib   version 1.3.2
+  
+  libpng version 1.6.59+apng
+  Copyright (c) 2018-2026 Cosmin Truta
+  Copyright (c) 1998-2002,2004,2006-2018 Glenn Randers-Pehrson
+  Copyright (c) 1996-1997 Andreas Dilger
+  Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.
+  Portions Copyright (c) 2006-2007 Andrew Smith
+  Portions Copyright (c) 2008-2026 Max Stepin
+   library (10659): libpng version 1.6.59+apng
+   pngtest (10659): libpng version 1.6.59+apng
+  
+   Testing ..\..\..\pngtest.png: eXIf type MM, 52 bytes
+  
+   Pass 0: rwrwrwrwrwrwrwrwrw
+   Pass 1: rwrwrwrwrwrwrwrwrw
+   Pass 2: rwrwrwrwrwrwrwrw
+   Pass 3: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+   Pass 4: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+   Pass 5: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+           rwrwrwrw
+   Pass 6: rwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrwrw
+           rwrwrwrwrw eXIf type MM, 52 bytes
+   eXIf type MM, 52 bytes
+  
+   PASS (9782 zero samples)
+   tIME = 7 Jun 1996 17:58:08 +0000
+   libpng passes test
+   Default limits:
+    width_max  = 1000000
+    height_max = 1000000
+    cache_max  = 1000
+    malloc_max = 8000000
+FinalizeBuildStatus:
+  Deleting file "x64\Release Library\pngtest.tlog\unsuccessfulbuild".
+  Touching "x64\Release Library\pngtest.tlog\pngtest.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (8) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (8) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj" (9) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release Library\".
+  Creating directory "x64\Release Library\pngvalid.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release Library\pngvalid.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release Library\pngvalid.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"x64\Release Library\\" /Fd"x64\Release Library\vc142.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\contrib\libtests\pngvalid.c
+  pngvalid.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(192,4): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(201,4): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5487,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5513,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5575,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5607,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5618,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(10258,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(12141,24): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngvalid.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngvalid.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"x64\Release Library\pngvalid.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngvalid.lib" /MACHINE:X64 "x64\Release Library\pngvalid.obj"
+  Generating code
+  Finished generating code
+  pngvalid.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngvalid.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngvalid.bsc" "x64\Release Library\pngvalid.sbr"
+CustomBuildStep:
+  Executing PNG validation program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngvalid.exe" --touch "x64\Release Library\pngvalid.out"
+  :VCEnd
+  Gamma correction error summary
+  
+  The printed value is the maximum error in the pixel values
+  calculated by the libpng gamma correction code.  The error
+  is calculated as the difference between the output pixel
+  value (always an integer) and the ideal value from the
+  libpng specification (typically not an integer).
+  
+  Expect this value to be less than .5 for 8 bit formats,
+  less than 1 for formats with fewer than 8 bits and a small
+  number (typically less than 5) for the 16 bit formats.
+  For performance reasons the value for 16 bit formats
+  increases when the image file includes an sBIT chunk.
+  
+  Basic gamma correction:
+    2 bit gray:  0.50495
+    4 bit gray:  0.81888
+    8 bit gray:  0.49933
+    8 bit color: 0.49933
+    indexed:     0.00000
+   16 bit gray:  0.74080
+   16 bit color: 0.74080
+  
+  Gamma correction with sBIT:
+   16 bit gray:  0.74058
+   16 bit color: 0.74058
+  
+  Gamma correction with 16 to 8 bit reduction:
+   16 bit gray:  1.97052
+   16 bit color: 1.97052
+  
+  Gamma correction with background:
+    8 bit gray:  19.34140
+    8 bit color: 17.44857
+   16 bit gray:  3.52430
+   16 bit color: 82.37971
+  
+  Gamma correction with alpha mode:
+    8 bit gray:  17.48251
+    8 bit color: 17.48251
+   16 bit gray:  309.24044
+   16 bit color: 310.97330
+  PASS: pngvalid --touch x64\Release Library\pngvalid.out (floating point arithmetic)
+FinalizeBuildStatus:
+  Deleting file "x64\Release Library\pngvalid.tlog\unsuccessfulbuild".
+  Touching "x64\Release Library\pngvalid.tlog\pngvalid.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (10) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (10) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj" (11) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release Library\".
+  Creating directory "x64\Release Library\pngstest.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release Library\pngstest.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release Library\pngstest.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"x64\Release Library\\" /Fd"x64\Release Library\vc142.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\contrib\libtests\pngstest.c
+  pngstest.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(766,44): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2333,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2337,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2342,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2347,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2352,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2375,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2377,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2400,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2409,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2420,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2730,19): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2742,19): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2784,13): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2792,13): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3097,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3167,13): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3264,16): warning C4996: 'strcpy': This function or variable may be unsafe. Consider using strcpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3184,17): warning C4996: 'tmpfile': This function or variable may be unsafe. Consider using tmpfile_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3244,56): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3256,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3653,13): warning C4996: 'strncpy': This function or variable may be unsafe. Consider using strncpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3863,24): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngstest.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngstest.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"x64\Release Library\pngstest.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngstest.lib" /MACHINE:X64 "x64\Release Library\pngstest.obj"
+  Generating code
+  Finished generating code
+  pngstest.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngstest.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngstest.bsc" "x64\Release Library\pngstest.sbr"
+CustomBuildStep:
+  Executing libpng simplified API test program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngstest.exe" --strict --log --touch "x64\Release Library\pngstest.out" ../../../contrib/pngsuite/basn0g01.png ../../../contrib/pngsuite/basn0g02.png ../../../contrib/pngsuite/basn0g04.png ../../../contrib/pngsuite/basn0g08.png ../../../contrib/pngsuite/basn0g16.png ../../../contrib/pngsuite/basn2c08.png ../../../contrib/pngsuite/basn2c16.png ../../../contrib/pngsuite/basn3p01.png ../../../contrib/pngsuite/basn3p02.png ../../../contrib/pngsuite/basn3p04.png ../../../contrib/pngsuite/basn3p08.png ../../../contrib/pngsuite/basn4a08.png ../../../contrib/pngsuite/basn4a16.png ../../../contrib/pngsuite/basn6a08.png ../../../contrib/pngsuite/basn6a16.png ../../../contrib/pngsuite/ftbbn0g01.png ../../../contrib/pngsuite/ftbbn0g02.png ../../../contrib/pngsuite/ftbbn0g04.png ../../../contrib/pngsuite/ftbbn2c16.png ../../../contrib/pngsuite/ftbbn3p08.png ../../../contrib/pngsuite/ftbgn2c16.png ../../../contrib/pngsuite/ftbgn3p08.png ../../../contrib/pngsuite/ftbrn2c08.png ../../../contrib/pngsuite/ftbwn0g16.png ../../../contrib/pngsuite/ftbwn3p08.png ../../../contrib/pngsuite/ftbyn3p08.png ../../../contrib/pngsuite/ftp0n0g08.png ../../../contrib/pngsuite/ftp0n2c08.png ../../../contrib/pngsuite/ftp0n3p08.png ../../../contrib/pngsuite/ftp1n3p08.png
+  :VCEnd
+  PASS: ../../../contrib/pngsuite/basn0g01.png
+  PASS: ../../../contrib/pngsuite/basn0g02.png
+  PASS: ../../../contrib/pngsuite/basn0g04.png
+  PASS: ../../../contrib/pngsuite/basn0g08.png
+  PASS: ../../../contrib/pngsuite/basn0g16.png
+  PASS: ../../../contrib/pngsuite/basn2c08.png
+  PASS: ../../../contrib/pngsuite/basn2c16.png
+  PASS: ../../../contrib/pngsuite/basn3p01.png
+  PASS: ../../../contrib/pngsuite/basn3p02.png
+  PASS: ../../../contrib/pngsuite/basn3p04.png
+  PASS: ../../../contrib/pngsuite/basn3p08.png
+  PASS: ../../../contrib/pngsuite/basn4a08.png
+  PASS: ../../../contrib/pngsuite/basn4a16.png
+  PASS: ../../../contrib/pngsuite/basn6a08.png
+  PASS: ../../../contrib/pngsuite/basn6a16.png
+  PASS: ../../../contrib/pngsuite/ftbbn0g01.png
+  PASS: ../../../contrib/pngsuite/ftbbn0g02.png
+  PASS: ../../../contrib/pngsuite/ftbbn0g04.png
+  PASS: ../../../contrib/pngsuite/ftbbn2c16.png
+  PASS: ../../../contrib/pngsuite/ftbbn3p08.png
+  PASS: ../../../contrib/pngsuite/ftbgn2c16.png
+  PASS: ../../../contrib/pngsuite/ftbgn3p08.png
+  PASS: ../../../contrib/pngsuite/ftbrn2c08.png
+  PASS: ../../../contrib/pngsuite/ftbwn0g16.png
+  PASS: ../../../contrib/pngsuite/ftbwn3p08.png
+  PASS: ../../../contrib/pngsuite/ftbyn3p08.png
+  PASS: ../../../contrib/pngsuite/ftp0n0g08.png
+  PASS: ../../../contrib/pngsuite/ftp0n2c08.png
+  PASS: ../../../contrib/pngsuite/ftp0n3p08.png
+  PASS: ../../../contrib/pngsuite/ftp1n3p08.png
+FinalizeBuildStatus:
+  Deleting file "x64\Release Library\pngstest.tlog\unsuccessfulbuild".
+  Touching "x64\Release Library\pngstest.tlog\pngstest.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (1) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (12) on node 1 (default targets).
+Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (12) is building "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj" (13) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release Library\".
+  Creating directory "x64\Release Library\pngunknown.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release Library\pngunknown.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release Library\pngunknown.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\CL.exe /c /I..\..\..\..\zlib /I..\..\..\scripts /Zi /nologo /W3 /WX- /diagnostics:column /Ox /Oi /GL /D WIN32 /D NDEBUG /D _CONSOLE /D _UNICODE /D UNICODE /GF /Gm- /EHsc /MT /GS /Gy- /fp:precise /fp:except- /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"x64\Release Library\\" /Fd"x64\Release Library\vc142.pdb" /FR"x64\Release Library\\" /external:W3 /Gd /TC /FC /errorReport:queue ..\..\..\contrib\libtests\pngunknown.c
+  pngunknown.c
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngunknown.c(1152,9): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj]
+D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngunknown.c(1239,27): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj]
+Link:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe" /INCREMENTAL:NO /NOLOGO /LIBPATH:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\\" libpng16.lib zlib.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG /LTCGOUT:"x64\Release Library\pngunknown.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.lib" /MACHINE:X64 "x64\Release Library\pngunknown.obj"
+  Generating code
+  Finished generating code
+  pngunknown.vcxproj -> D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe
+BscMake:
+  C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.29.30133\bin\HostX64\x64\bscmake.exe /nologo /o"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.bsc" "x64\Release Library\pngunknown.sbr"
+CustomBuildStep:
+  Executing PNG validation program
+  "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe" --strict --default --touch "x64\Release Library\pngunknown.out" ../../../pngtest.png
+  :VCEnd
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe discard
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe save
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe if-safe
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe vpAg
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe sTER
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe IDAT
+  PASS: D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\x64\Release Library\pngunknown.exe sAPI
+FinalizeBuildStatus:
+  Deleting file "x64\Release Library\pngunknown.tlog\unsuccessfulbuild".
+  Touching "x64\Release Library\pngunknown.tlog\pngunknown.lastbuildstate".
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (default targets).
+Done Building Project "D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default targets).
+
+Build succeeded.
+
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default target) (1) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj.metaproj" (default target) (4) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj" (default target) (5) ->
+(ClCompile target) -> 
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(1461,21): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(1477,43): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngread.c(4202,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(536,11): warning C4996: 'gmtime': This function or variable may be unsafe. Consider using gmtime_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2042,21): warning C4146: unary minus operator applied to unsigned type, result still unsigned [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2413,21): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2441,46): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngwrite.c(2454,43): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\libpng\libpng.vcxproj]
+
+
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default target) (1) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj.metaproj" (default target) (6) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj" (default target) (7) ->
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(882,16): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(888,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1408,13): warning C4996: 'strncpy': This function or variable may be unsafe. Consider using strncpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1619,13): warning C4996: 'strncpy': This function or variable may be unsafe. Consider using strncpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1720,16): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\pngtest.c(1726,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngtest\pngtest.vcxproj]
+
+
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default target) (1) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj.metaproj" (default target) (8) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj" (default target) (9) ->
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(192,4): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(201,4): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5487,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5513,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5575,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5607,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(5618,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(10258,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngvalid.c(12141,24): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngvalid\pngvalid.vcxproj]
+
+
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default target) (1) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj.metaproj" (default target) (10) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj" (default target) (11) ->
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(766,44): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2333,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2337,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2342,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2347,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2352,10): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2375,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2377,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2400,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2409,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2420,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2730,19): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2742,19): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2784,13): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(2792,13): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3097,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3167,13): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3264,16): warning C4996: 'strcpy': This function or variable may be unsafe. Consider using strcpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3184,17): warning C4996: 'tmpfile': This function or variable may be unsafe. Consider using tmpfile_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3244,56): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3256,7): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3653,13): warning C4996: 'strncpy': This function or variable may be unsafe. Consider using strncpy_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngstest.c(3863,24): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngstest\pngstest.vcxproj]
+
+
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\vstudio.sln" (default target) (1) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj.metaproj" (default target) (12) ->
+"D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj" (default target) (13) ->
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngunknown.c(1152,9): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj]
+  D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\contrib\libtests\pngunknown.c(1239,27): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [D:\a\jpegview\jpegview\extras\third_party\libpng-apng.src-patch\libpng\projects\vstudio\pngunknown\pngunknown.vcxproj]
+
+    48 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:21.26
+        1 file(s) copied.
+        1 file(s) copied.
+        1 file(s) copied.
+        1 file(s) copied.
+=== HEADER FILES NOT MAINTAINED BY SCRIPT ===
+NOTE: as for the header files, copy/replace files AS NEEDED
+TO: src\JPEGView\libpng-apng\include
+FROM: extras\third_party\libpng-apng.src-patch\libpng
