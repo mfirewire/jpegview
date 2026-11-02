@@ -65,7 +65,11 @@ jobs:
           grep -m1 "version:" ../libheif/dav1d/meson.build || fail "dav1d meson.build missing"
 
           echo "--- libde265 ---"
-          grep -m1 'project(' ../libde265-1.1.3-src/CMakeLists.txt || fail "libde265 CMakeLists missing"
+          # Check for the file itself, not for a matching line: libde265 writes
+          # "project (libde265" with a space, so grepping for "project(" reports
+          # a perfectly present file as missing.
+          test -f ../libde265-1.1.3-src/CMakeLists.txt || fail "libde265 CMakeLists missing"
+          grep -m1 'VERSION 1.1.3' ../libde265-1.1.3-src/CMakeLists.txt || fail "libde265 is not 1.1.3"
 
       - name: Install meson, ninja, nasm
         shell: pwsh
