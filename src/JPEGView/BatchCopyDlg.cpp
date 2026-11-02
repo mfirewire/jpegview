@@ -168,8 +168,8 @@ LRESULT CBatchCopyDlg::OnPreview(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*
 	CString strPattern = GetPatternText();
 	if (strPattern.IsEmpty()) return 0;
 
-	std::list<CFileDesc>::const_iterator iter;
-	const std::list<CFileDesc> & fileList = m_fileList.GetFileList();
+	std::vector<CFileDesc>::const_iterator iter;
+	const std::vector<CFileDesc> & fileList = m_fileList.GetFileList();
 	int nIndex = 0, nSelectedIndex = 0;
 	for (iter = fileList.begin( ); iter != fileList.end( ); iter++ ) {
 		if (m_lvFiles.GetCheckState(nIndex) && iter->GetTitle() != NULL) {
@@ -195,8 +195,8 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 	int nFilesCopied = 0;
 	int nFilesRenamed = 0;
 	int nDirsCreated = 0;
-	std::list<CFileDesc>::iterator iter;
-	std::list<CFileDesc> & fileList = m_fileList.GetFileList();
+	std::vector<CFileDesc>::iterator iter;
+	std::vector<CFileDesc> & fileList = m_fileList.GetFileList();
 	int nIndex = 0, nSelectedIndex = 0;
 	for (iter = fileList.begin( ); iter != fileList.end( ); iter++ ) {
 		if (m_lvFiles.GetCheckState(nIndex) && iter->GetTitle() != NULL) {
@@ -312,8 +312,8 @@ LRESULT CBatchCopyDlg::OnListViewKeyDown(WPARAM /*wParam*/, LPNMHDR lpnmhdr, BOO
 }
 
 int CBatchCopyDlg::CreateItemList() {
-	std::list<CFileDesc>::const_iterator iter;
-	const std::list<CFileDesc> & fileList = m_fileList.GetFileList();
+	std::vector<CFileDesc>::const_iterator iter;
+	const std::vector<CFileDesc> & fileList = m_fileList.GetFileList();
 	int nIndex = 0;
 	for (iter = fileList.begin( ); iter != fileList.end( ); iter++ ) {
 		m_lvFiles.InsertItem(nIndex, iter->GetTitle());

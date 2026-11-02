@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "Helpers.h"
 
 class CDirectoryWatcher;
@@ -9,6 +11,30 @@ class CFileDesc
 {
 public:
 	CFileDesc(const CString & sName, const FILETIME* lastModTime, const FILETIME* creationTime, __int64 fileSize);
+
+	// m_sTitle points into m_sName's buffer, so the implicitly generated copy
+	// would leave it dangling once the object is moved by a std::vector
+	// reallocation. Recompute the title on copy.
+	CFileDesc(const CFileDesc& other)
+		: m_sName(other.m_sName)
+		, m_sTitle((LPCTSTR)m_sName + m_sName.ReverseFind(_T('\\')) + 1)
+		, m_lastModTime(other.m_lastModTime)
+		, m_creationTime(other.m_creationTime)
+		, m_nRandomOrderNumber(other.m_nRandomOrderNumber)
+		, m_fileSize(other.m_fileSize)
+	{ }
+
+	CFileDesc& operator=(const CFileDesc& other) {
+		if (this != &other) {
+			m_sName = other.m_sName;
+			m_sTitle = (LPCTSTR)m_sName + m_sName.ReverseFind(_T('\\')) + 1;
+			m_lastModTime = other.m_lastModTime;
+			m_creationTime = other.m_creationTime;
+			m_nRandomOrderNumber = other.m_nRandomOrderNumber;
+			m_fileSize = other.m_fileSize;
+		}
+		return *this;
+	}
 
 	// STL sort only needs this operator to order CFileDesc objects
 	bool operator < (const CFileDesc& other) const;
@@ -140,7 +166,7 @@ public:
 	bool CanOpenCurrentFileForReading() const;
 
 	// Returns the raw file list of the current folder
-	std::list<CFileDesc> & GetFileList() { return m_fileList; }
+	std::vector<CFileDesc> & GetFileList() { return m_fileList; }
 
 	// delete the chain of CFileLists forward and backward and only leave the current node alive
 	void DeleteHistory(bool onlyForward = false);
@@ -157,10 +183,10 @@ private:
 	// filelists for several folders are chained
 	CFileList* m_next;
 	CFileList* m_prev;
-	std::list<CFileDesc> m_fileList;
-	std::list<CFileDesc>::iterator m_iter; // current position in m_fileList
-	std::list<CFileDesc>::iterator m_iterStart; // start of iteration in m_fileList
-	std::list<CFileDesc>::iterator m_iterCheckPoint;
+	std::vector<CFileDesc> m_fileList;
+	size_t m_iter; // current position in m_fileList (index; m_fileList.size() = end)
+	size_t m_iterStart; // start of iteration in m_fileList
+	size_t m_iterCheckPoint;
 
 	CString m_sMarkedFile;
 	CString m_sMarkedFileCurrent;
@@ -171,7 +197,7 @@ private:
 	void MoveIterToLast();
 	void NextInFolder();
 	CFileList* GotoFirstShown();
-	std::list<CFileDesc>::iterator FindFile(const CString& sName);
+	size_t FindFile(const CString& sName);
 	CFileList* FindFileRecursively (const CString& sDirectory, const CString& sFindAfter, 
 		bool bSearchThisFolder, int nLevel, int nRecursion);
 	CFileList* TryCreateFileList(const CString& directory, int nNewLevel);
