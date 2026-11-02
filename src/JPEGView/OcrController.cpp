@@ -169,6 +169,28 @@ bool COcrController::Copy(HWND window) {
 // Paint: draw word bounding boxes and highlight the selected range.
 // Image-space word corners are mapped to screen space via CMainDlg::ImageToScreen.
 void COcrController::Paint(CMainDlg& main, HDC dc) {
+    // 左上角状态行：识别中显示进度，识别完显示实际使用的语言标签。
+    // 认不出文字时，"是哪个引擎在跑"是第一个要排查的问题，所以直接摆在屏幕上。
+    const bool busy = Busy();
+    if (busy || m_active) {
+        std::wstring text;
+        if (busy) {
+            text = L"OCR [recognizing...]";
+        } else {
+            text = L"OCR";
+            const std::wstring& tag = m_result.languageTag.empty() ? m_result.language : m_result.languageTag;
+            if (!tag.empty()) { text += L" ["; text += tag; text += L"]"; }
+            text += L": drag across words | Ctrl+A select all | Ctrl+C copy | Esc hide";
+        }
+        const int saved = ::SaveDC(dc);
+        ::SetTextColor(dc, RGB(255, 255, 255));
+        ::SetBkColor(dc, RGB(30, 35, 40));
+        ::SetBkMode(dc, OPAQUE);
+        ::TextOutW(dc, HelpersGUI::ScaleToScreen(12), HelpersGUI::ScaleToScreen(36),
+                   text.c_str(), int(text.size()));
+        ::RestoreDC(dc, saved);
+    }
+
     if (!m_active || m_result.words.empty()) return;
 
     // Selection range (inclusive)

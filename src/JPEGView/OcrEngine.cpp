@@ -84,7 +84,15 @@ void ResizeLuminance(Snapshot& result, const uint8_t* source, size_t stride) {
 Snapshot MakeSnapshot(const void* pixels, int width, int height, int channels) {
     if (!pixels || width <= 0 || height <= 0 || (channels != 3 && channels != 4))
         throw std::invalid_argument("Invalid OCR image");
-    const double scale = std::min(1.0, double(SnapshotLimit) / std::max(width, height));
+    // Windows OCR 对小字号很敏感：12–16 px 的文字会丢字形细节，典型症状是
+    // l/I 混淆、词被切开（"expo rts"）、o 认成 0、甚至把英文认成汉字。
+    // 屏幕截图正好落在这个尺寸，所以小图先放大再交给引擎。
+    const int longest = std::max(width, height);
+    double scale = std::min(1.0, double(SnapshotLimit) / longest);
+    if (scale == 1.0) {
+        if (longest <= 1200) scale = 2.0;
+        else if (longest <= 2000) scale = 1.5;
+    }
     Snapshot result;
     result.imageWidth = width;
     result.imageHeight = height;
@@ -325,6 +333,25 @@ bool NeedsSpaceBetween(wchar_t prev, wchar_t next) {
 }
 } // namespace
 
+// 中文模型会把拉丁词切碎（"expo rts"、"n ew"、"co pyi ng"）。两个纯 ASCII 片段
+// 之间的间隙明显小于一个字符宽度时，判定为同一个词被切开，拼接时不补空格。
+static bool SplitInsideLatinWord(const Word& prev, const Word& next) {
+    auto asciiWord = [](const std::wstring& s) {
+        if (s.empty()) return false;
+        for (wchar_t c : s) {
+            const bool ok = (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') || (c >= L'0' && c <= L'9');
+            if (!ok) return false;
+        }
+        return true;
+    };
+    if (!asciiWord(prev.text) || !asciiWord(next.text)) return false;
+    const float prevChar = (prev.corners[1].x - prev.corners[0].x) / float(prev.text.size());
+    const float nextChar = (next.corners[1].x - next.corners[0].x) / float(next.text.size());
+    const float gap = next.corners[0].x - prev.corners[1].x;
+    const float reference = std::min(prevChar, nextChar);
+    return reference > 0 && gap < reference * 0.2f;
+}
+
 std::wstring SelectedText(const std::vector<Word>& words, int first, int last) {
     if (words.empty() || first < 0 || last < 0 || first >= int(words.size()) || last >= int(words.size()))
         return L"";
@@ -332,21 +359,21 @@ std::wstring SelectedText(const std::vector<Word>& words, int first, int last) {
 
     std::wstring out;
     size_t lastLine = 0;
-    bool havePrevious = false;
+    int previous = -1;
     for (int i = first; i <= last; ++i) {
         const std::wstring& text = words[i].text;
         if (text.empty()) continue;
-        if (havePrevious) {
+        if (previous >= 0) {
             // 跨行保留换行；行内按语言决定是否插入空格
             if (words[i].line != lastLine) {
                 out += L"\r\n";
-            } else if (NeedsSpaceBetween(out.back(), text.front())) {
+            } else if (NeedsSpaceBetween(out.back(), text.front()) && !SplitInsideLatinWord(words[previous], words[i])) {
                 out += L' ';
             }
         }
         out += text;
         lastLine = words[i].line;
-        havePrevious = true;
+        previous = i;
     }
     return out;
 }
