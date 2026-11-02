@@ -95,6 +95,21 @@ jobs:
           type build_libpng.log
           exit /b %RC%
 
+      - name: Surface libpng build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          # The job log API answers 403 for this repo, so the only way to see why
+          # a step died is to re-emit the interesting lines as annotations.
+          if (Test-Path build_libpng.log) {
+            $lines = @(Get-Content build_libpng.log)
+            $bad = $lines | Where-Object { $_ -match 'error|Error|ERROR|failed|FAILED|MSB\d+|C\d{4}|LNK\d{4}' }
+            if ($bad.Count -eq 0) { $bad = $lines | Select-Object -Last 40 }
+            $bad | Select-Object -First 40 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_libpng.log not found - the batch file never ran"
+          }
+
       - name: Sync libpng headers
         shell: pwsh
         run: |
@@ -139,6 +154,19 @@ jobs:
           set RC=%ERRORLEVEL%
           type build_heif.log
           exit /b %RC%
+
+      - name: Surface libheif build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build_heif.log) {
+            $lines = @(Get-Content build_heif.log)
+            $bad = $lines | Where-Object { $_ -match 'error|Error|ERROR|failed|FAILED|MSB\d+|C\d{4}|LNK\d{4}|CMake Error' }
+            if ($bad.Count -eq 0) { $bad = $lines | Select-Object -Last 40 }
+            $bad | Select-Object -First 40 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_heif.log not found - the batch file never ran"
+          }
 
       - name: Sync their headers
         shell: pwsh
