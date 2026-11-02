@@ -96,6 +96,7 @@ void CUnsharpMaskPanelCtl::OnApplyUnsharpMask(void* pContext, int nParameter, CB
 		::MessageBox(pThis->m_pMainDlg->GetHWND(), CNLS::GetString(_T("The operation failed because not enough memory is available!")),
 			_T("JPEGView"), MB_ICONSTOP | MB_OK);
 	}
+	pThis->m_pMainDlg->ResetOcrResult();
 	::SetCursor(hOldCursor);
 	pThis->TerminateUnsharpMaskPanel();
 	pThis->m_pMainDlg->GetImageProcPanelCtl()->ShowHideSaveDBButtons();

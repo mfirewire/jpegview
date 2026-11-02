@@ -1627,6 +1627,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				m_nRotation = (m_nRotation + nRotationDelta) % 360;
 				m_nUserRotation = (m_nUserRotation + nRotationDelta) % 360;
 				m_pCurrentImage->Rotate(nRotationDelta);
+				ResetOcrResult();
 				if (!IsAdjustWindowToImage()) m_dZoom = -1;
 				m_bUserZoom = false;
 				m_bUserPan = false;
@@ -1645,6 +1646,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				if (dlgResize.DoModal(m_hWnd) == IDOK) {
 					HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
 					m_pCurrentImage->ResizeOriginalPixels(dlgResize.GetFilter(), dlgResize.GetNewSize());
+					ResetOcrResult();
 					::SetCursor(hOldCursor);
 					m_pImageProcPanelCtl->ShowHideSaveDBButtons();
 					this->Invalidate(FALSE);
@@ -1659,6 +1661,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_MIRROR_V:
 			if (m_pCurrentImage != NULL) {
 				m_pCurrentImage->Mirror(nCommand == IDM_MIRROR_H);
+				ResetOcrResult();
 				m_pImageProcPanelCtl->ShowHideSaveDBButtons();
 				this->Invalidate(FALSE);
 			}
@@ -1995,6 +1998,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_CROP_SEL:
 			if (m_pCurrentImage != NULL) {
 				m_pCurrentImage->Crop(m_pCropCtl->GetImageCropRect(false));
+				ResetOcrResult();
 				m_pImageProcPanelCtl->ShowHideSaveDBButtons();
 				this->Invalidate(FALSE);
 				AdjustWindowToImage(false);
@@ -2194,12 +2198,16 @@ bool CMainDlg::OpenFileWithDialog(bool bFullScreen, bool bAfterStartup) {
 	return false;
 }
 
+void CMainDlg::ResetOcrResult() {
+	if (m_pOcrController) m_pOcrController->Reset();
+}
+
 void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	StopMovieMode();
 	StopAnimation();
 	// 打开新文件时清掉上一张图的识别结果。拖放、打开对话框、第二实例传文件
 	// 都走这里；翻页走 GotoImage，在那里另行清理。
-	if (m_pOcrController) m_pOcrController->Reset();
+	ResetOcrResult();
 	// recreate file list based on image opened
 	Helpers::ESorting eOldSorting = m_pFileList->GetSorting();
 	bool oOldAscending = m_pFileList->IsSortedAscending();
@@ -2571,7 +2579,7 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	// 换图（翻页/切换/重载）时清掉上一张图的识别结果，否则旧图的词框和文字
 	// 会叠在新图上，Ctrl+C 还会复制到上一张图的内容。翻页走这里，打开文件走
 	// OpenFile，两条收口都清理才算覆盖全部换图路径。
-	if (m_pOcrController) m_pOcrController->Reset();
+	ResetOcrResult();
 
 	if (ePos != POS_Current && ePos != POS_NextAnimation && ePos != POS_Clipboard && ePos != POS_AwayFromCurrent) {
 		MouseOff();

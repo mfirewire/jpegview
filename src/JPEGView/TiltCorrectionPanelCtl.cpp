@@ -97,6 +97,7 @@ void CTiltCorrectionPanelCtl::ApplyTransformation() {
 		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("The operation failed because not enough memory is available!")),
 			_T("JPEGView"), MB_ICONSTOP | MB_OK);
 	}
+	m_pMainDlg->ResetOcrResult();
 }
 
 void CTiltCorrectionPanelCtl::Reset() {
