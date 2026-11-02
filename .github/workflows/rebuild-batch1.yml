@@ -1,0 +1,83 @@
+name: Rebuild zlib + lcms2
+
+# 批次 1：两个零依赖的库
+#  - zlib 1.3 -> 1.3.2（静态库，被 libpng 使用，所以顺带重编 libpng16.lib）
+#  - lcms2 2.15 -> 2.20（DLL + 导入库 + 头文件）
+# 产物直接提交回分支，随后的常规构建会验证能否链接。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-batch1.yml'
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Pin zlib to v1.3.2
+        shell: bash
+        run: |
+          cd extras/third_party/libpng-apng.src-patch/zlib
+          git fetch --depth 1 origin refs/tags/v1.3.2:refs/tags/v1.3.2
+          git checkout -q v1.3.2
+          grep -m1 'define ZLIB_VERSION' zlib.h
+
+      - name: Pin Little-CMS to lcms2.20
+        shell: bash
+        run: |
+          cd extras/third_party/Little-CMS
+          git fetch --depth 1 origin refs/tags/lcms2.20:refs/tags/lcms2.20
+          git checkout -q lcms2.20
+          grep -m1 'define LCMS_VERSION' include/lcms2.h
+
+      - name: Build zlib + libpng (both architectures)
+        shell: cmd
+        run: extras\scripts\build-libpng-apng.bat
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Build and install lcms2 DLL (x64 + Win32)
+        shell: pwsh
+        run: |
+          $root = "extras/third_party/Little-CMS"
+          $proj = "$root/Projects/VC2022/lcms2_DLL/lcms2_DLL.vcxproj"
+          if (-not (Test-Path $proj)) { Write-Output "::error::lcms2 project not found"; exit 1 }
+          # 两个架构都输出到同一个 bin\，所以要编完一个立刻收走再编下一个
+          $outBin = "$root/bin"
+          foreach ($p in @("x64", "Win32")) {
+            msbuild $proj /p:Configuration=Release /p:Platform=$p /m /v:minimal
+            if ($LASTEXITCODE -ne 0) { Write-Output "::error::lcms2 build failed for $p"; exit 1 }
+            if (-not (Test-Path "$outBin/lcms2.dll")) { Write-Output "::error::lcms2.dll missing after $p build"; exit 1 }
+            $libDir = if ($p -eq "x64") { "lib64" } else { "lib" }
+            $binDir = if ($p -eq "x64") { "bin64" } else { "bin" }
+            Copy-Item "$outBin/lcms2.dll" "src/JPEGView/lcms2/$binDir/lcms2.dll" -Force
+            Copy-Item "$outBin/lcms2.lib" "src/JPEGView/lcms2/$libDir/lcms2.lib" -Force
+            Write-Output ("{0} -> {1} / {2} : {3} bytes" -f $p, $binDir, $libDir, (Get-Item "$outBin/lcms2.dll").Length)
+          }
+          Copy-Item "$root/include/lcms2.h" "src/JPEGView/lcms2/include/lcms2.h" -Force
+          Copy-Item "$root/include/lcms2_plugin.h" "src/JPEGView/lcms2/include/lcms2_plugin.h" -Force
+          Write-Output "--- installed ---"
+          Get-ChildItem src/JPEGView/lcms2 -Recurse -Include lcms2.dll, lcms2.lib, lcms2.h |
+            ForEach-Object { Write-Output ("  " + $_.FullName.Replace("$PWD\", "") + "  " + $_.Length) }
+          Select-String -Path "src/JPEGView/lcms2/include/lcms2.h" -Pattern "define LCMS_VERSION" | ForEach-Object { Write-Output $_.Line }
+
+      - name: Commit rebuilt binaries
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add -A src/JPEGView/lcms2 src/JPEGView/libpng-apng extras/third_party/Little-CMS extras/third_party/libpng-apng.src-patch/zlib
+          if git diff --cached --quiet; then
+            echo "没有变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "build(deps): zlib 1.3.2 + lcms2 2.20 rebuilt in CI"
+          git push
