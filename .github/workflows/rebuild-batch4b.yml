@@ -12,11 +12,9 @@ name: Rebuild batch 4b (libjxl 0.12.0)
 # 纯解码）。
 
 on:
+  # Done. Manual-only so editing build-libjxl.bat later does not rebuild and
+  # recommit the same binaries.
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/rebuild-batch4b.yml'
-      - 'extras/scripts/build-libjxl.bat'
 
 permissions:
   contents: write
