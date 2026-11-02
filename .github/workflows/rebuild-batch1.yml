@@ -4,6 +4,12 @@ name: Rebuild zlib + lcms2
 #  - zlib 1.3 -> 1.3.2（静态库，被 libpng 使用，所以顺带重编 libpng16.lib）
 #  - lcms2 2.15 -> 2.20（DLL + 导入库 + 头文件）
 # 产物直接提交回分支，随后的常规构建会验证能否链接。
+#
+# 升级顺序（由依赖关系决定）：
+#   1  zlib、lcms2                     ← 本工作流
+#   2  dav1d、libde265                 纯 DLL，无下游
+#   3  libpng（吃 zlib）→ libavif（吃 dav1d）→ libheif（吃 de265+avif+dav1d）
+#   4  libjpeg-turbo 3.x、libjxl 0.12   要改代码，风险最高
 
 on:
   workflow_dispatch:
