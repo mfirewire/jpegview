@@ -119,6 +119,13 @@ jobs:
       with:
         name: jpegview-x64-${{ env.short_sha }}
         path: release-artifacts/x64
+    # WICLoader's .pdb is ~4.7 MB and the .exp/.lib are build by-products; the
+    # regular Build workflows strip them, so keep the release zip the same size.
+    - name: Remove WICLoader debug files
+      shell: bash
+      run: |
+        rm -f release-artifacts/win32/WICLoader.exp release-artifacts/win32/WICLoader.lib release-artifacts/win32/WICLoader.pdb
+        rm -f release-artifacts/x64/WICLoader.exp release-artifacts/x64/WICLoader.lib release-artifacts/x64/WICLoader.pdb
     # Win32 and x64 binaries share the same file names, so they cannot be uploaded
     # flat into one release (the second would overwrite the first and then fail).
     # Zip each architecture under a distinct name instead.
