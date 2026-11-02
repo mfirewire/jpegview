@@ -9,6 +9,13 @@ name: Rebuild batch 3 (libpng, libavif, libheif)
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-batch3.yml'
+      - 'extras/scripts/build-libpng-apng.bat'
+      - 'extras/scripts/build-libheif_libavif.bat'
+      - 'extras/third_party/libpng-apng.src-patch/**'
+      - 'extras/third_party/libheif-1.23.7-src/**'
 
 permissions:
   contents: write
