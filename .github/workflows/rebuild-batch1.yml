@@ -39,7 +39,22 @@ jobs:
 
       - name: Build zlib + libpng (both architectures)
         shell: cmd
-        run: extras\scripts\build-libpng-apng.bat
+        run: |
+          call extras\scripts\build-libpng-apng.bat > build_libpng.log 2>&1
+          if errorlevel 1 exit /b 1
+
+      - name: Surface libpng build log
+        if: failure()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build_libpng.log)) {
+            Write-Output "::error::build_libpng.log not found - the batch file never ran"
+            exit 0
+          }
+          $lines = Get-Content build_libpng.log
+          $errs = @($lines | Where-Object { $_ -match '(?i)error|fatal|cannot open|not found|failed|MSB\d|LNK\d|C\d{4}' } | Select-Object -Last 15)
+          if ($errs.Count -eq 0) { $errs = @($lines | Select-Object -Last 15) }
+          $errs | ForEach-Object { Write-Output "::error::$_" }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v3
@@ -53,7 +68,7 @@ jobs:
           # 两个架构都输出到同一个 bin\，所以要编完一个立刻收走再编下一个
           $outBin = "$root/bin"
           foreach ($p in @("x64", "Win32")) {
-            msbuild $proj /p:Configuration=Release /p:Platform=$p /m /v:minimal
+            msbuild $proj /p:Configuration=Release /p:Platform=$p /m /v:minimal *>&1 | Tee-Object -FilePath "lcms2_$p.log"
             if ($LASTEXITCODE -ne 0) { Write-Output "::error::lcms2 build failed for $p"; exit 1 }
             if (-not (Test-Path "$outBin/lcms2.dll")) { Write-Output "::error::lcms2.dll missing after $p build"; exit 1 }
             $libDir = if ($p -eq "x64") { "lib64" } else { "lib" }
