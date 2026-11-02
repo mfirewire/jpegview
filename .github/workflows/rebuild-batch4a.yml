@@ -10,11 +10,9 @@ name: Rebuild batch 4a (libjpeg-turbo 3.2.1)
 # 生成的那一份。
 
 on:
+  # Done. Manual-only so editing build-libjpegturbo.bat later does not rebuild
+  # and recommit the same library.
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/rebuild-batch4a.yml'
-      - 'extras/scripts/build-libjpegturbo.bat'
 
 permissions:
   contents: write
