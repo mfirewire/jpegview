@@ -815,15 +815,37 @@ CFileList* CFileList::TryCreateFileList(const CString& directory, int nNewLevel)
 void CFileList::FindFiles() {
 	m_fileList.clear();
 	if (!m_sDirectory.IsEmpty()) {
-		CFindFile fileFind;
+		// One pass over the directory, matching the ending in memory. The old loop
+		// asked the file system once per ending - and there are up to 48 of them
+		// once the RAW and WIC lists from the ini are added - so every folder was
+		// walked that many times. On a local disk that is a fraction of a second,
+		// on a network share it is the difference between a moment and seconds.
+		// Note that the ending is compared exactly: FindFirstFile("*.tif") also
+		// returns .tiff files through their 8.3 short name, which the old
+		// expectedExtension check had to throw away again.
 		LPCTSTR* allFileEndings = GetSupportedFileEndingList();
-		for (int i = 0; i < nNumEndings; i++) {
-			if (fileFind.FindFile(m_sDirectory + _T("\\*.") + allFileEndings[i])) {
-				AddToFileList(m_fileList, fileFind, allFileEndings[i]);
-				while (fileFind.FindNextFile()) {
-					AddToFileList(m_fileList, fileFind, allFileEndings[i]);
+		CFindFile fileFind;
+		if (fileFind.FindFile(m_sDirectory + _T("\\*"))) {
+			do {
+				if (fileFind.IsDirectory()) {
+					continue;
 				}
-			}
+				// Held in a CString: GetFileName returns LPCTSTR in WTL, but taking a
+				// copy keeps this correct whatever the wrapper hands back.
+				CString sFileName = fileFind.GetFileName();
+				LPCTSTR sLastDot = _tcsrchr((LPCTSTR) sFileName, _T('.'));
+				if (sLastDot == NULL || sLastDot == (LPCTSTR) sFileName || sLastDot[1] == 0) {
+					continue; // no ending, or a name like ".gitignore" or "trailing."
+				}
+				LPCTSTR sEnding = sLastDot + 1;
+				bool bSupported = false;
+				for (int i = 0; i < nNumEndings && !bSupported; i++) {
+					bSupported = (_tcsicmp(sEnding, allFileEndings[i]) == 0);
+				}
+				if (bSupported) {
+					AddToFileList(m_fileList, fileFind, NULL);
+				}
+			} while (fileFind.FindNextFile());
 		}
 	}
 
