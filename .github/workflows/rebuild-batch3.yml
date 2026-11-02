@@ -101,11 +101,13 @@ jobs:
         run: |
           # The job log API answers 403 for this repo, so the only way to see why
           # a step died is to re-emit the interesting lines as annotations.
+          # Match real diagnostics only: "pngerror.c" and "W3 /WX-" both contain
+          # the word error and drowned the actual message last time.
           if (Test-Path build_libpng.log) {
             $lines = @(Get-Content build_libpng.log)
-            $bad = $lines | Where-Object { $_ -match 'error|Error|ERROR|failed|FAILED|MSB\d+|C\d{4}|LNK\d{4}' }
-            if ($bad.Count -eq 0) { $bad = $lines | Select-Object -Last 40 }
-            $bad | Select-Object -First 40 | ForEach-Object { Write-Output "::error::$_" }
+            $bad = $lines | Where-Object { $_ -match ':\s+(fatal\s+)?error\s+[A-Z]*\d+|error LNK\d+|error MSB\d+|^\s*error ' }
+            if ($bad.Count -eq 0) { $bad = @("no explicit error line; last 20 lines follow") + ($lines | Select-Object -Last 20) }
+            $bad | Select-Object -First 30 | ForEach-Object { Write-Output "::error::$_" }
           } else {
             Write-Output "::error::build_libpng.log not found - the batch file never ran"
           }
