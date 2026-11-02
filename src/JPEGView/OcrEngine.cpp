@@ -245,6 +245,11 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
 
         SoftwareBitmap bitmap = SoftwareBitmap::CreateCopyFromBuffer(planeBuffer, BitmapPixelFormat::Gray8, workWidth, workHeight);
 
+        // 快照可能被放大（小图）或缩小，OCR 的坐标是快照空间的，必须换算回原图
+        // 空间，否则高亮框会整体放大或偏移，和文字对不上。
+        const float toImageX = float(image.imageWidth) / float(workWidth);
+        const float toImageY = float(image.imageHeight) / float(workHeight);
+
         std::wstring honoredName, honoredTag;
         int attempts = 0;
         for (const auto& tag : candidates) {
@@ -274,8 +279,8 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
                     // OcrWord 的包围盒属性名是 BoundingRect（Windows.Foundation.Rect），不是 BoundingBox。
                     auto rect = word.BoundingRect();
                     // std::array 是聚合类型，不能从 braced-init-list 直接赋值，逐元素写。
-                    const float x0 = rect.X, y0 = rect.Y;
-                    const float x1 = rect.X + rect.Width, y1 = rect.Y + rect.Height;
+                    const float x0 = rect.X * toImageX, y0 = rect.Y * toImageY;
+                    const float x1 = (rect.X + rect.Width) * toImageX, y1 = (rect.Y + rect.Height) * toImageY;
                     w.corners[0] = {x0, y0};
                     w.corners[1] = {x1, y0};
                     w.corners[2] = {x1, y1};
