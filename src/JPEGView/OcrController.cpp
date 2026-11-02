@@ -56,7 +56,11 @@ void COcrController::Toggle(CMainDlg& main) {
     }
     if (m_job) {
         std::lock_guard lock(m_job->mutex);
-        if (!m_job->done) return; // one bounded job; repeated clicks never queue work
+        // A canceled job (the previous image was switched away) must not block a
+        // new recognition: it has already been told to stop, and its result will
+        // be discarded, so starting the next one is safe and keeps the key from
+        // silently doing nothing after a fast image change.
+        if (!m_job->done && !m_job->canceled.load()) return; // one bounded job; repeated clicks never queue work
     }
     auto image = main.GetCurrentImage();
     if (!image) return;
