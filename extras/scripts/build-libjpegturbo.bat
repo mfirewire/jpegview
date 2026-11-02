@@ -62,6 +62,13 @@ mkdir "%XBUILD_DIR%" 2>nul
 
 call "%~dp0vs-init.bat" %1
 
+REM libspng is still built in-tree and its CMakeLists only sets up include paths
+REM in the NOT WITH_SYSTEM_ZLIB branch, so with the system zlib it compiles
+REM without any zlib.h on the search path (C1083). Putting the directory in
+REM INCLUDE lets cl.exe find it without fighting cmd quoting inside
+REM -DCMAKE_C_FLAGS.
+SET INCLUDE=%XZLIB_INC%;%INCLUDE%
+
 pushd "%XBUILD_DIR%"
 REM Only the static TurboJPEG library is linked into JPEGView, so skip the DLL
 REM to halve the build time. WITH_CRT_DLL=OFF keeps the static CRT (/MT) that
@@ -71,7 +78,7 @@ REM WITH_SYSTEM_ZLIB=ON stops the in-tree zlib objects from being compiled into
 REM turbojpeg-static.lib, which is what causes the z_errmsg clash. libspng stays
 REM in-tree (it has no conflict - nothing else links spng) and resolves zlib
 REM through the paths passed below.
-cmake.exe -G"NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_CRT_DLL=OFF -DWITH_SYSTEM_ZLIB=ON -DZLIB_LIBRARY="%XZLIB_LIB%" -DZLIB_INCLUDE_DIR="%XZLIB_INC%" "%XLIB_DIR%"
+cmake.exe -G"NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_CRT_DLL=OFF -DWITH_SYSTEM_ZLIB=ON -DZLIB_LIBRARY="%XZLIB_LIB%" -DZLIB_LIBRARY_RELEASE="%XZLIB_LIB%" -DZLIB_LIBRARY_DEBUG="%XZLIB_LIB%" -DZLIB_INCLUDE_DIR="%XZLIB_INC%" "%XLIB_DIR%"
 IF ERRORLEVEL 1 exit /b 1
 nmake.exe
 IF ERRORLEVEL 1 exit /b 1
