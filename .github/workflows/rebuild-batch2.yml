@@ -8,6 +8,9 @@ name: Rebuild dav1d + libde265
 on:
   workflow_dispatch:
   push:
+    branches:
+      - 'feature/*'
+      - 'master'
     paths:
       - '.github/workflows/rebuild-batch2.yml'
 

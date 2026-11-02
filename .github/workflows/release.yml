@@ -49,8 +49,8 @@ jobs:
       with:
         name: jpegview-win32-${{ env.short_sha }}
         path: |
-          src/JPEGView/bin/Win32/Release/*.exe
-          src/JPEGView/bin/Win32/Release/*.dll
+          src/JPEGView/bin/x86/Release/*.exe
+          src/JPEGView/bin/x86/Release/*.dll
 
   build-x64:
     name: Build x64 Release

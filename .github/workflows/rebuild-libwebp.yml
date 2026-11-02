@@ -9,6 +9,9 @@ name: Rebuild libwebp
 on:
   workflow_dispatch:
   push:
+    branches:
+      - 'feature/*'
+      - 'master'
     paths:
       - '.github/workflows/rebuild-libwebp.yml'
       - 'extras/third_party/libwebp-1.6.0-src/**'
