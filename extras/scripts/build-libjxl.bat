@@ -53,9 +53,24 @@ call "%~dp0vs-init.bat" %XBUILD_ARCH%
 
 pushd "%XBUILD_DIR%"
 
-cmake.exe -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -A %XPLATFORM% "%XLIB_DIR%"
+REM jxl_dec is only the decode-only library; JPEGView links jxl (decode+encode,
+REM which is what JXLWrapper writes files with) plus jxl_threads. Building
+REM "jxl" also pulls in jxl_cms and the bundled highway/brotli.
+REM
+REM Everything else is switched off explicitly: the defaults turn on tools,
+REM examples, benchmarks, doxygen, man pages, JNI, sjpeg and OpenEXR, none of
+REM which we ship, and each one drags in extra configure-time probes and build
+REM time. Viewers/plugins stay off so the bundled lcms submodule is not needed.
+cmake.exe -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -A %XPLATFORM% ^
+  -DJPEGXL_ENABLE_TOOLS=OFF -DJPEGXL_ENABLE_DEVTOOLS=OFF ^
+  -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF ^
+  -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF ^
+  -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF ^
+  -DJPEGXL_ENABLE_OPENEXR=OFF -DJPEGXL_ENABLE_VIEWERS=OFF ^
+  -DJPEGXL_ENABLE_PLUGINS=OFF ^
+  "%XLIB_DIR%"
 IF ERRORLEVEL 1 exit /b 1
-msbuild.exe /p:Platform=%XPLATFORM% /p:configuration="Release" LIBJXL.sln /t:jxl_dec /t:jxl_threads
+msbuild.exe /p:Platform=%XPLATFORM% /p:configuration="Release" LIBJXL.sln /t:jxl /t:jxl_threads
 IF ERRORLEVEL 1 exit /b 1
 
 popd

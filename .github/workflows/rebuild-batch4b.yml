@@ -1,0 +1,131 @@
+name: Rebuild batch 4b (libjxl 0.12.0)
+
+# 批次 4b：libjxl 0.10.3 -> 0.12.0
+#
+# 符号层面已逐个核对：JXLWrapper 用到的 49 个 Jxl* / 16 个 JXL_* 里，除项目
+# 自己的类名 JxlReader 外全部存在于 0.12 头文件，0.11/0.12 移除的是
+# Butteraugli、jpegli 和 GIMP 插件，都不是我们用到的。所以**不需要改
+# JXLWrapper.cpp**。
+#
+# 真正的工作量在构建：libjxl 的 highway / brotli / skcms 都在嵌套子模块里，
+# 仓库里是空的；0.12 的库结构也变了（jxl 才是解码+编码主库，jxl_dec 只剩
+# 纯解码）。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-batch4b.yml'
+      - 'extras/scripts/build-libjxl.bat'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Init libjxl 0.12.0 and its build deps
+        shell: bash
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          git submodule update --init extras/third_party/libjxl || fail "libjxl submodule update failed"
+          cd extras/third_party/libjxl || fail "libjxl dir missing"
+          if ! git checkout -q v0.12.0 2>/dev/null; then
+            git fetch --depth 1 origin refs/tags/v0.12.0:refs/tags/v0.12.0 || fail "cannot fetch v0.12.0"
+            git checkout -q v0.12.0 || fail "cannot checkout v0.12.0"
+          fi
+          git describe --tags
+          # highway / brotli / skcms are nested submodules; libjxl's
+          # third_party/CMakeLists.txt hard-fails without them.
+          git submodule update --init --depth 1 \
+            third_party/highway third_party/brotli third_party/skcms || fail "nested submodules failed"
+          for d in highway brotli skcms; do
+            n=$(ls third_party/$d 2>/dev/null | wc -l)
+            echo "third_party/$d -> $n entries"
+            [ "$n" -gt 0 ] || fail "third_party/$d is empty"
+          done
+          test -f lib/include/jxl/decode.h || fail "lib/include/jxl missing"
+
+      - name: Build libjxl
+        shell: cmd
+        run: |
+          call extras\scripts\build-libjxl.bat > build_libjxl.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_libjxl.log
+          exit /b %RC%
+
+      - name: Surface build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build_libjxl.log) {
+            $lines = @(Get-Content build_libjxl.log)
+            $bad = $lines | Where-Object { $_ -match ':\s+(fatal\s+)?error\s+[A-Z]*\d+|error LNK\d+|error MSB\d+|^\s*error |CMake Error' }
+            if ($bad.Count -eq 0) { $bad = @("no explicit error line; last 30 lines follow") + ($lines | Select-Object -Last 30) }
+            $bad | Select-Object -First 35 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_libjxl.log not found"
+          }
+
+      - name: Sync headers
+        shell: pwsh
+        run: |
+          # Same rule as every other library in this series: the .lib and the
+          # headers have to come from the same release.
+          $dst = "src/JPEGView/libjxl/include/jxl"
+          $src = "extras/third_party/libjxl/lib/include/jxl"
+          Remove-Item "$dst/*.h" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$src/*.h" $dst -Force
+          Write-Output ("public headers: " + (Get-ChildItem "$dst/*.h").Count)
+
+          # version.h and the *_export.h headers are generated per configuration.
+          foreach ($name in @("version.h","jxl_export.h","jxl_cms_export.h","jxl_threads_export.h")) {
+            $f = Get-ChildItem -Recurse "extras/scripts/libjxl/x64" -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($f) { Copy-Item $f.FullName "$dst/$name" -Force; Write-Output ("generated: $name from " + $f.DirectoryName) }
+            else { Write-Output "::warning::generated $name not found" }
+          }
+          (Select-String -Path "$dst/version.h" -Pattern 'JPEGXL_(MAJOR|MINOR|PATCH)_VERSION').Line
+
+      - name: Verify
+        shell: pwsh
+        run: |
+          $fail = 0
+          foreach ($f in @(
+            "src/JPEGView/libjxl/bin/jxl.dll","src/JPEGView/libjxl/bin64/jxl.dll",
+            "src/JPEGView/libjxl/bin64/jxl_threads.dll",
+            "src/JPEGView/libjxl/lib/jxl.lib","src/JPEGView/libjxl/lib64/jxl.lib",
+            "src/JPEGView/libjxl/lib64/jxl_threads.lib")) {
+            if (-not (Test-Path $f)) { Write-Output "::error::missing $f"; $fail = 1 }
+            else { Write-Output ("{0}  {1} bytes" -f $f, (Get-Item $f).Length) }
+          }
+          $v = (Select-String -Path "src/JPEGView/libjxl/include/jxl/version.h" -Pattern 'JPEGXL_MAJOR_VERSION\s+(\d+)').Matches[0].Groups[1].Value
+          $m = (Select-String -Path "src/JPEGView/libjxl/include/jxl/version.h" -Pattern 'JPEGXL_MINOR_VERSION\s+(\d+)').Matches[0].Groups[1].Value
+          $p = (Select-String -Path "src/JPEGView/libjxl/include/jxl/version.h" -Pattern 'JPEGXL_PATCH_VERSION\s+(\d+)').Matches[0].Groups[1].Value
+          Write-Output "header version: $v.$m.$p"
+          if ("$v.$m.$p" -ne "0.12.0") { Write-Output "::error::expected 0.12.0, got $v.$m.$p"; $fail = 1 }
+          if ($fail) { exit 1 }
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+          git commit \
+            -m "build(deps): libjxl 0.12.0" \
+            -m "Checked every symbol JXLWrapper references: 48 of 49 Jxl* names and all 16 JXL_* macros exist in 0.12 (the one miss, JxlReader, is the project's own class). 0.11/0.12 removed Butteraugli, jpegli and the GIMP plugin, none of which this code uses, so no application changes." \
+            -m "Build side: highway/brotli/skcms are nested submodules and the repo had them empty, so the workflow initialises those three only (not testdata). The build targets jxl rather than jxl_dec now - jxl_dec is decode-only and JXLWrapper writes files - and every optional component (tools, examples, benchmarks, doxygen, man pages, JNI, sjpeg, OpenEXR) is switched off explicitly." \
+            -m "Headers are synced as a whole directory again, plus the generated version.h and *_export.h."
+          git push || { git pull --rebase --autostash origin feature/improvements && git push; }
