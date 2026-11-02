@@ -125,7 +125,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref_name }}
-        name: Release ${{ github.ref_name }}
+        name: ${{ github.ref_name }} - All 11 third-party libraries upgraded. ICC color management for JPEG/PNG. OCR text recognition restored and hardened.
         draft: false
         prerelease: false
         files: |
