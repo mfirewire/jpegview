@@ -4,7 +4,6 @@
 #include "Helpers.h"
 #include "DirectoryWatcher.h"
 #include "Shlwapi.h"
-#include <algorithm>
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -16,7 +15,7 @@ bool CFileDesc::sm_bSortAscending = true;
 Helpers::ENavigationMode CFileList::sm_eMode = Helpers::NM_LoopDirectory;
 
 // Helper to add the current file of filefind object to the list
-static void AddToFileList(std::vector<CFileDesc> & fileList, CFindFile & fileFind, LPCTSTR expectedExtension) {
+static void AddToFileList(std::list<CFileDesc> & fileList, CFindFile & fileFind, LPCTSTR expectedExtension) {
 	if (!fileFind.IsDirectory()) {
 		if (expectedExtension != NULL) {
 			// compare if the extension is the expected extension
@@ -221,19 +220,19 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 		if (bImageFile || bIsDirectory) {
 			FindFiles();
 			m_iter = FindFile(sInitialFile);
-			m_iterStart = bWrapAroundFolder ? m_iter : 0;
+			m_iterStart = bWrapAroundFolder ? m_iter : m_fileList.begin();
 		} else {
 			// neither image file nor directory nor list of file names - try to read anyway but normally will fail
 			CFindFile fileFind;
 			if (fileFind.FindFile(sInitialFile)) {
 				AddToFileList(m_fileList, fileFind, NULL);
 			}
-			m_iter = m_iterStart = 0;
+			m_iter = m_iterStart = m_fileList.begin();
 		}
 	} else {
 		sm_eMode = Helpers::NM_LoopDirectory;
-		if (forceSorting) std::sort(m_fileList.begin(), m_fileList.end());
-		m_iter = m_iterStart = 0;
+		if (forceSorting) m_fileList.sort();
+		m_iter = m_iterStart = m_fileList.begin();
 	}
 }
 
@@ -281,10 +280,10 @@ void CFileList::Reload(LPCTSTR sFileName, bool clearForwardHistory) {
 
 	if (!m_bIsSlideShowList) {
 		FindFiles();
-		m_iterStart = m_bWrapAroundFolder ? FindFile(m_sInitialFile) : 0;
+		m_iterStart = m_bWrapAroundFolder ? FindFile(m_sInitialFile) : m_fileList.begin();
 	} else {
 		VerifyFiles(); // maybe some of the files got deleted or moved
-		m_iterStart = 0;
+		m_iterStart = m_fileList.begin();
 	}
 	m_iter = FindFile(sCurrentFile); // go again to current file
 }
@@ -339,21 +338,22 @@ void CFileList::FileHasRenamed(LPCTSTR sOldFileName, LPCTSTR sNewFileName) {
 	if (_tcsicmp(sOldFileName, m_sInitialFile) == 0) {
 		m_sInitialFile = sNewFileName;
 	}
-	for (CFileDesc& fd : m_fileList) {
-		if (_tcsicmp(sOldFileName, fd.GetName()) == 0) {
-			fd.SetName(sNewFileName);
+	std::list<CFileDesc>::iterator iter;
+	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
+		if (_tcsicmp(sOldFileName, iter->GetName()) == 0) {
+			iter->SetName(sNewFileName);
 		}
 	}
 }
 
 void CFileList::ModificationTimeChanged() {
-	if (m_iter < m_fileList.size()) {
-		LPCTSTR sName = m_fileList[m_iter].GetName();
+	if (m_iter != m_fileList.end()) {
+		LPCTSTR sName = m_iter->GetName();
 		HANDLE hFile = ::CreateFile(sName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 		if (hFile != NULL) {
 			FILETIME lastModTime;
 			if (::GetFileTime(hFile, NULL, NULL, &lastModTime)) {
-				m_fileList[m_iter].SetModificationDate(lastModTime);
+				m_iter->SetModificationDate(lastModTime);
 			}
 			::CloseHandle(hFile);
 		}
@@ -363,12 +363,12 @@ void CFileList::ModificationTimeChanged() {
 CFileList* CFileList::Next() {
 	m_nMarkedIndexShow = -1;
 	if (m_fileList.size() > 0) {
-		size_t iterTemp = m_iter;
-		if (iterTemp == m_fileList.size())
+		std::list<CFileDesc>::iterator iterTemp = m_iter;
+		if (iterTemp == m_fileList.end())
 			return this;
 		iterTemp++;
-		if (iterTemp == m_fileList.size()) {
-			iterTemp = 0;
+		if (iterTemp == m_fileList.end()) {
+			iterTemp = m_fileList.begin();
 		}
 		if (iterTemp == m_iterStart) {
 			// we are finished with this folder
@@ -407,7 +407,7 @@ CFileList* CFileList::Prev() {
 			if (!m_bWrapAroundFolder) {
 				return this;
 			}
-			if (m_iter == 0) {
+			if (m_iter == m_fileList.begin()) {
 				MoveIterToLast();
 			} else {
 				m_iter--;
@@ -418,8 +418,9 @@ CFileList* CFileList::Prev() {
 		}
 	}
 	if (m_fileList.size() > 0) {
-		if (m_iter == 0) {
-			m_iter = m_fileList.size() - 1;
+		if (m_iter == m_fileList.begin()) {
+			m_iter = m_fileList.end();
+			m_iter--;
 		} else {
 			m_iter--;
 		}
@@ -429,13 +430,13 @@ CFileList* CFileList::Prev() {
 
 void CFileList::First() {
 	m_nMarkedIndexShow = -1;
-	m_iter = m_iterStart = 0;
+	m_iter = m_iterStart = m_fileList.begin();
 }
 
 void CFileList::Last() {
 	m_nMarkedIndexShow = -1;
 	MoveIterToLast();
-	m_iterStart = 0;
+	m_iterStart = m_fileList.begin();
 }
 
 CFileList* CFileList::AwayFromCurrent() {
@@ -445,7 +446,7 @@ CFileList* CFileList::AwayFromCurrent() {
 		CFileList* pFileList = Prev();
 		if (Current() != NULL && sCurrentFile != NULL && _tcscmp(sCurrentFile, Current()) == 0) {
 			// not moved away, only one image
-			m_iter = m_fileList.size();
+			m_iter = m_fileList.end();
 		}
 		return pFileList;
 	} else {
@@ -454,8 +455,8 @@ CFileList* CFileList::AwayFromCurrent() {
 }
 
 LPCTSTR CFileList::Current() const {
-	if (m_iter < m_fileList.size()) {
-		return m_fileList[m_iter].GetName();
+	if (m_iter != m_fileList.end()) {
+		return m_iter->GetName();
 	} else {
 		return NULL;
 	}
@@ -481,15 +482,20 @@ LPCTSTR CFileList::CurrentDirectory() const {
 }
 
 int CFileList::CurrentIndex() const {
-	if (m_iter < m_fileList.size()) {
-		return (int)m_iter;
+	int i = 0;
+	std::list<CFileDesc>::const_iterator iter;
+	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
+		if (iter == m_iter) {
+			return i;
+		}
+		i++;
 	}
 	return -1;
 }
 
 const FILETIME* CFileList::CurrentModificationTime() const {
-	if (m_iter < m_fileList.size()) {
-		return &(m_fileList[m_iter].GetLastModTime());
+	if (m_iter != m_fileList.end()) {
+		return &(m_iter->GetLastModTime());
 	} else {
 		return NULL;
 	}
@@ -499,7 +505,7 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 	if (bToggle) {
 		return (m_nMarkedIndexShow == 0) ? m_sMarkedFile : m_sMarkedFileCurrent;
 	} else {
-		size_t thisIter = m_iter;
+		std::list<CFileDesc>::iterator thisIter = m_iter;
 		LPCTSTR sFileName;
 		if (nIndex != 0) {
 			CFileList* pFL = bForward ? Next() : Prev();
@@ -514,11 +520,11 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 
 void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
 	if (eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
-		CString sThisFile = (m_iter < m_fileList.size()) ? m_fileList[m_iter].GetName() : "";
+		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
 		CFileDesc::SetSorting(eSorting, sortAscending);
-		std::sort(m_fileList.begin(), m_fileList.end());
+		m_fileList.sort();
 		m_iter = FindFile(sThisFile);
-		m_iterStart = m_bWrapAroundFolder ? m_iter : 0;
+		m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
 	}
 }
 
@@ -538,7 +544,7 @@ void CFileList::SetNavigationMode(Helpers::ENavigationMode eMode) {
 	sm_eMode = eMode;
 	DeleteHistory();
 	m_nLevel = 0;
-	m_iterStart = m_bWrapAroundFolder ? m_iter : 0;
+	m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
 }
 
 void CFileList::MarkCurrentFile() {
@@ -617,22 +623,26 @@ void CFileList::DeleteHistory(bool onlyForward) {
 ///////////////////////////////////////////////////////////////////////////////////
 
 void CFileList::MoveIterToLast() {
-	if (!m_fileList.empty()) {
-		m_iter = m_fileList.size() - 1;
+	std::list<CFileDesc>::iterator lastIter = m_iter;
+	while (m_iter != m_fileList.end()) {
+		lastIter = m_iter;
+		m_iter++;
 	}
+	m_iter = lastIter;
 }
 
-size_t CFileList::FindFile(const CString& sName) {
+std::list<CFileDesc>::iterator CFileList::FindFile(const CString& sName) {
 	int nStart = sName.ReverseFind(_T('\\')) + 1;
 	if (nStart == sName.GetLength()) {
-		return 0;
+		return m_fileList.begin();
 	}
-	for (size_t i = 0; i < m_fileList.size(); i++) {
-		if (_tcsicmp((LPCTSTR)sName + nStart, m_fileList[i].GetTitle()) == 0) {
-			return i;
+	std::list<CFileDesc>::iterator iter;
+	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
+		if (_tcsicmp((LPCTSTR)sName + nStart, iter->GetTitle()) == 0) {
+			return iter;
 		}
 	}
-	return 0; // in case the file was not found
+	return m_fileList.begin(); // in case the file was not found
 }
 
 CFileList* CFileList::WrapToNextImage() {
@@ -758,8 +768,8 @@ CFileList* CFileList::WrapToPrevImage() {
 void CFileList::NextInFolder() {
 	if (m_fileList.size() > 0) {
 		m_iter++;
-		if (m_iter == m_fileList.size()) {
-			m_iter = 0;
+		if (m_iter == m_fileList.end()) {
+			m_iter = m_fileList.begin();
 		}
 	}
 }
@@ -839,15 +849,17 @@ void CFileList::FindFiles() {
 		}
 	}
 
-	std::sort(m_fileList.begin(), m_fileList.end());
+	m_fileList.sort();
 }
 
 void CFileList::VerifyFiles() {
-	for (size_t i = 0; i < m_fileList.size(); ) {
-		if (::GetFileAttributes(m_fileList[i].GetName()) == INVALID_FILE_ATTRIBUTES) {
-			m_fileList.erase(m_fileList.begin() + i);
-		} else {
-			++i;
+	std::list<CFileDesc>::iterator iter;
+	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
+		if (::GetFileAttributes(iter->GetName()) == INVALID_FILE_ATTRIBUTES) {
+			iter = m_fileList.erase(iter);
+			if (iter == m_fileList.end()) {
+				break;
+			}
 		}
 	}
 }
