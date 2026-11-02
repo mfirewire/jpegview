@@ -1,0 +1,192 @@
+name: Rebuild batch 3 (libpng, libavif, libheif)
+
+# 批次 3：三个互相依赖的库，按依赖顺序在同一个 job 里跑完
+#   libpng 1.6.59 + APNG（吃批次 1 的 zlib 1.3.2）
+#   libavif 1.4.2（吃批次 2 的 dav1d 1.5.4）
+#   libheif 1.23.7（吃批次 2 的 libde265 1.1.3）
+#
+# 全部成功后一次性提交，随后由一次普通推送触发常规构建来验证链接。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Init the sources this batch needs
+        shell: bash
+        run: |
+          set -e
+          git submodule update --init \
+            extras/third_party/libpng-apng.src-patch/libpng \
+            extras/third_party/libpng-apng.src-patch/zlib \
+            extras/third_party/libheif/dav1d \
+            extras/third_party/libheif/libde265 \
+            extras/third_party/libavif
+          echo "--- libpng ---"
+          cd extras/third_party/libpng-apng.src-patch/libpng
+          git fetch --depth 1 origin refs/tags/v1.6.59:refs/tags/v1.6.59
+          git checkout -q v1.6.59
+          grep -m1 'define PNG_LIBPNG_VER_STRING' png.h
+          echo "--- libavif ---"
+          cd ../../libavif
+          grep -h 'define AVIF_VERSION_MAJOR\|define AVIF_VERSION_MINOR\|define AVIF_VERSION_PATCH' include/avif/avif.h
+          echo "--- dav1d ---"
+          grep -m1 "version:" ../libheif/dav1d/meson.build
+          echo "--- libde265 ---"
+          grep -m1 'project(' ../libde265-1.1.3-src/CMakeLists.txt
+
+      - name: Install meson, ninja, nasm
+        shell: pwsh
+        run: |
+          python -m pip install --quiet --upgrade meson ninja
+          $nasmDir = "C:\Program Files\NASM"
+          if (-not (Test-Path "$nasmDir\nasm.exe")) {
+            choco install nasm -y --no-progress
+          }
+          if (-not (Test-Path "$nasmDir\nasm.exe")) { Write-Output "::error::nasm not found"; exit 1 }
+          $env:PATH = "$nasmDir;$env:PATH"
+          Write-Output $nasmDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          meson --version
+          ninja --version
+          nasm -v
+
+      # ---------------------------------------------------------------- libpng
+      - name: Build libpng 1.6.59 + APNG
+        shell: cmd
+        run: |
+          call extras\scripts\build-libpng-apng.bat > build_libpng.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_libpng.log
+          exit /b %RC%
+
+      - name: Sync libpng headers
+        shell: pwsh
+        run: |
+          # Same lesson as libwebp/LibRaw: the .lib alone is not an upgrade. The
+          # header declares the struct layouts the library was compiled against.
+          # These must come from the *patched* tree so the APNG defines travel
+          # with them (the APNG patch adds PNG_APNG_SUPPORTED to png.h itself).
+          $src = "extras/third_party/libpng-apng.src-patch/libpng"
+          $dst = "src/JPEGView/libpng-apng/include"
+          Copy-Item "$src/png.h"     $dst -Force
+          Copy-Item "$src/pngconf.h" $dst -Force
+          if (Test-Path "$src/pnglibconf.h") {
+            Copy-Item "$src/pnglibconf.h" $dst -Force
+            Write-Output "pnglibconf.h taken from the patched build tree"
+          } else {
+            Copy-Item "$src/scripts/pnglibconf.h.prebuilt" "$dst/pnglibconf.h" -Force
+            Write-Output "pnglibconf.h taken from scripts/pnglibconf.h.prebuilt"
+          }
+          (Select-String -Path "$dst/png.h" -Pattern 'define PNG_LIBPNG_VER_STRING').Line
+          if (-not (Select-String -Path "$dst/png.h" -Pattern 'define PNG_APNG_SUPPORTED' -Quiet)) {
+            Write-Output "::error::png.h lost PNG_APNG_SUPPORTED"; exit 1
+          }
+          Write-Output "APNG defines present: ok"
+
+      - name: Verify libpng
+        shell: pwsh
+        run: |
+          $h = "src/JPEGView/libpng-apng/include/png.h"
+          $ver = (Select-String -Path $h -Pattern 'define PNG_LIBPNG_VER_STRING "([^"]+)"').Matches[0].Groups[1].Value
+          Write-Output "header version: $ver"
+          if ($ver -notlike "1.6.59*") { Write-Output "::error::libpng header is $ver, expected 1.6.59"; exit 1 }
+          foreach ($f in @("src/JPEGView/libpng-apng/lib/libpng16.lib","src/JPEGView/libpng-apng/lib64/libpng16.lib")) {
+            if (-not (Test-Path $f)) { Write-Output "::error::missing $f"; exit 1 }
+            Write-Output ("{0}  {1} bytes" -f $f, (Get-Item $f).Length)
+          }
+
+      # ----------------------------------------------------- libavif + libheif
+      - name: Build libavif 1.4.2 + libheif 1.23.7
+        shell: cmd
+        run: |
+          call extras\scripts\build-libheif_libavif.bat > build_heif.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_heif.log
+          exit /b %RC%
+
+      - name: Sync their headers
+        shell: pwsh
+        run: |
+          # The batch script deliberately leaves headers alone (see its own note).
+          # Leaving them behind is what made the libwebp/LibRaw upgrades compile
+          # against 1.3.2/0.21.1 declarations while linking 1.6.0/0.22.3 code, so
+          # do it here: whole directories, no cherry-picking.
+          Write-Output "--- libheif headers ---"
+          $dst = "src/JPEGView/libheif/include/libheif"
+          Remove-Item "$dst/*.h" -Force -ErrorAction SilentlyContinue
+          Copy-Item "extras/third_party/libheif-1.23.7-src/libheif/api/libheif/*.h" $dst -Force
+          # heif_version.h / heif_export.h are generated by CMake, prefer those
+          Get-ChildItem -Recurse "extras/scripts/libheif_libavif" -Filter heif_version.h -ErrorAction SilentlyContinue |
+            Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName $dst -Force; Write-Output ("version header: " + $_.FullName) }
+          Get-ChildItem -Recurse "extras/scripts/libheif_libavif" -Filter heif_export.h -ErrorAction SilentlyContinue |
+            Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName $dst -Force }
+          (Select-String -Path "$dst/heif_version.h" -Pattern 'LIBHEIF_VERSION').Line
+
+          Write-Output "--- libavif headers ---"
+          $dst2 = "src/JPEGView/libavif/include/avif"
+          Remove-Item "$dst2/*.h" -Force -ErrorAction SilentlyContinue
+          Copy-Item "extras/third_party/libavif/include/avif/*.h" $dst2 -Force
+          (Select-String -Path "$dst2/avif.h" -Pattern 'define AVIF_VERSION_MAJOR').Line
+
+      - name: Verify libavif + libheif
+        shell: pwsh
+        run: |
+          $fail = 0
+          foreach ($f in @(
+            "src/JPEGView/libavif/bin/avif.dll","src/JPEGView/libavif/bin64/avif.dll",
+            "src/JPEGView/libavif/lib/avif.lib","src/JPEGView/libavif/lib64/avif.lib",
+            "src/JPEGView/libheif/bin/heif.dll","src/JPEGView/libheif/bin64/heif.dll",
+            "src/JPEGView/libheif/lib/heif.lib","src/JPEGView/libheif/lib64/heif.lib")) {
+            if (-not (Test-Path $f)) { Write-Output "::error::missing $f"; $fail = 1 }
+            else { Write-Output ("{0}  {1} bytes" -f $f, (Get-Item $f).Length) }
+          }
+          # avif.dll must actually reference dav1d, otherwise the AV1 decoder was
+          # silently disabled (AVIF_CODEC_DAV1D=ON is not a valid value in 1.4)
+          $bytes = [System.IO.File]::ReadAllBytes("src/JPEGView/libavif/bin64/avif.dll")
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch "dav1d\.dll") { Write-Output "::error::avif.dll does not import dav1d.dll - AV1 decoding was disabled at configure time"; $fail = 1 }
+          else { Write-Output "avif.dll imports dav1d.dll: ok" }
+          if ($fail) { exit 1 }
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nothing changed"
+            exit 0
+          fi
+          git commit -m "build(deps): libpng 1.6.59+apng, libavif 1.4.2, libheif 1.23.7
+
+          Third batch, in dependency order.
+
+          libpng 1.6.31 -> 1.6.59 with the matching APNG patch. The x64 vcxproj
+          patch had to be regenerated: upstream libpng dropped arm/filter_neon.c,
+          so one hunk of the 1.6.40-era patch no longer applied and patch exited
+          non-zero.
+
+          libavif 1.3.0 -> 1.4.2. Note the codec switches changed from ON/OFF to
+          OFF/LOCAL/SYSTEM - AVIF_CODEC_DAV1D=ON is now silently ignored and
+          produces an avif.dll without AV1 support, so the build uses SYSTEM plus
+          explicit DAV1D_LIBRARY/DAV1D_INCLUDE_DIR.
+
+          libheif 1.19.8 -> 1.23.7. Its CMake root is the source drop, not the
+          libheif/ subdirectory the old script pointed at, and 1.23 splits the API
+          into 29 headers that have to be copied as a set."
+          git push

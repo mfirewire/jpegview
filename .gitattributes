@@ -1,0 +1,5 @@
+# Unified diffs are consumed byte for byte by `patch`. With core.autocrlf=true a
+# checkout on Windows turns them into CRLF and the context lines stop matching,
+# which is exactly how the libpng build breaks for local developers while still
+# working on the CI runners.
+*.patch text eol=lf

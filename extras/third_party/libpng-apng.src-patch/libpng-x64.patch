@@ -1,7 +1,6 @@
-diff --git a/projects/vstudio/libpng/libpng.vcxproj b/projects/vstudio/libpng/libpng.vcxproj
-index e10f4ff8b..062abd07a 100644
---- a/projects/vstudio/libpng/libpng.vcxproj
-+++ b/projects/vstudio/libpng/libpng.vcxproj
+diff -ruN libpng-1.6.59/projects/vstudio/libpng/libpng.vcxproj lp-work/projects/vstudio/libpng/libpng.vcxproj
+--- a/projects/vstudio/libpng/libpng.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/libpng/libpng.vcxproj	2026-11-02 10:27:27.016907500 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -288,7 +287,7 @@ index e10f4ff8b..062abd07a 100644
 +  </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
      <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
+       <WarningLevel>Level3</WarningLevel>
 @@ -361,6 +518,38 @@
        <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
      </Lib>
@@ -328,58 +327,40 @@ index e10f4ff8b..062abd07a 100644
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">
      <ClCompile>
        <WarningLevel>Level3</WarningLevel>
-@@ -399,34 +588,50 @@
-       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
+@@ -402,6 +591,10 @@
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
 +      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
      </ClCompile>
      <ClCompile Include="..\..\..\arm\filter_neon_intrinsics.c">
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
-       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
+@@ -410,6 +603,10 @@
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
 +      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
      </ClCompile>
      <ClCompile Include="..\..\..\arm\palette_neon_intrinsics.c">
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
-       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
+@@ -418,6 +615,10 @@
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
 +      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
      </ClCompile>
      <ClCompile Include="..\..\..\png.c">
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">Create</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">Create</PrecompiledHeader>
-+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">Create</PrecompiledHeader>
-       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">Create</PrecompiledHeader>
-     </ClCompile>
-     <ClCompile Include="..\..\..\pngerror.c" />
-@@ -447,8 +652,10 @@
+@@ -447,8 +648,10 @@
    <ItemGroup>
      <ResourceCompile Include="..\..\..\scripts\pngwin.rc">
        <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">true</ExcludedFromBuild>
@@ -390,10 +371,66 @@ index e10f4ff8b..062abd07a 100644
        <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">true</ExcludedFromBuild>
      </ResourceCompile>
    </ItemGroup>
-diff --git a/projects/vstudio/pnglibconf/pnglibconf.vcxproj b/projects/vstudio/pnglibconf/pnglibconf.vcxproj
-index e0a3887a4..b16b41c67 100644
---- a/projects/vstudio/pnglibconf/pnglibconf.vcxproj
-+++ b/projects/vstudio/pnglibconf/pnglibconf.vcxproj
+diff -ruN libpng-1.6.59/projects/vstudio/libpng/libpng.vcxproj.rej lp-work/projects/vstudio/libpng/libpng.vcxproj.rej
+--- a/projects/vstudio/libpng/libpng.vcxproj.rej	1970-01-01 08:00:00.000000000 +0800
++++ b/projects/vstudio/libpng/libpng.vcxproj.rej	2026-11-02 10:26:50.123366300 +0800
+@@ -0,0 +1,53 @@
++--- projects/vstudio/libpng/libpng.vcxproj
+++++ projects/vstudio/libpng/libpng.vcxproj
++@@ -588,34 +777,50 @@
++       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
++     </ClCompile>
++     <ClCompile Include="..\..\..\arm\filter_neon_intrinsics.c">
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
++       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
++     </ClCompile>
++     <ClCompile Include="..\..\..\arm\palette_neon_intrinsics.c">
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
++       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
++     </ClCompile>
++     <ClCompile Include="..\..\..\png.c">
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">Create</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">Create</PrecompiledHeader>
+++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">Create</PrecompiledHeader>
++       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">Create</PrecompiledHeader>
++     </ClCompile>
++     <ClCompile Include="..\..\..\pngerror.c" />
+diff -ruN libpng-1.6.59/projects/vstudio/pnglibconf/pnglibconf.vcxproj lp-work/projects/vstudio/pnglibconf/pnglibconf.vcxproj
+--- a/projects/vstudio/pnglibconf/pnglibconf.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/pnglibconf/pnglibconf.vcxproj	2026-11-02 10:26:50.137025800 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Release</Configuration>
        <Platform>Win32</Platform>
@@ -439,16 +476,10 @@ index e0a3887a4..b16b41c67 100644
    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
      <CustomBuildBeforeTargets>Build</CustomBuildBeforeTargets>
    </PropertyGroup>
-@@ -71,6 +88,31 @@
-       <Inputs>..\..\..\scripts\pnglibconf.h.prebuilt</Inputs>
-     </CustomBuildStep>
-   </ItemDefinitionGroup>
-+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-+    <ClCompile>
-+      <WarningLevel>$(WarningLevel)</WarningLevel>
-+      <Optimization>MaxSpeed</Optimization>
-+      <FunctionLevelLinking>true</FunctionLevelLinking>
-+      <IntrinsicFunctions>true</IntrinsicFunctions>
+@@ -52,6 +69,31 @@
+       <Optimization>MaxSpeed</Optimization>
+       <FunctionLevelLinking>true</FunctionLevelLinking>
+       <IntrinsicFunctions>true</IntrinsicFunctions>
 +    </ClCompile>
 +    <Link>
 +      <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -468,13 +499,18 @@ index e0a3887a4..b16b41c67 100644
 +      <Inputs>..\..\..\scripts\pnglibconf.h.prebuilt</Inputs>
 +    </CustomBuildStep>
 +  </ItemDefinitionGroup>
-   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
-     <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
-diff --git a/projects/vstudio/pngstest/pngstest.vcxproj b/projects/vstudio/pngstest/pngstest.vcxproj
-index 3937cb41d..f87acb81f 100644
---- a/projects/vstudio/pngstest/pngstest.vcxproj
-+++ b/projects/vstudio/pngstest/pngstest.vcxproj
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
++    <ClCompile>
++      <WarningLevel>$(WarningLevel)</WarningLevel>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
+     </ClCompile>
+     <Link>
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+diff -ruN libpng-1.6.59/projects/vstudio/pngstest/pngstest.vcxproj lp-work/projects/vstudio/pngstest/pngstest.vcxproj
+--- a/projects/vstudio/pngstest/pngstest.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/pngstest/pngstest.vcxproj	2026-11-02 10:26:50.151041700 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -769,24 +805,11 @@ index 3937cb41d..f87acb81f 100644
 +  </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
      <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
-@@ -379,6 +544,42 @@
-       <Inputs>$(OutDir)pngstest.exe</Inputs>
-     </CustomBuildStep>
-   </ItemDefinitionGroup>
-+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
-+    <ClCompile>
-+      <WarningLevel>Level3</WarningLevel>
-+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-+      <Optimization>Full</Optimization>
-+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-+      <FunctionLevelLinking>false</FunctionLevelLinking>
-+      <IntrinsicFunctions>true</IntrinsicFunctions>
-+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-+      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
-+      <CompileAsManaged>false</CompileAsManaged>
+       <WarningLevel>Level3</WarningLevel>
+@@ -356,6 +521,42 @@
+       <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
+       <CompileAsManaged>false</CompileAsManaged>
 +      <TreatWarningAsError>false</TreatWarningAsError>
 +      <StringPooling>true</StringPooling>
 +      <MinimalRebuild>false</MinimalRebuild>
@@ -810,13 +833,25 @@ index 3937cb41d..f87acb81f 100644
 +      <Inputs>$(OutDir)pngstest.exe</Inputs>
 +    </CustomBuildStep>
 +  </ItemDefinitionGroup>
-   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">
-     <ClCompile>
-       <WarningLevel>Level3</WarningLevel>
-diff --git a/projects/vstudio/pngtest/pngtest.vcxproj b/projects/vstudio/pngtest/pngtest.vcxproj
-index 72beced2b..23bac5b26 100644
---- a/projects/vstudio/pngtest/pngtest.vcxproj
-+++ b/projects/vstudio/pngtest/pngtest.vcxproj
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
++    <ClCompile>
++      <WarningLevel>Level3</WarningLevel>
++      <PrecompiledHeader>NotUsing</PrecompiledHeader>
++      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
++      <Optimization>Full</Optimization>
++      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
++      <FunctionLevelLinking>false</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
++      <CompileAsManaged>false</CompileAsManaged>
+       <TreatWarningAsError>false</TreatWarningAsError>
+       <StringPooling>true</StringPooling>
+       <MinimalRebuild>false</MinimalRebuild>
+diff -ruN libpng-1.6.59/projects/vstudio/pngtest/pngtest.vcxproj lp-work/projects/vstudio/pngtest/pngtest.vcxproj
+--- a/projects/vstudio/pngtest/pngtest.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/pngtest/pngtest.vcxproj	2026-11-02 10:26:50.172783900 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -1111,24 +1146,11 @@ index 72beced2b..23bac5b26 100644
 +  </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
      <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
-@@ -380,6 +545,43 @@
-       <Inputs>..\..\..\pngtest.png;$(OutDir)pngtest.exe</Inputs>
-     </CustomBuildStep>
-   </ItemDefinitionGroup>
-+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
-+    <ClCompile>
-+      <WarningLevel>Level3</WarningLevel>
-+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-+      <Optimization>Full</Optimization>
-+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-+      <FunctionLevelLinking>false</FunctionLevelLinking>
-+      <IntrinsicFunctions>true</IntrinsicFunctions>
-+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-+      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
-+      <CompileAsManaged>false</CompileAsManaged>
+       <WarningLevel>Level3</WarningLevel>
+@@ -356,6 +521,43 @@
+       <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
+       <CompileAsManaged>false</CompileAsManaged>
 +      <TreatWarningAsError>false</TreatWarningAsError>
 +      <StringPooling>true</StringPooling>
 +      <MinimalRebuild>false</MinimalRebuild>
@@ -1153,13 +1175,25 @@ index 72beced2b..23bac5b26 100644
 +      <Inputs>..\..\..\pngtest.png;$(OutDir)pngtest.exe</Inputs>
 +    </CustomBuildStep>
 +  </ItemDefinitionGroup>
-   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">
-     <ClCompile>
-       <WarningLevel>Level3</WarningLevel>
-diff --git a/projects/vstudio/pngunknown/pngunknown.vcxproj b/projects/vstudio/pngunknown/pngunknown.vcxproj
-index f4d130d0b..f32f54535 100644
---- a/projects/vstudio/pngunknown/pngunknown.vcxproj
-+++ b/projects/vstudio/pngunknown/pngunknown.vcxproj
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
++    <ClCompile>
++      <WarningLevel>Level3</WarningLevel>
++      <PrecompiledHeader>NotUsing</PrecompiledHeader>
++      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
++      <Optimization>Full</Optimization>
++      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
++      <FunctionLevelLinking>false</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
++      <CompileAsManaged>false</CompileAsManaged>
+       <TreatWarningAsError>false</TreatWarningAsError>
+       <StringPooling>true</StringPooling>
+       <MinimalRebuild>false</MinimalRebuild>
+diff -ruN libpng-1.6.59/projects/vstudio/pngunknown/pngunknown.vcxproj lp-work/projects/vstudio/pngunknown/pngunknown.vcxproj
+--- a/projects/vstudio/pngunknown/pngunknown.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/pngunknown/pngunknown.vcxproj	2026-11-02 10:26:50.194920400 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -1454,24 +1488,11 @@ index f4d130d0b..f32f54535 100644
 +  </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
      <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
-@@ -379,6 +544,42 @@
-       <Inputs>$(OutDir)pngunknown.exe</Inputs>
-     </CustomBuildStep>
-   </ItemDefinitionGroup>
-+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
-+    <ClCompile>
-+      <WarningLevel>Level3</WarningLevel>
-+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-+      <Optimization>Full</Optimization>
-+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-+      <FunctionLevelLinking>false</FunctionLevelLinking>
-+      <IntrinsicFunctions>true</IntrinsicFunctions>
-+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-+      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
-+      <CompileAsManaged>false</CompileAsManaged>
+       <WarningLevel>Level3</WarningLevel>
+@@ -356,6 +521,42 @@
+       <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
+       <CompileAsManaged>false</CompileAsManaged>
 +      <TreatWarningAsError>false</TreatWarningAsError>
 +      <StringPooling>true</StringPooling>
 +      <MinimalRebuild>false</MinimalRebuild>
@@ -1495,13 +1516,25 @@ index f4d130d0b..f32f54535 100644
 +      <Inputs>$(OutDir)pngunknown.exe</Inputs>
 +    </CustomBuildStep>
 +  </ItemDefinitionGroup>
-   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">
-     <ClCompile>
-       <WarningLevel>Level3</WarningLevel>
-diff --git a/projects/vstudio/pngvalid/pngvalid.vcxproj b/projects/vstudio/pngvalid/pngvalid.vcxproj
-index 3726193bf..af330ed7f 100644
---- a/projects/vstudio/pngvalid/pngvalid.vcxproj
-+++ b/projects/vstudio/pngvalid/pngvalid.vcxproj
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
++    <ClCompile>
++      <WarningLevel>Level3</WarningLevel>
++      <PrecompiledHeader>NotUsing</PrecompiledHeader>
++      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
++      <Optimization>Full</Optimization>
++      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
++      <FunctionLevelLinking>false</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
++      <CompileAsManaged>false</CompileAsManaged>
+       <TreatWarningAsError>false</TreatWarningAsError>
+       <StringPooling>true</StringPooling>
+       <MinimalRebuild>false</MinimalRebuild>
+diff -ruN libpng-1.6.59/projects/vstudio/pngvalid/pngvalid.vcxproj lp-work/projects/vstudio/pngvalid/pngvalid.vcxproj
+--- a/projects/vstudio/pngvalid/pngvalid.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/pngvalid/pngvalid.vcxproj	2026-11-02 10:26:50.215637700 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -1796,24 +1829,11 @@ index 3726193bf..af330ed7f 100644
 +  </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
      <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
-@@ -379,6 +544,42 @@
-       <Inputs>$(OutDir)pngvalid.exe</Inputs>
-     </CustomBuildStep>
-   </ItemDefinitionGroup>
-+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
-+    <ClCompile>
-+      <WarningLevel>Level3</WarningLevel>
-+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-+      <Optimization>Full</Optimization>
-+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-+      <FunctionLevelLinking>false</FunctionLevelLinking>
-+      <IntrinsicFunctions>true</IntrinsicFunctions>
-+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-+      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
-+      <CompileAsManaged>false</CompileAsManaged>
+       <WarningLevel>Level3</WarningLevel>
+@@ -356,6 +521,42 @@
+       <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
+       <CompileAsManaged>false</CompileAsManaged>
 +      <TreatWarningAsError>false</TreatWarningAsError>
 +      <StringPooling>true</StringPooling>
 +      <MinimalRebuild>false</MinimalRebuild>
@@ -1837,14 +1857,26 @@ index 3726193bf..af330ed7f 100644
 +      <Inputs>$(OutDir)pngvalid.exe</Inputs>
 +    </CustomBuildStep>
 +  </ItemDefinitionGroup>
-   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">
-     <ClCompile>
-       <WarningLevel>Level3</WarningLevel>
-diff --git a/projects/vstudio/vstudio.sln b/projects/vstudio/vstudio.sln
-index 5fc1c292b..af13662ed 100644
---- a/projects/vstudio/vstudio.sln
-+++ b/projects/vstudio/vstudio.sln
-@@ -44,126 +44,186 @@ Global
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">
++    <ClCompile>
++      <WarningLevel>Level3</WarningLevel>
++      <PrecompiledHeader>NotUsing</PrecompiledHeader>
++      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
++      <Optimization>Full</Optimization>
++      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
++      <FunctionLevelLinking>false</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <AdditionalIncludeDirectories>$(ZLibSrcDir);..\..\..\scripts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++      <DisableSpecificWarnings>$(DisableSpecificWarnings)</DisableSpecificWarnings>
++      <CompileAsManaged>false</CompileAsManaged>
+       <TreatWarningAsError>false</TreatWarningAsError>
+       <StringPooling>true</StringPooling>
+       <MinimalRebuild>false</MinimalRebuild>
+diff -ruN libpng-1.6.59/projects/vstudio/vstudio.sln lp-work/projects/vstudio/vstudio.sln
+--- a/projects/vstudio/vstudio.sln	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/vstudio.sln	2026-11-02 10:26:50.235117900 +0800
+@@ -44,126 +44,186 @@
  	GlobalSection(SolutionConfigurationPlatforms) = preSolution
  		Debug Library|ARM64 = Debug Library|ARM64
  		Debug Library|Win32 = Debug Library|Win32
@@ -2031,10 +2063,9 @@ index 5fc1c292b..af13662ed 100644
  	EndGlobalSection
  	GlobalSection(SolutionProperties) = preSolution
  		HideSolutionNode = FALSE
-diff --git a/projects/vstudio/zlib/zlib.vcxproj b/projects/vstudio/zlib/zlib.vcxproj
-index 23e606517..bfbbe6834 100644
---- a/projects/vstudio/zlib/zlib.vcxproj
-+++ b/projects/vstudio/zlib/zlib.vcxproj
+diff -ruN libpng-1.6.59/projects/vstudio/zlib/zlib.vcxproj lp-work/projects/vstudio/zlib/zlib.vcxproj
+--- a/projects/vstudio/zlib/zlib.vcxproj	2026-09-29 04:58:10.000000000 +0800
++++ b/projects/vstudio/zlib/zlib.vcxproj	2026-11-02 10:26:50.251790400 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -2293,11 +2324,17 @@ index 23e606517..bfbbe6834 100644
 +  </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">
      <ClCompile>
-       <WarningLevel>Level3</WarningLevel>
-@@ -292,6 +411,30 @@
-       <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
-     </Lib>
-   </ItemDefinitionGroup>
+       <WarningLevel>$(WarningLevel)</WarningLevel>
+@@ -286,6 +405,30 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+       <SubSystem>Windows</SubSystem>
+       <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++    </Link>
++    <Lib>
++      <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
++    </Lib>
++  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
 +    <ClCompile>
 +      <WarningLevel>$(WarningLevel)</WarningLevel>
@@ -2316,12 +2353,6 @@ index 23e606517..bfbbe6834 100644
 +      <GenerateDebugInformation>true</GenerateDebugInformation>
 +      <SubSystem>Windows</SubSystem>
 +      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-+      <OptimizeReferences>true</OptimizeReferences>
-+    </Link>
-+    <Lib>
-+      <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
-+    </Lib>
-+  </ItemDefinitionGroup>
-   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
-     <ClCompile>
-       <WarningLevel>$(WarningLevel)</WarningLevel>
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+     <Lib>

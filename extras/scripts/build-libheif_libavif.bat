@@ -99,7 +99,8 @@ mkdir "%XDIST_DIR%" 2>nul
 
 call "%~dp0vs-init.bat" %1
 
-pushd "%XLIB_DIR%\dav1d"
+REM dav1d lives in its own submodule, not inside the libheif source drop
+pushd "%~dp0..\third_party\libheif\dav1d"
 
 REM or use --reconfigure flag
 REM rd /s /q "%XLIB_DIR%\dav1d\build" 2>nul
@@ -139,7 +140,7 @@ REM ============================================================================
 REM so the environments don't pollute each other
 setlocal
 
-SET XLIB_DIR=%XLIB_DIR%\libde265-1.1.3-src
+SET XLIB_DIR=%~dp0..\third_party\libde265-1.1.3-src
 
 SET XBUILD_DIR=%XOUT_DIR%\libde-%1
 
@@ -180,7 +181,7 @@ SET XARCH=%1
 SET XBUILD_DIR=%XOUT_DIR%\libheif-%XARCH%
 
 SET XDAV1D_DIST=%XOUT_DIR%\dav1d-%XARCH%\dist
-SET XDE265_DIR=%XLIB_DIR%\libde265
+SET XDE265_DIR=%~dp0..\third_party\libde265-1.1.3-src
 
 SET XDE265_BUILD=%XOUT_DIR%\libde-%1
 
@@ -193,7 +194,13 @@ IF ERRORLEVEL 1 exit /b 1
 
 pushd "%XBUILD_DIR%"
 
-cmake.exe -DCMAKE_BUILD_TYPE=Release -A %2 -DDAV1D_LIBRARY="%XDAV1D_DIST%\lib\dav1d.lib" -DDAV1D_INCLUDE_DIR="%XDAV1D_DIST%\include" -DLIBDE265_LIBRARY="%XDE265_BUILD%\libde265\Release\de265.lib" -DLIBDE265_INCLUDE_DIR="%XDE265_DIR%" "%XLIB_DIR%\libheif"
+REM The CMake project root is the libheif source drop itself; libheif/ is just a
+REM subdirectory, so pointing CMake at it fails on undefined parent variables.
+REM
+REM Only libde265 is needed: HEIC files are HEVC, so the HEVC decoder is what
+REM matters. Every encoder and the AOM/dav1d decoders are switched off so the
+REM configure step does not go looking for libraries that are not on the runner.
+cmake.exe -DCMAKE_BUILD_TYPE=Release -A %2 -DBUILD_SHARED_LIBS=ON -DWITH_LIBDE265=ON -DWITH_LIBDE265_PLUGIN=OFF -DLIBDE265_LIBRARY="%XDE265_BUILD%\libde265\Release\de265.lib" -DLIBDE265_INCLUDE_DIR="%XDE265_DIR%" -DWITH_X265=OFF -DWITH_X264=OFF -DWITH_OpenH264_DECODER=OFF -DWITH_AOM_DECODER=OFF -DWITH_AOM_ENCODER=OFF -DWITH_DAV1D=OFF -DWITH_LIBSHARPYUV=OFF -DWITH_GDK_PIXBUF=OFF -DWITH_EXAMPLE_HEIF_THUMB=OFF -DWITH_EXAMPLE_HEIF_VIEW=OFF "%XLIB_DIR%"
 IF ERRORLEVEL 1 exit /b 1
 msbuild.exe /p:Platform=%2 /p:configuration="Release" libheif.sln /t:heif
 IF ERRORLEVEL 1 exit /b 1
@@ -240,7 +247,13 @@ REM not sure if there's any diff using nmake vs ninja
 
 REM derived from https://github.com/AOMediaCodec/libavif/blob/main/.github/workflows/ci-windows.yml
 ::cmake.exe -G"NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DAVIF_CODEC_DAV1D=ON -DDAV1D_LIBRARY="%XDAV1D_DIST%\lib\dav1d.lib" -DDAV1D_INCLUDE_DIR="%XDAV1D_DIST%\include" "%XLIBAVIF_DIR%"
-cmake.exe -G Ninja -DCMAKE_BUILD_TYPE=Release -DAVIF_CODEC_DAV1D=ON -DDAV1D_LIBRARY="%XDAV1D_DIST%\lib\dav1d.lib" -DDAV1D_INCLUDE_DIR="%XDAV1D_DIST%\include" "%XLIBAVIF_DIR%"
+REM libavif 1.4 replaced the ON/OFF codec switches with OFF/LOCAL/SYSTEM.
+REM Passing =ON silently disables dav1d (the option is neither LOCAL nor SYSTEM,
+REM so AVIF_CODEC_DAV1D_ENABLED stays OFF) and you get an avif.dll that cannot
+REM decode AV1 - the build still succeeds, which makes it easy to miss.
+REM SYSTEM makes it use cmake/Modules/Finddav1d.cmake, which honours the
+REM DAV1D_LIBRARY / DAV1D_INCLUDE_DIR cache entries passed below.
+cmake.exe -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DAVIF_CODEC_DAV1D=SYSTEM -DDAV1D_LIBRARY="%XDAV1D_DIST%\lib\dav1d.lib" -DDAV1D_INCLUDE_DIR="%XDAV1D_DIST%\include" -DAVIF_ZLIBPNG=OFF -DAVIF_JPEG=OFF -DAVIF_LIBYUV=OFF -DAVIF_LIBSHARPYUV=OFF "%XLIBAVIF_DIR%"
 IF ERRORLEVEL 1 exit /b 1
 ::nmake.exe
 ninja.exe
