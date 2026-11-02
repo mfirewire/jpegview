@@ -5,6 +5,7 @@
 #include "JPEGImage.h"
 #include "HelpersGUI.h"
 #include "NLS.h"
+#include "SettingsProvider.h"
 #include <mutex>
 #include <thread>
 #include <cmath>
@@ -66,8 +67,10 @@ void COcrController::Toggle(CMainDlg& main) {
         m_job = job;
         m_result = {};
         m_anchor = m_end = -1;
-        std::thread([job, snapshot = std::move(snapshot)]() {
-            auto result = Ocr::Recognize(snapshot, job->canceled);
+        // 设置只在 UI 线程读一次，工作线程拿到的是一份纯字符串列表。
+        auto languages = Ocr::SplitLanguageList(std::wstring(CSettingsProvider::This().OcrLanguages()));
+        std::thread([job, snapshot = std::move(snapshot), languages = std::move(languages)]() {
+            auto result = Ocr::Recognize(snapshot, languages, job->canceled);
             std::lock_guard lock(job->mutex);
             job->result = std::move(result);
             job->done = true;
