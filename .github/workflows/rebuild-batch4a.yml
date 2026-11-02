@@ -1,0 +1,134 @@
+name: Rebuild batch 4a (libjpeg-turbo 3.2.1)
+
+# 批次 4a：libjpeg-turbo 2.1.91 -> 3.2.1
+#
+# 2.1.91 是 3.0 的 beta 标签，API 早就是 tj3 风格（38 个 tj3 函数），3.0 正式版
+# 只是把它定稿。所以这一项**不需要改应用层代码**，核对过源码引用的 12 个函数、
+# 22 个 TJ 宏、4 个 TJPARAM 在 3.2.1 头文件里全部存在。
+#
+# 真正的工作量在构建：3.x 只支持 CMake，源码挪进了 src/，jconfig.h 要取构建
+# 生成的那一份。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-batch4a.yml'
+      - 'extras/scripts/build-libjpegturbo.bat'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Init libjpeg-turbo at 3.2.1
+        shell: bash
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          git submodule update --init extras/third_party/libjpeg-turbo || fail "submodule update failed"
+          cd extras/third_party/libjpeg-turbo || fail "dir missing"
+          if ! git checkout -q 3.2.1 2>/dev/null; then
+            git fetch --depth 1 origin refs/tags/3.2.1:refs/tags/3.2.1 || fail "cannot fetch 3.2.1"
+            git checkout -q 3.2.1 || fail "cannot checkout 3.2.1"
+          fi
+          git describe --tags
+          grep -m1 'set(VERSION ' CMakeLists.txt || fail "version line missing"
+          # 3.x moved the public headers into src/
+          test -f src/turbojpeg.h || fail "src/turbojpeg.h missing - not a 3.x tree?"
+
+      - name: Install nasm
+        shell: pwsh
+        run: |
+          $nasmDir = "C:\Program Files\NASM"
+          if (-not (Test-Path "$nasmDir\nasm.exe")) { choco install nasm -y --no-progress }
+          if (-not (Test-Path "$nasmDir\nasm.exe")) { Write-Output "::error::nasm not found"; exit 1 }
+          $env:PATH = "$nasmDir;$env:PATH"
+          Write-Output $nasmDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          nasm -v
+
+      - name: Build libjpeg-turbo
+        shell: cmd
+        run: |
+          call extras\scripts\build-libjpegturbo.bat > build_jpegturbo.log 2>&1
+          set RC=%ERRORLEVEL%
+          type build_jpegturbo.log
+          exit /b %RC%
+
+      - name: Surface build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build_jpegturbo.log) {
+            $lines = @(Get-Content build_jpegturbo.log)
+            $bad = $lines | Where-Object { $_ -match ':\s+(fatal\s+)?error\s+[A-Z]*\d+|error LNK\d+|error MSB\d+|^\s*error |CMake Error' }
+            if ($bad.Count -eq 0) { $bad = @("no explicit error line; last 25 lines follow") + ($lines | Select-Object -Last 25) }
+            $bad | Select-Object -First 30 | ForEach-Object { Write-Output "::error::$_" }
+          } else {
+            Write-Output "::error::build_jpegturbo.log not found"
+          }
+
+      - name: Sync headers
+        shell: pwsh
+        run: |
+          # Public headers now live in src/; jconfig.h is generated per-architecture
+          # by CMake and differs between x86 and x64, so take the x64 one (the two
+          # only differ in SIMD/word-size settings that the app does not see).
+          $dst = "src/JPEGView/libjpeg-turbo/include"
+          $srcDir = "extras/third_party/libjpeg-turbo/src"
+          foreach ($h in @("jpeglib.h","jmorecfg.h","jerror.h","jpegint.h","turbojpeg.h")) {
+            if (-not (Test-Path "$srcDir/$h")) { Write-Output "::error::$h missing in $srcDir"; exit 1 }
+            Copy-Item "$srcDir/$h" $dst -Force
+          }
+          $jc = Get-ChildItem -Recurse "extras/scripts/libjpeg-turbo/x64" -Filter jconfig.h -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $jc) { Write-Output "::error::generated jconfig.h not found"; exit 1 }
+          Copy-Item $jc.FullName "$dst/jconfig.h" -Force
+          Write-Output ("jconfig.h from " + $jc.FullName)
+          (Select-String -Path "$dst/jconfig.h" -Pattern 'define LIBJPEG_TURBO_VERSION').Line
+
+      - name: Verify
+        shell: pwsh
+        run: |
+          $fail = 0
+          $ver = (Select-String -Path "src/JPEGView/libjpeg-turbo/include/jconfig.h" -Pattern 'define LIBJPEG_TURBO_VERSION\s+"?([0-9.]+)"?').Matches[0].Groups[1].Value
+          Write-Output "header version: $ver"
+          if ($ver -notlike "3.2.1*") { Write-Output "::error::expected 3.2.1, got $ver"; $fail = 1 }
+
+          foreach ($f in @("src/JPEGView/libjpeg-turbo/lib/turbojpeg-static.lib",
+                           "src/JPEGView/libjpeg-turbo/lib64/turbojpeg-static.lib")) {
+            if (-not (Test-Path $f)) { Write-Output "::error::missing $f"; $fail = 1 }
+            else { Write-Output ("{0}  {1} bytes" -f $f, (Get-Item $f).Length) }
+          }
+
+          # 3.2.x embeds zlib/libspng for the PNG paths. 3.2.1 claims the symbols
+          # are hidden; verify the static lib does not export a bare inflate that
+          # would collide with the zlib.lib JPEGView already links.
+          $bytes = [System.IO.File]::ReadAllBytes("src/JPEGView/libjpeg-turbo/lib64/turbojpeg-static.lib")
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          foreach ($sym in @("_inflate", "_deflate")) {
+            if ($text -match [regex]::Escape($sym)) { Write-Output "::warning::$sym appears in turbojpeg-static.lib - check for a zlib symbol clash" }
+          }
+          if ($fail) { exit 1 }
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "mfirewire"
+          git config user.email "mfirewire@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+          git commit \
+            -m "build(deps): libjpeg-turbo 3.2.1" \
+            -m "2.1.91 is the beta tag that became 3.0, so the TurboJPEG API in this tree is already the tj3 generation; every function, macro and TJPARAM the app uses exists unchanged in 3.2.1, so no application code changes." \
+            -m "Build side: 3.x is CMake-only and moved the public headers into src/, and jconfig.h has to come from the generated build tree rather than the repo. The script now builds static-only (the DLL was never shipped) with WITH_CRT_DLL=OFF so the static CRT keeps matching JPEGView's /MT."
+          git push || { git pull --rebase --autostash origin feature/improvements && git push; }

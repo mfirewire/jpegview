@@ -56,7 +56,11 @@ mkdir "%XBUILD_DIR%" 2>nul
 call "%~dp0vs-init.bat" %1
 
 pushd "%XBUILD_DIR%"
-cmake.exe -G"NMake Makefiles" -DCMAKE_BUILD_TYPE=Release "%XLIB_DIR%"
+REM Only the static TurboJPEG library is linked into JPEGView, so skip the DLL
+REM to halve the build time. WITH_CRT_DLL=OFF keeps the static CRT (/MT) that
+REM JPEGView itself uses; mixing /MT and /MD inside one process is the crash we
+REM already had to fix once for libpng.
+cmake.exe -G"NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_CRT_DLL=OFF "%XLIB_DIR%"
 IF ERRORLEVEL 1 exit /b 1
 nmake.exe
 IF ERRORLEVEL 1 exit /b 1
