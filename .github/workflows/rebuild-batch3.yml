@@ -8,14 +8,10 @@ name: Rebuild batch 3 (libpng, libavif, libheif)
 # 全部成功后一次性提交，随后由一次普通推送触发常规构建来验证链接。
 
 on:
+  # Batch 3 is done. Keep it manual so editing the build scripts later does not
+  # silently rebuild and recommit the same binaries; run it from the Actions tab
+  # when libpng/libavif/libheif actually need refreshing.
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/rebuild-batch3.yml'
-      - 'extras/scripts/build-libpng-apng.bat'
-      - 'extras/scripts/build-libheif_libavif.bat'
-      - 'extras/third_party/libpng-apng.src-patch/**'
-      - 'extras/third_party/libheif-1.23.7-src/**'
 
 permissions:
   contents: write
