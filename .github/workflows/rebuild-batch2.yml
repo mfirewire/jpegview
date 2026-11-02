@@ -48,12 +48,17 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --quiet --upgrade meson ninja
-          if (-not (Get-Command nasm.exe -ErrorAction SilentlyContinue)) {
+          $nasmDir = "C:\Program Files\NASM"
+          if (-not (Test-Path "$nasmDir\nasm.exe")) {
             choco install nasm -y --no-progress
-            $nasm = Get-ChildItem "C:\Program Files\NASM\nasm.exe" -ErrorAction SilentlyContinue
-            if (-not $nasm) { Write-Output "::error::nasm not found after install"; exit 1 }
-            Write-Output ("C:\Program Files\NASM") | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           }
+          if (-not (Test-Path "$nasmDir\nasm.exe")) {
+            Write-Output "::error::nasm.exe not found after install"
+            exit 1
+          }
+          # GITHUB_PATH 只对后续 step 生效，本 step 里要自己加到当前进程
+          $env:PATH = "$nasmDir;$env:PATH"
+          Write-Output $nasmDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           meson --version
           nasm -v
 
