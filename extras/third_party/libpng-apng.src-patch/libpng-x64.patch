@@ -1,6 +1,6 @@
 diff -ruN libpng-1.6.59/projects/vstudio/libpng/libpng.vcxproj lp-work/projects/vstudio/libpng/libpng.vcxproj
 --- a/projects/vstudio/libpng/libpng.vcxproj	2026-09-29 04:58:10.000000000 +0800
-+++ b/projects/vstudio/libpng/libpng.vcxproj	2026-11-02 10:27:27.016907500 +0800
++++ b/projects/vstudio/libpng/libpng.vcxproj	2026-11-02 11:00:21.261419300 +0800
 @@ -9,6 +9,10 @@
        <Configuration>Debug Library</Configuration>
        <Platform>Win32</Platform>
@@ -360,7 +360,18 @@ diff -ruN libpng-1.6.59/projects/vstudio/libpng/libpng.vcxproj lp-work/projects/
      </ClCompile>
      <ClCompile Include="..\..\..\png.c">
        <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-@@ -447,8 +648,10 @@
+@@ -428,6 +629,10 @@
+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">Create</PrecompiledHeader>
+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">Create</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">Create</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">Create</PrecompiledHeader>
+     </ClCompile>
+     <ClCompile Include="..\..\..\pngerror.c" />
+     <ClCompile Include="..\..\..\pngget.c" />
+@@ -447,8 +652,10 @@
    <ItemGroup>
      <ResourceCompile Include="..\..\..\scripts\pngwin.rc">
        <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">true</ExcludedFromBuild>
@@ -371,63 +382,6 @@ diff -ruN libpng-1.6.59/projects/vstudio/libpng/libpng.vcxproj lp-work/projects/
        <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">true</ExcludedFromBuild>
      </ResourceCompile>
    </ItemGroup>
-diff -ruN libpng-1.6.59/projects/vstudio/libpng/libpng.vcxproj.rej lp-work/projects/vstudio/libpng/libpng.vcxproj.rej
---- a/projects/vstudio/libpng/libpng.vcxproj.rej	1970-01-01 08:00:00.000000000 +0800
-+++ b/projects/vstudio/libpng/libpng.vcxproj.rej	2026-11-02 10:26:50.123366300 +0800
-@@ -0,0 +1,53 @@
-+--- projects/vstudio/libpng/libpng.vcxproj
-++++ projects/vstudio/libpng/libpng.vcxproj
-+@@ -588,34 +777,50 @@
-+       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
-+     </ClCompile>
-+     <ClCompile Include="..\..\..\arm\filter_neon_intrinsics.c">
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
-+       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
-+     </ClCompile>
-+     <ClCompile Include="..\..\..\arm\palette_neon_intrinsics.c">
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">NotUsing</PrecompiledHeader>
-+       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">WIN32;_DEBUG;PNG_ARM_NEON_OPT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
-+     </ClCompile>
-+     <ClCompile Include="..\..\..\png.c">
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|Win32'">Create</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|x64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug Library|ARM64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|Win32'">Create</PrecompiledHeader>
-++      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|x64'">Create</PrecompiledHeader>
-+       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release Library|ARM64'">Create</PrecompiledHeader>
-+     </ClCompile>
-+     <ClCompile Include="..\..\..\pngerror.c" />
 diff -ruN libpng-1.6.59/projects/vstudio/pnglibconf/pnglibconf.vcxproj lp-work/projects/vstudio/pnglibconf/pnglibconf.vcxproj
 --- a/projects/vstudio/pnglibconf/pnglibconf.vcxproj	2026-09-29 04:58:10.000000000 +0800
 +++ b/projects/vstudio/pnglibconf/pnglibconf.vcxproj	2026-11-02 10:26:50.137025800 +0800
