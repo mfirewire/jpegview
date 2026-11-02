@@ -7,6 +7,7 @@
 #include "FileList.h"
 #include "SettingsProvider.h"
 #include <math.h>
+#include <new>
 
 namespace Helpers {
 
@@ -408,6 +409,107 @@ void* FindEXIFBlock(void* pJPEGStream, int nStreamLength) {
 		return NULL;
 	}
 	return pEXIFBlock;
+}
+
+// A profile of this size is not something a camera or an editor produces; it is
+// a broken length field that would otherwise make us allocate a lot of memory.
+static const int MAX_ICC_PROFILE_SIZE = 16 * 1024 * 1024;
+
+void* ExtractICCProfile(void* pJPEGStream, int nStreamLength, unsigned int* pProfileSize) {
+	if (pProfileSize != NULL) {
+		*pProfileSize = 0;
+	}
+	uint8* pStream = (uint8*) pJPEGStream;
+	if (pStream == NULL || nStreamLength < 4 || pStream[0] != 0xFF || pStream[1] != 0xD8) {
+		return NULL;
+	}
+
+	// Each part of the profile sits in an APP2 segment: "ICC_PROFILE\0", one byte
+	// sequence number (1-based), one byte total count, then the profile bytes.
+	struct Chunk {
+		int nSequence;
+		const uint8* pData;
+		int nSize;
+	};
+	Chunk chunks[256];
+	int nChunks = 0;
+	int nExpectedCount = 0;
+	int nTotalSize = 0;
+
+	int nIndex = 2;
+	while (nIndex + 4 <= nStreamLength) {
+		if (pStream[nIndex] != 0xFF) {
+			break; // not a segment any more
+		}
+		while (nIndex < nStreamLength && pStream[nIndex] == 0xFF) {
+			nIndex++; // padding before the marker code
+		}
+		if (nIndex >= nStreamLength) {
+			break;
+		}
+		uint8 nMarker = pStream[nIndex];
+		if (nMarker == 0 || nMarker == 0xD9 || nMarker == 0xDA) {
+			break; // stuffed byte, end of image or start of scan: segments are over
+		}
+		nIndex++;
+		if (nIndex + 1 >= nStreamLength) {
+			break;
+		}
+		int nSegmentLength = (pStream[nIndex] << 8) | pStream[nIndex + 1];
+		if (nSegmentLength < 2 || nIndex + nSegmentLength > nStreamLength) {
+			break; // truncated file
+		}
+		// 2 bytes of length, 12 bytes of identifier, 2 bytes of sequence and count
+		if (nMarker == 0xE2 && nSegmentLength >= 16 && memcmp(pStream + nIndex + 2, "ICC_PROFILE\0", 12) == 0) {
+			int nSequence = pStream[nIndex + 14];
+			int nCount = pStream[nIndex + 15];
+			if (nSequence >= 1 && nCount >= 1 && nChunks < 256) {
+				chunks[nChunks].nSequence = nSequence;
+				chunks[nChunks].pData = pStream + nIndex + 16;
+				chunks[nChunks].nSize = nSegmentLength - 16;
+				nChunks++;
+				nExpectedCount = nCount;
+				nTotalSize += nSegmentLength - 16;
+			}
+		}
+		nIndex += nSegmentLength;
+	}
+
+	// All parts have to be there, otherwise the profile would be corrupted.
+	if (nChunks == 0 || nChunks != nExpectedCount || nTotalSize > MAX_ICC_PROFILE_SIZE) {
+		return NULL;
+	}
+
+	// Parts need not arrive in order; sort them by sequence number (insertion sort,
+	// at most a handful of entries).
+	for (int i = 1; i < nChunks; i++) {
+		Chunk key = chunks[i];
+		int j = i - 1;
+		while (j >= 0 && chunks[j].nSequence > key.nSequence) {
+			chunks[j + 1] = chunks[j];
+			j--;
+		}
+		chunks[j + 1] = key;
+	}
+
+	uint8* pProfile = new(std::nothrow) uint8[nTotalSize];
+	if (pProfile == NULL) {
+		return NULL;
+	}
+	int nOffset = 0;
+	for (int i = 0; i < nChunks; i++) {
+		if (chunks[i].nSequence != i + 1) {
+			delete[] pProfile;
+			return NULL; // a sequence number is missing
+		}
+		memcpy(pProfile + nOffset, chunks[i].pData, chunks[i].nSize);
+		nOffset += chunks[i].nSize;
+	}
+
+	if (pProfileSize != NULL) {
+		*pProfileSize = (unsigned int) nOffset;
+	}
+	return pProfile;
 }
 
 __int64 CalculateJPEGFileHash(void* pJPEGStream, int nStreamLength) {

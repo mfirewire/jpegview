@@ -2,6 +2,7 @@
 
 #include "ICCProfileTransform.h"
 #include "SettingsProvider.h"
+#include <string.h>
 
 
 #ifndef WINXP
@@ -139,6 +140,31 @@ void ICCProfileTransform::DeleteTransform(void* transform)
 		cmsDeleteTransform(transform);
 }
 
+bool ICCProfileTransform::IsNoTransformNeeded(const void* profile, unsigned int size)
+{
+	if (profile == NULL || size == 0)
+		return true;
+	cmsHPROFILE hProfile = cmsOpenProfileFromMem(profile, size);
+	if (hProfile == NULL)
+		return true; // unreadable profile: nothing to apply
+	bool bSkip;
+	if (cmsGetColorSpace(hProfile) != cmsSigRgbData) {
+		// A gray or CMYK profile, while every caller here hands over RGB pixels.
+		// lcms2 would refuse the transform, and refusing here is cheaper.
+		bSkip = true;
+	} else {
+		// sRGB profiles name themselves, and the names in the wild are
+		// "sRGB IEC61966-2.1" and its translations. Reading the colorant matrix
+		// would be exact, but it would also have to special-case every wider
+		// gamut profile that we do want to convert.
+		char text[128] = { 0 };
+		cmsGetProfileInfoASCII(hProfile, cmsInfoDescription, "en", "US", text, (cmsUInt32Number) sizeof(text) - 1);
+		bSkip = (strstr(text, "sRGB") != NULL) || (strstr(text, "srgb") != NULL);
+	}
+	cmsCloseProfile(hProfile);
+	return bSkip;
+}
+
 #else
 
 // stub out lcms2 methods in an elegant way in XP build, as per suggestion https://github.com/sylikc/jpegview/commit/4b62f07e2a147a04a5014a5711d159670162e799#commitcomment-102738193
@@ -152,5 +178,9 @@ bool ICCProfileTransform::DoTransform(void* /* transform */, const void* /* inpu
 }
 
 void ICCProfileTransform::DeleteTransform(void* /* transform */) { }
+
+bool ICCProfileTransform::IsNoTransformNeeded(const void* /* profile */, unsigned int /* size */) {
+	return true; // no lcms2 in the XP build, nothing to convert with
+}
 
 #endif

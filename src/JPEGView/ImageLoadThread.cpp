@@ -11,6 +11,7 @@
 #include "BasicProcessing.h"
 #include "dcraw_mod.h"
 #include "TJPEGWrapper.h"
+#include "ICCProfileTransform.h"
 #include "PNGWrapper.h"
 #ifndef WINXP
 #include "JXLWrapper.h"
@@ -477,6 +478,32 @@ void CImageLoadThread::DeleteCachedAvifDecoder() {
 #endif
 }
 
+// Applies the color profile embedded in a JPEG to the decoded pixels, in place.
+// TurboJPEG hands back BGR rows padded to four bytes, which is the layout lcms2
+// writes, so the conversion can happen in the same buffer. Nothing happens when
+// the file carries no profile, when the profile already is sRGB (what cameras
+// mostly write), or when it is not an RGB profile at all.
+static void ApplyEmbeddedICCProfile(void* pPixelData, int nWidth, int nHeight, int nChannels,
+                                    void* pJPEGStream, int nStreamLength) {
+	if (pPixelData == NULL || nChannels != 3 || !CSettingsProvider::This().UseEmbeddedColorProfiles()) {
+		return;
+	}
+	unsigned int nProfileSize = 0;
+	uint8* pProfile = (uint8*) Helpers::ExtractICCProfile(pJPEGStream, nStreamLength, &nProfileSize);
+	if (pProfile == NULL) {
+		return;
+	}
+	if (!ICCProfileTransform::IsNoTransformNeeded(pProfile, nProfileSize)) {
+		void* transform = ICCProfileTransform::CreateTransform(pProfile, nProfileSize, ICCProfileTransform::FORMAT_BGR);
+		if (transform != NULL) {
+			ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, nWidth, nHeight,
+				Helpers::DoPadding(nWidth * 3, 4));
+			ICCProfileTransform::DeleteTransform(transform);
+		}
+	}
+	delete[] pProfile;
+}
+
 void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 	HANDLE hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
@@ -503,7 +530,7 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 		}
 		unsigned int nNumBytesRead;
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD) &nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
-			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus() || CSettingsProvider::This().UseEmbeddedColorProfiles();
+			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseGDIPlus) {
 				IStream* pStream = NULL;
 				if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
@@ -537,6 +564,7 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 
 				// Color and b/w JPEG is supported
 				if (pPixelData != NULL && (nBPP == 3 || nBPP == 1)) {
+					ApplyEmbeddedICCProfile(pPixelData, nWidth, nHeight, nBPP, pBuffer, (int) nFileSize);
 					request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, 
 						Helpers::FindEXIFBlock(pBuffer, nFileSize), nBPP, 
 						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
@@ -704,8 +732,9 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			void* pEXIFData = NULL;
 
 #ifndef WINXP
-			// If UseEmbeddedColorProfiles is true and the image isn't animated, we should use GDI+ for better color management
-			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus() || CSettingsProvider::This().UseEmbeddedColorProfiles();
+			// libpng applies the iCCP profile itself now, so color management is
+			// no longer a reason to take the slower GDI+ path.
+			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseCachedDecoder || !bUseGDIPlus || PngReader::MustUseLibpng(pBuffer, nFileSize))
 				pPixelData = (uint8*)PngReader::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
 #endif

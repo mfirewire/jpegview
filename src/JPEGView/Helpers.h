@@ -231,6 +231,12 @@ namespace Helpers {
 	// Finds the EXIF block in the JPEG bytes stream, NULL if no EXIF block
 	void* FindEXIFBlock(void* pJPEGStream, int nStreamLength);
 
+	// Collects the ICC profile embedded in the JPEG's APP2 segments. A profile
+	// larger than 64 KB is split into several segments that have to be joined in
+	// sequence order. Returns a buffer allocated with new[], to be released with
+	// delete[]; NULL when the stream carries no complete profile.
+	void* ExtractICCProfile(void* pJPEGStream, int nStreamLength, unsigned int* pProfileSize);
+
 	// Calculates a hash value over the given JPEG stream having the given length (in bytes).
 	// All blocks and tables in the JPEG stream are not included into the hash to allow
 	// e.g. commenting the JPEG or changing some EXIF information without changing the hash.

@@ -34,6 +34,13 @@ public:
 	// Free memory associated with the given transform
 	static void DeleteTransform(void* transform);
 
+	// True when handing this profile to CreateTransform would change nothing:
+	// it already describes sRGB, it cannot be parsed, or it describes something
+	// other than RGB data while the caller's pixels are RGB. Cameras and phones
+	// mostly embed sRGB, and skipping those keeps color management free for the
+	// common case.
+	static bool IsNoTransformNeeded(const void* profile, unsigned int size);
+
 private:
 	static const int FLAGS;
 

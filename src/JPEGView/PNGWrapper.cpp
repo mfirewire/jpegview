@@ -5,6 +5,8 @@
 #ifndef WINXP
 #include "png.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
+#include "ICCProfileTransform.h"
 #include <stdexcept>
 
 // Uncomment to build without APNG support
@@ -69,6 +71,10 @@ struct PngReader::png_cache {
 	void* buffer;
 	size_t buffer_size;
 	size_t buffer_offset;
+	// Transform from the iCCP profile this file carries to sRGB, NULL when the
+	// file has none, when it already is sRGB or when the setting is off. Built
+	// once per image: every frame of an APNG goes through the same transform.
+	void* icc_transform;
 };
 
 PngReader::png_cache PngReader::cache = { 0 };
@@ -156,6 +162,11 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 #endif
 	cache.frame_index++;
 	cache.frame_index %= cache.frame_count;
+	if (cache.icc_transform != NULL) {
+		// BGRA, rows tightly packed, which is what lcms2 writes as well
+		ICCProfileTransform::DoTransform(cache.icc_transform, pixels, pixels,
+			cache.width, cache.height, cache.width * cache.channels);
+	}
 	return pixels;
 }
 
@@ -278,7 +289,25 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 			cache.x0 = x0;
 			cache.y0 = y0;
 			cache.frame_count = frames;
-			return frames > 0;
+			if (frames > 0) {
+#ifdef PNG_iCCP_SUPPORTED
+				// libpng has already inflated the iCCP chunk by the time we get
+				// here, so this is the profile itself, not its deflate stream.
+				if (CSettingsProvider::This().UseEmbeddedColorProfiles()) {
+					png_charp profile_name = NULL;
+					int compression = 0;
+					png_bytep profile = NULL;
+					png_uint_32 profile_len = 0;
+					if (png_get_iCCP(png_ptr, info_ptr, &profile_name, &compression, &profile, &profile_len) == PNG_INFO_iCCP
+						&& profile != NULL && profile_len > 0
+						&& !ICCProfileTransform::IsNoTransformNeeded(profile, profile_len)) {
+						cache.icc_transform = ICCProfileTransform::CreateTransform(profile, profile_len, ICCProfileTransform::FORMAT_BGRA);
+					}
+				}
+#endif
+				return true;
+			}
+			return false;
 		}
 		free(p_image);
 		free(rows_image);
@@ -363,6 +392,9 @@ void PngReader::DeleteCacheInternal(bool free_buffer)
 	free(cache.p_temp);
 	free(cache.p_frame);
 	free(cache.p_image);
+	if (cache.icc_transform != NULL) {
+		ICCProfileTransform::DeleteTransform(cache.icc_transform);
+	}
 	png_destroy_read_struct(&cache.png_ptr, &cache.info_ptr, NULL);
 	void* temp_buffer = cache.buffer;
 	size_t temp_buffer_size = cache.buffer_size;
