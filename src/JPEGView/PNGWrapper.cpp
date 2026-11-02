@@ -190,7 +190,7 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 		if (setjmp(png_jmpbuf(png_ptr)))
 		{
 			PngReader::DeleteCache();
-			throw std::runtime_error::runtime_error("Image contains errors.");
+			throw std::runtime_error("Image contains errors.");
 		}
 		// skip png signature since we already checked it
 		png_set_sig_bytes(png_ptr, 8);
