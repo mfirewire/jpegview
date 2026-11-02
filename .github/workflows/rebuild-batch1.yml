@@ -10,6 +10,8 @@ on:
   push:
     paths:
       - '.github/workflows/rebuild-batch1.yml'
+      - 'extras/scripts/build-libpng-apng.bat'
+      - 'extras/scripts/vs-init.bat'
 
 jobs:
   build:
