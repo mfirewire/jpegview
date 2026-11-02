@@ -71,9 +71,15 @@ jobs:
         run: |
           if (Test-Path build_libjxl.log) {
             $lines = @(Get-Content build_libjxl.log)
-            $bad = $lines | Where-Object { $_ -match ':\s+(fatal\s+)?error\s+[A-Z]*\d+|error LNK\d+|error MSB\d+|^\s*error |CMake Error' }
-            if ($bad.Count -eq 0) { $bad = @("no explicit error line; last 30 lines follow") + ($lines | Select-Object -Last 30) }
-            $bad | Select-Object -First 35 | ForEach-Object { Write-Output "::error::$_" }
+            Write-Output ("log lines: " + $lines.Count)
+            # msbuild keeps going after a target fails, so the real diagnostic is
+            # usually buried well before the end of the log - searching only the
+            # tail showed nothing but jxl_threads succeeding. Match any line that
+            # mentions error, case-insensitively, and keep the count visible.
+            $bad = $lines | Where-Object { $_ -match '(?i)\berror\b|fatal error|failed to build' }
+            Write-Output ("error-ish lines: " + $bad.Count)
+            if ($bad.Count -eq 0) { $bad = $lines | Select-Object -Last 60 }
+            $bad | Select-Object -First 40 | ForEach-Object { Write-Output "::error::$_" }
           } else {
             Write-Output "::error::build_libjxl.log not found"
           }

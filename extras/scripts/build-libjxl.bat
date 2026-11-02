@@ -76,12 +76,32 @@ IF ERRORLEVEL 1 exit /b 1
 popd
 
 REM copy the libs over
-copy /y "%XBUILD_DIR%\Release\jxl*.dll" "%XSRC_DIR%\JPEGView\libjxl\bin%XJPV_ARCH_PATH%\"
-IF ERRORLEVEL 1 exit /b 1
-copy /y "%XBUILD_DIR%\third_party\brotli\Release\brotli*.dll" "%XSRC_DIR%\JPEGView\libjxl\bin%XJPV_ARCH_PATH%\"
-IF ERRORLEVEL 1 exit /b 1
-copy /y "%XBUILD_DIR%\lib\Release\jxl*.lib" "%XSRC_DIR%\JPEGView\libjxl\lib%XJPV_ARCH_PATH%\"
-IF ERRORLEVEL 1 exit /b 1
+REM 0.12 emits both the DLL and the import library into lib\<config>\ instead of
+REM Release\ at the top of the build tree, so try the new place first and fall
+REM back to the old one.
+for %%D in ("%XBUILD_DIR%\lib\Release" "%XBUILD_DIR%\Release") do (
+	if exist "%%~D\jxl.dll" (
+		copy /y "%%~D\jxl*.dll" "%XSRC_DIR%\JPEGView\libjxl\bin%XJPV_ARCH_PATH%\"
+		if errorlevel 1 exit /b 1
+		copy /y "%%~D\jxl*.lib" "%XSRC_DIR%\JPEGView\libjxl\lib%XJPV_ARCH_PATH%\"
+		if errorlevel 1 exit /b 1
+		goto :JXL_COPIED
+	)
+)
+echo could not find jxl.dll in the build tree
+exit /b 1
+:JXL_COPIED
+
+for %%D in ("%XBUILD_DIR%\third_party\brotli\Release" "%XBUILD_DIR%\lib\Release") do (
+	if exist "%%~D\brotli*.dll" (
+		copy /y "%%~D\brotli*.dll" "%XSRC_DIR%\JPEGView\libjxl\bin%XJPV_ARCH_PATH%\"
+		if errorlevel 1 exit /b 1
+		goto :BROTLI_COPIED
+	)
+)
+echo could not find brotli DLLs in the build tree
+exit /b 1
+:BROTLI_COPIED
 
 
 
