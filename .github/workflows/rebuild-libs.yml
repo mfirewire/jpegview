@@ -3,19 +3,12 @@ name: Rebuild third-party libs
 # 手动触发。逐个把 extras/third_party/*-src 里的源码编成静态库/DLL 并覆盖
 # src/JPEGView/lib*/ 下的预编译产物，成功后自动提交。
 #
-# 目前接入：LibRaw 0.22.3（libraw.lib + libraw.dll）
-# 待接入：libheif/libavif/libde265（cmake，依赖 dav1d）、lcms2、libpng-apng
-#        —— 后两者需要先把 .gitmodules 里的子模块指针升到新版本。
+# 注意：libheif / libavif 已经交给 rebuild-batch3.yml。两个工作流都会改
+# src/JPEGView/libheif 和 libavif，如果同时跑会互相覆盖并让后 push 的那个
+# 被拒。所以这里去掉 push 触发，只在手动需要单独重建 LibRaw 时使用。
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/rebuild-libs.yml'
-      - 'extras/scripts/build-libraw.bat'
-      - 'extras/scripts/build-libheif_libavif.bat'
-      - 'extras/third_party/LibRaw-0.22.3-src/**'
-      - 'extras/third_party/libheif-1.23.7-src/**'
 
 permissions:
   contents: write

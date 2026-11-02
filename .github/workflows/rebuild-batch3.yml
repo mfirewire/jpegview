@@ -36,25 +36,36 @@ jobs:
       - name: Init the sources this batch needs
         shell: bash
         run: |
-          set -e
+          fail() { echo "::error::$1"; exit 1; }
+
+          echo "--- submodules ---"
           git submodule update --init \
             extras/third_party/libpng-apng.src-patch/libpng \
             extras/third_party/libpng-apng.src-patch/zlib \
             extras/third_party/libheif/dav1d \
             extras/third_party/libheif/libde265 \
-            extras/third_party/libavif
-          echo "--- libpng ---"
-          cd extras/third_party/libpng-apng.src-patch/libpng
-          git fetch --depth 1 origin refs/tags/v1.6.59:refs/tags/v1.6.59
-          git checkout -q v1.6.59
-          grep -m1 'define PNG_LIBPNG_VER_STRING' png.h
+            extras/third_party/libavif || fail "git submodule update failed"
+
+          echo "--- libpng: switch to v1.6.59 ---"
+          cd extras/third_party/libpng-apng.src-patch/libpng || fail "libpng submodule dir missing"
+          # The submodule is a full clone, so the tag usually already exists and
+          # a second fetch of the same ref exits non-zero ("already exists").
+          # Check it out first, only fetch when the tag is genuinely absent.
+          if ! git checkout -q v1.6.59 2>/dev/null; then
+            git fetch --depth 1 origin refs/tags/v1.6.59:refs/tags/v1.6.59 || fail "cannot fetch libpng v1.6.59"
+            git checkout -q v1.6.59 || fail "cannot checkout libpng v1.6.59"
+          fi
+          grep -m1 'define PNG_LIBPNG_VER_STRING' png.h || fail "png.h version missing"
+
           echo "--- libavif ---"
-          cd ../../libavif
-          grep -h 'define AVIF_VERSION_MAJOR\|define AVIF_VERSION_MINOR\|define AVIF_VERSION_PATCH' include/avif/avif.h
+          cd ../../libavif || fail "libavif submodule dir missing"
+          grep -h 'define AVIF_VERSION_MAJOR\|define AVIF_VERSION_MINOR\|define AVIF_VERSION_PATCH' include/avif/avif.h || fail "avif.h version missing"
+
           echo "--- dav1d ---"
-          grep -m1 "version:" ../libheif/dav1d/meson.build
+          grep -m1 "version:" ../libheif/dav1d/meson.build || fail "dav1d meson.build missing"
+
           echo "--- libde265 ---"
-          grep -m1 'project(' ../libde265-1.1.3-src/CMakeLists.txt
+          grep -m1 'project(' ../libde265-1.1.3-src/CMakeLists.txt || fail "libde265 CMakeLists missing"
 
       - name: Install meson, ninja, nasm
         shell: pwsh
@@ -180,7 +191,6 @@ jobs:
             exit 0
           fi
           git commit -m "build(deps): libpng 1.6.59+apng, libavif 1.4.2, libheif 1.23.7
-
           Third batch, in dependency order.
 
           libpng 1.6.31 -> 1.6.59 with the matching APNG patch. The x64 vcxproj
@@ -196,4 +206,7 @@ jobs:
           libheif 1.19.8 -> 1.23.7. Its CMake root is the source drop, not the
           libheif/ subdirectory the old script pointed at, and 1.23 splits the API
           into 29 headers that have to be copied as a set."
-          git push
+          # Another workflow may have pushed meanwhile (the library rebuild
+          # workflows all commit into src/JPEGView); rebase instead of losing
+          # this run's binaries to a non-fast-forward rejection.
+          git push || { git pull --rebase --autostash origin feature/improvements && git push; }
