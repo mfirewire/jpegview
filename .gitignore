@@ -36,3 +36,6 @@ ipch/
 *.cachefile
 *.VC.db
 *.VC.VC.opendb
+
+# build logs captured by the rebuild workflows (tee output for annotations)
+build_*.log
