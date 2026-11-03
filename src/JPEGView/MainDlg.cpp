@@ -1739,6 +1739,14 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 						}
 					}
 				}
+			} else if (m_pCurrentImage != NULL && m_pCurrentImage->GetImageFormat() == IF_JPEG) {
+				// A JPEG that has been destructively edited in memory: the key map
+				// reaches here even though the menu is greyed out. Running the
+				// transformation would rewrite the file and silently throw away the
+				// unsaved edit, so say why nothing happened instead of going quiet.
+				::MessageBox(m_hWnd,
+					CNLS::GetString(_T("Lossless transformation is not available because the image has been edited in memory. Save the image first.")),
+					_T(JPEGVIEW_TITLE), MB_OK | MB_ICONINFORMATION);
 			}
 			break;
 		case IDM_CONVERT_JXL:
@@ -2259,7 +2267,7 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	// free current image and all read ahead images
 	InitParametersForNewImage();
 	m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
-	m_pJPEGProvider->ClearAllRequests();
+	m_pJPEGProvider->ClearAllRequests(true);
 	m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
 		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode && (bAfterStartup || IsAdjustWindowToImage())),
 		m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage);
@@ -2457,7 +2465,7 @@ void CMainDlg::ExecuteUserCommand(CUserCommand* pUserCommand) {
 			}
 			if (pUserCommand->NeedsReloadAll()) {
 				m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
-				m_pJPEGProvider->ClearAllRequests();
+				m_pJPEGProvider->ClearAllRequests(true);
 				m_pCurrentImage = NULL;
 				bReloadCurrent = true;
 			} else {

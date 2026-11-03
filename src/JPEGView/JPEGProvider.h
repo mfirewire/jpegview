@@ -55,7 +55,9 @@ public:
 
 	// Clears all requests by marking them as invalid - forces reloading of all images next time they are requested
 	// Any references to CJPEGImage objects get invalid by this call.
-	void ClearAllRequests();
+	// releaseLockedFile also releases the worker thread's cached decoder/file for each request, so a
+	// reload of the same file name reads it from disk again.
+	void ClearAllRequests(bool releaseLockedFile = false);
 
 	// Free as much memory as possible by clearing all requests that are not in use. Returns if some memory could be freed.
 	bool FreeAllPossibleMemory();

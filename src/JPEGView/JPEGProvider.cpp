@@ -123,12 +123,12 @@ void CJPEGProvider::NotifyNotUsed(CJPEGImage* pImage) {
 	if (pImage != NULL) delete pImage;
 }
 
-void CJPEGProvider::ClearAllRequests() {
+void CJPEGProvider::ClearAllRequests(bool releaseLockedFile) {
 	std::list<CImageRequest*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
-		if (ClearRequest((*iter)->Image)) {
+		if (ClearRequest((*iter)->Image, releaseLockedFile)) {
 			// removed from iteration, restart iteration to remove the rest
-			ClearAllRequests();
+			ClearAllRequests(releaseLockedFile);
 			break;
 		}
 	}

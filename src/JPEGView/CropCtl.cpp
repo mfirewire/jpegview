@@ -560,7 +560,11 @@ CRect CCropCtl::GetScreenCropRect() {
 
 CRect CCropCtl::GetImageCropRect(bool losslessCrop) {
 	CJPEGImage* pCurrentImage = m_pMainDlg->GetCurrentImage();
-	if (pCurrentImage == NULL) {
+	// GetScreenCropRect guards on m_cropEnd == INT_MIN but this one did not. The
+	// crop start is set as soon as the left button goes down while the end is
+	// still the INT_MIN sentinel, so a right-click in that state produced a
+	// non-empty rect from the origin to the cursor and really cropped.
+	if (pCurrentImage == NULL || m_cropEnd == CPoint(INT_MIN, INT_MIN)) {
 		return CRect(0, 0, 0, 0);
 	} else {
 		CRect cropRect = CRect(max(0, min(m_cropStart.x, m_cropEnd.x)), max(0, min(m_cropStart.y, m_cropEnd.y)),

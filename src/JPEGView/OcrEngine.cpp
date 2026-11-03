@@ -301,6 +301,11 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
             result.language = honoredName;
             result.languageTag = honoredTag;
         }
+        // 所有候选语言都创建失败（标签写错、语言包全卸载）时，上面两个都是空、
+        // error 也是空，调用方连个提示都弹不出来。给一个明确的原因。
+        if (attempts == 0 && result.words.empty()) {
+            result.error = L"No OCR engine could be created for the configured languages.";
+        }
     } catch (const std::exception&) {
         result.error = L"OCR recognition failed.";
     } catch (...) {

@@ -56,7 +56,10 @@ static EImageFormat GetImageFormat(LPCTSTR sFileName) {
 	if ((fptr = _tfopen(sFileName, _T("rb"))) == NULL) {
 		return IF_Unknown;
 	}
-	unsigned char header[16];
+	// Zero-initialised: a file shorter than 16 bytes leaves the tail as zero
+	// instead of uninitialised stack, and the format checks below then compare
+	// against fixed bytes rather than garbage.
+	unsigned char header[16] = { 0 };
 	int nSize = (int)fread((void*)header, 1, 16, fptr);
 	fclose(fptr);
 	if (nSize < 2) {

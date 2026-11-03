@@ -788,6 +788,11 @@ int CSettingsProvider::GetInt(LPCTSTR sKey, int nDefault, int nMin, int nMax) {
 	if (*pEnd != 0) {
 		return nDefault;
 	}
+	// "1e999" parses to infinity and casting it to int is undefined; reject any
+	// non-finite value instead of clamping it.
+	if (!_finite(dValue)) {
+		return nDefault;
+	}
 	int nValue = (int)dValue;
 	return min(nMax, max(nMin, nValue));
 }
@@ -805,6 +810,11 @@ double CSettingsProvider::GetDouble(LPCTSTR sKey, double dDefault, double dMin, 
 	}
 	while (*pEnd != 0 && _istspace(*pEnd)) pEnd++;
 	if (*pEnd != 0) {
+		return dDefault;
+	}
+	// "nan" parses to NaN, which makes the min/max below return the NaN itself
+	// (every comparison against NaN is false); fall back to the default instead.
+	if (!_finite(dValue)) {
 		return dDefault;
 	}
 	return min(dMax, max(dMin, dValue));
