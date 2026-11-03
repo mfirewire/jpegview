@@ -17,7 +17,7 @@ public:
     void Paint(CMainDlg& main, HDC dc);
     bool MouseDown(CMainDlg& main, CPoint point);
     bool MouseMove(CMainDlg& main, CPoint point);
-    bool MouseUp();
+    bool MouseUp(CMainDlg& main);
     bool Active() const { return m_active; }
     // True while the pointer is over a recognized word but no selection is being
     // dragged. MouseMove no longer consumes hover moves, so the caller asks this
@@ -34,6 +34,10 @@ private:
     Ocr::Result m_result;
     bool m_active = false, m_selecting = false;
     bool m_hovering = false;
-    int m_anchor = -1, m_end = -1;
+    // 多选：与 m_result.words 等长，true 表示该词被选中。点击切换单个词，
+    // 拖动则用一段连续范围整体替换。复制时按索引顺序拼接，天然是原文顺序。
+    std::vector<bool> m_selected;
+    int m_dragAnchor = -1, m_dragEnd = -1;
+    bool IsSelected(size_t index) const { return index < m_selected.size() && m_selected[index]; }
     int Hit(CMainDlg& main, CPoint point) const;
 };

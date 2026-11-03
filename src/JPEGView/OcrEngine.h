@@ -39,4 +39,7 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
                  const std::atomic<bool>& canceled);
 bool Contains(const Word& word, Point point);
 std::wstring SelectedText(const std::vector<Word>& words, int first, int last);
+// 多选版本：selected 与 words 等长，取其中为 true 的词，顺序仍按原文顺序。
+// 空词、越界的尾部都被忽略；span 太短时按空处理。
+std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool>& selected);
 }

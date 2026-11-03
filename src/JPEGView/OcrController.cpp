@@ -7,6 +7,7 @@
 #include "NLS.h"
 #include "SettingsProvider.h"
 #include <gdiplus.h>
+#include <algorithm>
 #include <mutex>
 #include <thread>
 #include <cmath>
@@ -31,8 +32,9 @@ bool COcrController::Busy() const {
 void COcrController::Reset() {
     if (m_job) m_job->canceled.store(true);
     m_result = {};
+    m_selected.clear();
     m_active = m_selecting = m_hovering = false;
-    m_anchor = m_end = -1;
+    m_dragAnchor = m_dragEnd = -1;
 }
 
 void COcrController::Shutdown() {
@@ -83,7 +85,8 @@ void COcrController::Toggle(CMainDlg& main) {
             if (job->window) ::PostMessage(job->window, WM_OCR_COMPLETED, 0, 0);
         }).detach();
         m_result = {};
-        m_anchor = m_end = -1;
+        m_selected.clear();
+        m_dragAnchor = m_dragEnd = -1;
     } catch (const std::exception&) {
         // Undo the publish. A job that is out but has no worker behind it would
         // never be marked done and never posts WM_OCR_COMPLETED, and the busy gate
@@ -106,6 +109,7 @@ void COcrController::Complete(CMainDlg& main) {
     }
     m_job.reset();
     m_active = !m_result.words.empty();
+    m_selected.assign(m_result.words.size(), false);
     main.Invalidate(FALSE);
     if (!m_result.error.empty()) {
         ::MessageBox(main.GetHWND(), m_result.error.c_str(), _T("OCR"), MB_OK | MB_ICONINFORMATION);
@@ -128,11 +132,16 @@ bool COcrController::MouseDown(CMainDlg& main, CPoint point) {
     if (!m_active) return false;
     const int hit = Hit(main, point);
     if (hit < 0) {
-        m_anchor = m_end = -1;
+        // Background click drops the selection but still leaves the event to
+        // panning, which is what it did before multi-select existed.
+        m_selected.assign(m_result.words.size(), false);
+        m_dragAnchor = m_dragEnd = -1;
         main.Invalidate(FALSE);
-        return false; // background remains available for panning
+        return false;
     }
-    m_anchor = m_end = hit;
+    // The word is not toggled yet: a click (press and release without moving)
+    // toggles it in MouseUp, a drag replaces the selection with the swept range.
+    m_dragAnchor = m_dragEnd = hit;
     m_selecting = true;
     main.Invalidate(FALSE);
     return true;
@@ -143,7 +152,7 @@ bool COcrController::MouseMove(CMainDlg& main, CPoint point) {
     const int hit = Hit(main, point);
     m_hovering = hit >= 0;
     if (m_selecting) {
-        if (hit >= 0 && m_end != hit) { m_end = hit; main.Invalidate(FALSE); }
+        if (hit >= 0 && m_dragEnd != hit) { m_dragEnd = hit; main.Invalidate(FALSE); }
         ::SetCursor(::LoadCursor(nullptr, IDC_IBEAM));
         return true; // swallow while a selection is being dragged
     }
@@ -154,21 +163,39 @@ bool COcrController::MouseMove(CMainDlg& main, CPoint point) {
     return false;
 }
 
-bool COcrController::MouseUp() {
-    const bool selecting = m_selecting;
+bool COcrController::MouseUp(CMainDlg& main) {
+    const bool wasSelecting = m_selecting;
     m_selecting = false;
-    return selecting;
+    const int anchor = m_dragAnchor, end = m_dragEnd;
+    m_dragAnchor = m_dragEnd = -1;
+    if (!wasSelecting || anchor < 0) return false;
+
+    if (end < 0 || end == anchor) {
+        // A click toggles one word, so a second click on it deselects again.
+        if (size_t(anchor) < m_selected.size()) {
+            m_selected[size_t(anchor)] = !m_selected[anchor];
+        }
+    } else {
+        // A drag is a fresh selection: the swept range replaces what was there.
+        std::fill(m_selected.begin(), m_selected.end(), false);
+        const int first = std::min(anchor, end);
+        const int last = std::max(anchor, end);
+        for (int i = first; i <= last && size_t(i) < m_selected.size(); ++i) {
+            m_selected[size_t(i)] = true;
+        }
+    }
+    main.Invalidate(FALSE);
+    return true;
 }
 
 bool COcrController::SelectAll() {
     if (!m_active || m_result.words.empty()) return false;
-    m_anchor = 0;
-    m_end = int(m_result.words.size()) - 1;
+    m_selected.assign(m_result.words.size(), true);
     return true;
 }
 
 bool COcrController::Copy(HWND window) {
-    const auto text = Ocr::SelectedText(m_result.words, m_anchor, m_end);
+    const auto text = Ocr::SelectedText(m_result.words, m_selected);
     if (text.empty()) return false;
     const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
     HGLOBAL memory = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
@@ -206,7 +233,7 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
             text = L"OCR";
             const std::wstring& tag = m_result.languageTag.empty() ? m_result.language : m_result.languageTag;
             if (!tag.empty()) { text += L" ["; text += tag; text += L"]"; }
-            text += L": drag across words | Ctrl+A select all | Ctrl+C copy | Esc hide";
+            text += L": click words to toggle, drag for a range | Ctrl+A select all | Ctrl+C copy | Esc hide";
         }
         const int saved = ::SaveDC(dc);
         ::SetTextColor(dc, RGB(255, 255, 255));
@@ -219,12 +246,11 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
 
     if (!m_active || m_result.words.empty()) return;
 
-    // Selection range (inclusive)
-    int selFirst = m_anchor, selLast = m_end;
-    if (selFirst > selLast) std::swap(selFirst, selLast);
-    // 选区在松开鼠标后必须保持可见，否则 Ctrl+C 复制的内容用户看不到。
-    // 因此这里只看 anchor/end 是否有效，不看是否正在拖动。
-    bool haveSelection = selFirst >= 0 && selLast >= 0 && selFirst < int(m_result.words.size()) && selLast < int(m_result.words.size());
+    // While dragging, preview the range that will be selected on release;
+    // otherwise show the words that are actually selected.
+    int dragFirst = m_dragAnchor, dragLast = m_dragEnd;
+    if (dragFirst > dragLast) std::swap(dragFirst, dragLast);
+    const bool dragging = m_selecting && dragFirst >= 0 && dragLast >= 0;
 
     HPEN hBoxPen = ::CreatePen(PS_SOLID, 1, RGB(0, 120, 215));
     HPEN hSelPen = ::CreatePen(PS_SOLID, 2, RGB(0, 120, 215));
@@ -245,7 +271,7 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
         }
         if (!ok) continue;
 
-        bool selected = haveSelection && int(i) >= selFirst && int(i) <= selLast;
+        bool selected = dragging ? (int(i) >= dragFirst && int(i) <= dragLast) : IsSelected(i);
         if (selected) {
             ::SelectObject(dc, hSelPen);
             ::SelectObject(dc, GetStockObject(NULL_BRUSH));

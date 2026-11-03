@@ -357,19 +357,21 @@ static bool SplitInsideLatinWord(const Word& prev, const Word& next) {
     return reference > 0 && gap < reference * 0.2f;
 }
 
-std::wstring SelectedText(const std::vector<Word>& words, int first, int last) {
-    if (words.empty() || first < 0 || last < 0 || first >= int(words.size()) || last >= int(words.size()))
-        return L"";
-    if (first > last) std::swap(first, last);
+std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool>& selected) {
+    if (words.empty() || selected.size() != words.size()) return L"";
 
     std::wstring out;
     size_t lastLine = 0;
     int previous = -1;
-    for (int i = first; i <= last; ++i) {
+    for (size_t i = 0; i < words.size(); ++i) {
+        if (!selected[i]) continue;
         const std::wstring& text = words[i].text;
         if (text.empty()) continue;
         if (previous >= 0) {
-            // 跨行保留换行；行内按语言决定是否插入空格
+            // 跨行保留换行；行内按语言决定是否插入空格。
+            // 多选时 previous 是上一个被选中的词，中间可能隔了没选中的词，
+            // 所以 SplitInsideLatinWord 的几何判断在这里仍然成立：
+            // 隔得远的两个词 gap 大，不会被当成同一个拉丁词的断行。
             if (words[i].line != lastLine) {
                 out += L"\r\n";
             } else if (NeedsSpaceBetween(out.back(), text.front()) && !SplitInsideLatinWord(words[previous], words[i])) {
@@ -378,9 +380,19 @@ std::wstring SelectedText(const std::vector<Word>& words, int first, int last) {
         }
         out += text;
         lastLine = words[i].line;
-        previous = i;
+        previous = int(i);
     }
     return out;
+}
+
+std::wstring SelectedText(const std::vector<Word>& words, int first, int last) {
+    if (words.empty() || first < 0 || last < 0 || first >= int(words.size()) || last >= int(words.size()))
+        return L"";
+    if (first > last) std::swap(first, last);
+
+    std::vector<bool> selected(words.size(), false);
+    for (int i = first; i <= last; ++i) selected[size_t(i)] = true;
+    return SelectedText(words, selected);
 }
 
 } // namespace Ocr
