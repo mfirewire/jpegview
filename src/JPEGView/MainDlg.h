@@ -310,6 +310,11 @@ private:
 	bool m_bPanMouseCursorSet;
 	bool m_bMouseOn;
 	bool m_bKeepParametersBeforeAnimation;
+	// Animation keeps its own snapshot. It used to reuse m_eProcFlagsBeforeMovie,
+	// which StartMovieMode had filled in, so stopping an animation inside movie
+	// mode handed movie mode a set of flags captured after movie mode had already
+	// turned everything off - and the user's settings never came back.
+	EProcessingFlags m_eProcFlagsBeforeAnimation;
 	bool m_bIsAnimationPlaying;
 	int m_nLastAnimationOffset;
 	int m_nExpectedNextAnimationTickCount;

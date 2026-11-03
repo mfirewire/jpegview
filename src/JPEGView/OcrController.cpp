@@ -31,7 +31,7 @@ bool COcrController::Busy() const {
 void COcrController::Reset() {
     if (m_job) m_job->canceled.store(true);
     m_result = {};
-    m_active = m_selecting = false;
+    m_active = m_selecting = m_hovering = false;
     m_anchor = m_end = -1;
 }
 
@@ -64,16 +64,17 @@ void COcrController::Toggle(CMainDlg& main) {
     }
     auto image = main.GetCurrentImage();
     if (!image) return;
+    const std::shared_ptr<Job> previousJob = m_job;
     try {
         const void* pixels = image->OriginalPixels();
         auto snapshot = Ocr::MakeSnapshot(pixels, image->OrigWidth(), image->OrigHeight(), image->OriginalChannels());
         auto job = std::make_shared<Job>();
         job->window = main.GetHWND();
-        m_job = job;
-        m_result = {};
-        m_anchor = m_end = -1;
         // 设置只在 UI 线程读一次，工作线程拿到的是一份纯字符串列表。
         auto languages = Ocr::SplitLanguageList(std::wstring(CSettingsProvider::This().OcrLanguages()));
+        // Publish before the thread starts: a worker that finishes immediately
+        // posts WM_OCR_COMPLETED, and Complete has to find the job it belongs to.
+        m_job = job;
         std::thread([job, snapshot = std::move(snapshot), languages = std::move(languages)]() {
             auto result = Ocr::Recognize(snapshot, languages, job->canceled);
             std::lock_guard lock(job->mutex);
@@ -81,8 +82,16 @@ void COcrController::Toggle(CMainDlg& main) {
             job->done = true;
             if (job->window) ::PostMessage(job->window, WM_OCR_COMPLETED, 0, 0);
         }).detach();
+        m_result = {};
+        m_anchor = m_end = -1;
     } catch (const std::exception&) {
-        if (m_job) { std::lock_guard lock(m_job->mutex); m_job->done = true; }
+        // Undo the publish. A job that is out but has no worker behind it would
+        // never be marked done and never posts WM_OCR_COMPLETED, and the busy gate
+        // at the top of Toggle turns away every later attempt for good - that is
+        // the state this catches, not a running worker being mislabelled (there is
+        // none: the gate only lets us through when the job is null, done or
+        // canceled).
+        m_job = previousJob;
         ::MessageBox(main.GetHWND(), CNLS::GetString(_T("Could not start text recognition. Memory may be low.")), _T("OCR"), MB_OK | MB_ICONERROR);
     }
     main.Invalidate(FALSE);
@@ -130,12 +139,18 @@ bool COcrController::MouseDown(CMainDlg& main, CPoint point) {
 }
 
 bool COcrController::MouseMove(CMainDlg& main, CPoint point) {
-    if (!m_active) return false;
+    if (!m_active) { m_hovering = false; return false; }
     const int hit = Hit(main, point);
+    m_hovering = hit >= 0;
     if (m_selecting) {
         if (hit >= 0 && m_end != hit) { m_end = hit; main.Invalidate(FALSE); }
+        ::SetCursor(::LoadCursor(nullptr, IDC_IBEAM));
+        return true; // swallow while a selection is being dragged
     }
-    if (hit >= 0 || m_selecting) { ::SetCursor(::LoadCursor(nullptr, IDC_IBEAM)); return true; }
+    // Hovering must not consume the event. It used to return true here as well,
+    // purely to keep the I-beam from being overwritten, and the side effect was
+    // that a pan whose cursor crossed a word box stopped moving: OnMouseMove
+    // returns early on a swallowed event, so DoDragging never ran.
     return false;
 }
 
@@ -162,15 +177,19 @@ bool COcrController::Copy(HWND window) {
     if (!data) { ::GlobalFree(memory); return false; }
     ::memcpy(data, text.c_str(), bytes);
     ::GlobalUnlock(memory);
-    if (::OpenClipboard(window)) {
-        ::EmptyClipboard();
-        ::SetClipboardData(CF_UNICODETEXT, memory);
-        ::CloseClipboard();
-    } else {
+    if (!::OpenClipboard(window)) {
         ::GlobalFree(memory);
         return false;
     }
-    return true;
+    ::EmptyClipboard();
+    // On success the clipboard owns the block; on failure it is still ours and
+    // has to be freed, otherwise every failed copy leaks the text.
+    const bool copied = ::SetClipboardData(CF_UNICODETEXT, memory) != NULL;
+    if (!copied) {
+        ::GlobalFree(memory);
+    }
+    ::CloseClipboard();
+    return copied;
 }
 
 // Paint: draw word bounding boxes and highlight the selected range.

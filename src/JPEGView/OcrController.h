@@ -19,6 +19,10 @@ public:
     bool MouseMove(CMainDlg& main, CPoint point);
     bool MouseUp();
     bool Active() const { return m_active; }
+    // True while the pointer is over a recognized word but no selection is being
+    // dragged. MouseMove no longer consumes hover moves, so the caller asks this
+    // to pick the I-beam instead of the normal arrow.
+    bool Hovering() const { return m_hovering; }
     bool Selecting() const { return m_selecting; }
     bool Busy() const;
     // 选中全部识别出的词；没有识别结果时返回 false，调用方应回落到原有按键行为
@@ -29,6 +33,7 @@ private:
     std::shared_ptr<Job> m_job;
     Ocr::Result m_result;
     bool m_active = false, m_selecting = false;
+    bool m_hovering = false;
     int m_anchor = -1, m_end = -1;
     int Hit(CMainDlg& main, CPoint point) const;
 };

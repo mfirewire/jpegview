@@ -107,7 +107,17 @@ bool CFileDesc::SortAscending(const CFileDesc& other) const {
 }
 
 bool CFileDesc::operator < (const CFileDesc& other) const {
-	return SortAscending(other) ^ (!sm_bSortAscending);
+	// Must be a strict weak ordering: with the old "SortAscending(other) ^ invert"
+	// form two files comparing equal in descending order were both less than each
+	// other, which std::sort is allowed to turn into out-of-bounds writes and
+	// list::sort into an arbitrary order.
+	if (SortAscending(other)) {
+		return sm_bSortAscending;
+	}
+	if (other.SortAscending(*this)) {
+		return !sm_bSortAscending;
+	}
+	return false; // equal sort keys
 }
 
 
@@ -202,7 +212,11 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 	int nPos = sInitialFile.ReverseFind(_T('\\'));
 	m_sDirectory = (nPos > 0) ? sInitialFile.Left(nPos) : _T(""); // the backslash is stripped away!
 	nPos = sInitialFile.ReverseFind(_T('.'));
-	bool bIsDirectory = (::GetFileAttributes(sInitialFile) & FILE_ATTRIBUTE_DIRECTORY) != 0;
+	DWORD dwInitialFileAttributes = ::GetFileAttributes(sInitialFile);
+	// Check for INVALID_FILE_ATTRIBUTES first: its 0xFFFFFFFF value has every
+	// attribute bit set, so a path that does not exist used to be taken for a
+	// directory and the caller ended up listing the parent folder.
+	bool bIsDirectory = dwInitialFileAttributes != INVALID_FILE_ATTRIBUTES && (dwInitialFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 	CString sExtensionInitialFile = (nPos > 0) ? sInitialFile.Right(sInitialFile.GetLength()-nPos-1) : _T("");
 	sExtensionInitialFile.MakeLower();
 	bool bImageFile = !bIsDirectory && IsImageFile(sExtensionInitialFile);

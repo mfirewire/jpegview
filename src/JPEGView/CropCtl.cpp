@@ -257,6 +257,14 @@ void CCropCtl::AbortCropping() {
 }
 
 int CCropCtl::ShowCropContextMenu() {
+	// Everything below reads the current image (format, destructive-editing state,
+	// aspect ratio). Cropping can still be marked active after the image is gone -
+	// the file was deleted and the next one failed to load, say - and the menu is
+	// also reachable straight from WM_CONTEXTMENU, so check here rather than
+	// trusting every caller.
+	if (m_pMainDlg->GetCurrentImage() == NULL) {
+		return 0;
+	}
 	// Display the crop menu
 	HMENU hMenu = ::LoadMenu(_Module.m_hInst, _T("CropMenu"));
 	int nMenuCmd = 0;
@@ -576,11 +584,14 @@ CRect CCropCtl::GetImageCropRect(bool losslessCrop) {
 }
 
 void CCropCtl::CropLossless() {
+	CJPEGImage* pCurrentImage = m_pMainDlg->GetCurrentImage();
+	if (pCurrentImage == NULL) {
+		return;
+	}
 	CRect cropRect = GetImageCropRect(true);
 	if (cropRect.IsRectEmpty()) {
 		return;
 	}
-	CJPEGImage* pCurrentImage = m_pMainDlg->GetCurrentImage();
 	pCurrentImage->TrimRectToMCUBlockSize(cropRect);
 
 	CString sCurrentFile = m_pMainDlg->CurrentFileName(false);

@@ -221,6 +221,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 	m_eForcedSorting = Helpers::FS_Undefined;
 
 	m_eProcFlagsBeforeMovie = PFLAG_None;
+	m_eProcFlagsBeforeAnimation = PFLAG_None;
 	m_nRotation = 0;
 	m_nUserRotation = 0;
 	m_dZoomAtResizeStart = 1.0;
@@ -946,7 +947,9 @@ LRESULT CMainDlg::OnMouseMove(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, B
 	}
 	if (!m_bPanMouseCursorSet && !bMouseCursorSet) {
 		if (!m_pPanelMgr->MouseCursorCaptured()) {
-			::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+			// OCR hover no longer swallows the move, so the I-beam is picked here.
+			bool bOverOcrWord = m_pOcrController != NULL && m_pOcrController->Hovering();
+			::SetCursor(::LoadCursor(NULL, bOverOcrWord ? IDC_IBEAM : IDC_ARROW));
 		}
 	}
 
@@ -1168,7 +1171,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 
 	MouseOn();
 
-	if (m_pCropCtl->IsCropping()) {
+	if (m_pCropCtl->IsCropping() && m_pCurrentImage != NULL) {
 		m_pCropCtl->ShowCropContextMenu();
 		return 1;
 	}
@@ -1698,7 +1701,11 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_ROTATE_180_LOSSLESS:
 		case IDM_MIRROR_H_LOSSLESS:
 		case IDM_MIRROR_V_LOSSLESS:
-			if (m_pCurrentImage != NULL && m_pCurrentImage->GetImageFormat() == IF_JPEG) {
+			// The menu greys these out for destructively edited images, but the
+			// commands are also reachable through the key map. They rotate the file
+			// on disk, so running them on an image whose in-memory state differs
+			// would silently discard the edit and reload the original.
+			if (m_pCurrentImage != NULL && m_pCurrentImage->GetImageFormat() == IF_JPEG && !m_pCurrentImage->IsDestructivelyProcessed()) {
 				bool bCanTransformWithoutCrop = m_pCurrentImage->CanUseLosslessJPEGTransformations();
 				bool bAskIfToCrop = !(bCanTransformWithoutCrop ||sp.CropWithoutPromptLosslessJPEG());
 				bool bPerformTransformation = true;
@@ -2429,9 +2436,14 @@ void CMainDlg::ExecuteUserCommand(CUserCommand* pUserCommand) {
 		// First go to next, then execute the command and reload current file.
 		// Otherwise we get into troubles when the current image was deleted or moved.
 		CFileList* oldFileList = m_pFileList;
+		// GotoImage is called with NO_REQUEST when the command reloads everything
+		// afterwards. If Execute then fails, that reload never happens and the view
+		// is left without an image, so remember that we owe one.
+		bool bMovedWithoutRequest = false;
 		if (pUserCommand->MoveToNextAfterCommand()) {
 			// don't send a request if we reload all, it would be canceled anyway later
-			GotoImage(POS_AwayFromCurrent, pUserCommand->NeedsReloadAll() ? NO_REQUEST : 0);
+			bMovedWithoutRequest = pUserCommand->NeedsReloadAll();
+			GotoImage(POS_AwayFromCurrent, bMovedWithoutRequest ? NO_REQUEST : 0);
 		}
 		if (pUserCommand->Execute(this->m_hWnd, sCurrentFileName)) {
 			if (pUserCommand->NeedsReloadAll() || pUserCommand->NeedsReloadFileList()) {
@@ -2459,6 +2471,11 @@ void CMainDlg::ExecuteUserCommand(CUserCommand* pUserCommand) {
 			if (bReloadCurrent) {
 				ReloadImage(false);
 			}
+		} else if (bMovedWithoutRequest) {
+			// The command failed after we had already skipped to the next image
+			// without requesting it. Load what is current now instead of leaving a
+			// blank window behind.
+			ReloadImage(false);
 		}
 	}
 }
@@ -3596,7 +3613,7 @@ void CMainDlg::StartAnimation() {
 	if (m_bIsAnimationPlaying) {
 		return;
 	}
-	m_eProcFlagsBeforeMovie = CreateDefaultProcessingFlags(m_bKeepParams);
+	m_eProcFlagsBeforeAnimation = CreateDefaultProcessingFlags(m_bKeepParams);
 	m_bKeepParametersBeforeAnimation = IsKeepParams();
 	if (!m_bKeepParametersBeforeAnimation) {
 		ExecuteCommand(IDM_KEEP_PARAMETERS);
@@ -3631,13 +3648,16 @@ void CMainDlg::StopAnimation() {
 	if (IsKeepParams() != m_bKeepParametersBeforeAnimation) {
 		ExecuteCommand(IDM_KEEP_PARAMETERS);
 	}
-	if (GetProcessingFlag(m_eProcFlagsBeforeMovie, PFLAG_AutoContrast)) {
+	if (GetProcessingFlag(m_eProcFlagsBeforeAnimation, PFLAG_AutoContrast)) {
 		m_bAutoContrast = true;
 	}
-	if (GetProcessingFlag(m_eProcFlagsBeforeMovie, PFLAG_LDC)) {
+	if (GetProcessingFlag(m_eProcFlagsBeforeAnimation, PFLAG_AutoContrastSection)) {
+		m_bAutoContrastSection = true;
+	}
+	if (GetProcessingFlag(m_eProcFlagsBeforeAnimation, PFLAG_LDC)) {
 		m_bLDC = true;
 	}
-	if (GetProcessingFlag(m_eProcFlagsBeforeMovie, PFLAG_LandscapeMode)) {
+	if (GetProcessingFlag(m_eProcFlagsBeforeAnimation, PFLAG_LandscapeMode)) {
 		m_bLandscapeMode = true;
 	}
 	::KillTimer(this->m_hWnd, ANIMATION_TIMER_EVENT_ID);

@@ -125,11 +125,15 @@ static bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int n
 
 	::CloseHandle(hFile);
 
-	// If the file was written to a temporary file and it succeeded, replace now the existing file with the temporary
+	// If the file was written to a temporary file and it succeeded, swap it in.
+	// This must not be delete-then-rename: if the delete succeeds and the rename
+	// fails the original is gone and only a .tmp is left. ReplaceFile leaves the
+	// target untouched when it fails. It needs the target to exist, which is
+	// exactly the case in which the temporary file was used.
 	if (bOk && sTempEnding[0] != 0) {
-		bOk = ::DeleteFile(sFileName);
-		if (bOk) {
-			bOk = ::MoveFile(sNewFileName, sFileName);
+		bOk = ::ReplaceFile(sFileName, sNewFileName, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL) != 0;
+		if (!bOk) {
+			::DeleteFile(sNewFileName);
 		}
 	} else if (!bOk) {
 		// new file is only partly written or not at all, make sure it is deleted
