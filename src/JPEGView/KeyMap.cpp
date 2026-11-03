@@ -115,7 +115,7 @@ static int _GetKeyCode(LPTSTR sKey) {
 // second base key ("Q+W" likewise never matches a single key press).
 // Callers treat -1 like 0 (no mapping); both are <= 0, so a single
 // "nKeyCode <= 0" check covers the old empty case and the new rejects.
-static int _ParseKeys(LPTSTR sKeys) {
+static int _ParseKeys(LPTSTR sKeys, CString* pReason = NULL) {
 	int nKeyCode = 0;
 	int nModifiersSeen = 0;
 	bool bBaseKeySeen = false;
@@ -127,15 +127,24 @@ static int _ParseKeys(LPTSTR sKeys) {
 		*sKeys = 0;
 		int nCode = _GetKeyCode(sStart);
 		if (nCode < 0) {
+			if (pReason != NULL) {
+				*pReason = CString(_T("unrecognized token '")) + sStart + _T("'");
+			}
 			return -1;
 		}
 		if (nCode == M_ALT || nCode == M_CTRL || nCode == M_SHIFT) {
 			if ((nModifiersSeen & nCode) != 0) {
+				if (pReason != NULL) {
+					*pReason = _T("repeated modifier (dead mapping: no real key press ever produces it)");
+				}
 				return -1; // repeated modifier: dead mapping
 			}
 			nModifiersSeen |= nCode;
 		} else {
 			if (bBaseKeySeen) {
+				if (pReason != NULL) {
+					*pReason = _T("second base key (dead mapping: no single key press ever matches it)");
+				}
 				return -1; // second base key: dead mapping
 			}
 			bBaseKeySeen = true;
@@ -263,6 +272,11 @@ CKeyMap::CKeyMap() {
 		LPTSTR sLine = _SkipWhiteSpace(lineBuff);
 		if (*sLine == 0) continue;
 		if (_IsComment(sLine)) continue;
+		// Keep the raw line for the rejected-shortcut report: _Parse and
+		// _ParseKeys both rewrite the buffer in place, so the text must be
+		// copied before either runs.
+		CString sRawLine(sLine);
+		sRawLine.TrimRight();
 		if (_tcsncmp(sLine, _T("#define"), 7) == 0) continue; // the symbols in the KeyMap are ignored (in case you have an old keymap file which defined the symbols and keybindings together)
 
 		LPTSTR sCommandId = _Parse(sLine);
@@ -272,8 +286,21 @@ CKeyMap::CKeyMap() {
 		if (sCommandId == NULL || *sCommandId == 0) continue;
 		int nCommandId = _FindCommandId(m_symbolMap, sCommandId);
 		if (nCommandId < 0) continue;
-		int nKeyCode = _ParseKeys(sLine);
-		if (nKeyCode <= 0) continue;
+		CString sParseReason;
+		int nKeyCode = _ParseKeys(sLine, &sParseReason);
+		if (nKeyCode <= 0) {
+			RecordRejectedShortcut(sRawLine, sParseReason.IsEmpty() ? _T("invalid shortcut") : (LPCTSTR)sParseReason);
+			continue;
+		}
+		// A later line for the same key displaces the earlier command's
+		// binding; the earlier binding is the one that silently stops
+		// working, so report the displacement instead of overwriting quietly.
+		stdext::hash_map<int, int>::const_iterator existingBinding = m_keyMap.find(nKeyCode);
+		if (existingBinding != m_keyMap.end() && existingBinding->second != nCommandId) {
+			CString sDetail;
+			sDetail.Format(_T("duplicate binding: this key was already bound to another command, so the earlier binding is displaced (shortcut: %s)"), (LPCTSTR)_GetKeyShortcutName(nKeyCode));
+			RecordRejectedShortcut(sRawLine, sDetail);
+		}
 		m_keyMap[nKeyCode] = nCommandId;
 	}
 
@@ -316,6 +343,39 @@ void CKeyMap::AddDefaultEscapeHandling() {
 		m_keyMap[VK_ESCAPE] = IDM_DEFAULT_ESC;
 	}
 	ApplyIniOverrides();
+	// End of construction on every path (this function is the common
+	// tail of all constructor exits): report the rejected definitions
+	// once, here, and nowhere else.
+	ShowRejectedShortcuts();
+}
+
+void CKeyMap::RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason) {
+	CString sEntry;
+	sEntry.Format(_T("%s -- %s"), sDefinition, sReason);
+	m_rejectedShortcuts.push_back(sEntry);
+}
+
+// Show the collected rejections once. An empty list shows nothing, so a
+// clean KeyMap.txt stays silent; the list is capped so a hostile file
+// cannot flood the screen. The text is English on purpose: no
+// strings-file entry, no translations.
+void CKeyMap::ShowRejectedShortcuts() {
+	if (m_rejectedShortcuts.empty()) {
+		return;
+	}
+	const size_t kMaxShown = 20;
+	CString sMessage = _T("JPEGView ignored the following shortcut definitions:");
+	for (size_t i = 0; i < m_rejectedShortcuts.size() && i < kMaxShown; i++) {
+		sMessage += _T("\n");
+		sMessage += m_rejectedShortcuts[i];
+	}
+	if (m_rejectedShortcuts.size() > kMaxShown) {
+		CString sMore;
+		sMore.Format(_T("\n... and %u more ignored definitions."), (unsigned)(m_rejectedShortcuts.size() - kMaxShown));
+		sMessage += sMore;
+	}
+	sMessage += _T("\n\nCheck KeyMap.txt and the INI file (OcrShortcut) and fix or remove them.");
+	::MessageBox(NULL, sMessage, _T("JPEGView"), MB_OK | MB_ICONWARNING);
 }
 
 // 用 INI 中的设置覆盖 KeyMap 里的快捷键。目前只有 OCR。
@@ -336,18 +396,27 @@ void CKeyMap::ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut) {
 	if (sBuffer.IsEmpty()) return;
 
 	// _ParseKeys 会把 '+' 就地替换成 0，因此必须给它一块可写缓冲。
+	// The display text must be copied before parsing: _ParseKeys rewrites
+	// '+' in place, so reading sBuffer afterwards would stop at the first
+	// replaced plus sign.
+	CString sShortcutText = sBuffer;
+	CString sParseReason;
 	int nKeyCode = 0;
 	{
 		LPTSTR pBuffer = sBuffer.GetBuffer(sBuffer.GetLength());
-		nKeyCode = _ParseKeys(pBuffer);
+		nKeyCode = _ParseKeys(pBuffer, &sParseReason);
 		sBuffer.ReleaseBuffer();
 	}
-	if (nKeyCode <= 0) return;
+	if (nKeyCode <= 0) {
+		RecordRejectedShortcut(CString(_T("INI OcrShortcut '")) + sShortcutText + _T("'"), sParseReason.IsEmpty() ? _T("invalid shortcut") : (LPCTSTR)sParseReason);
+		return;
+	}
 
 	// Esc 和鼠标左键承载基本交互（退出当前模式、平移、裁剪）。让配置把它们
 	// 抢走会把用户困在一个没有常规出口的模式里，直接拒绝。
 	if (nKeyCode == VK_ESCAPE || nKeyCode == VK_LBUTTON) {
 		OutputDebugString(_T("JPEGView: OcrShortcut may not use Esc or the left mouse button; ignored.\n"));
+		RecordRejectedShortcut(CString(_T("INI OcrShortcut '")) + sShortcutText + _T("'"), _T("Esc and the left mouse button carry basic interaction and cannot be rebound"));
 		return;
 	}
 
@@ -357,6 +426,7 @@ void CKeyMap::ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut) {
 	stdext::hash_map<int, int>::const_iterator existing = m_keyMap.find(nKeyCode);
 	if (existing != m_keyMap.end() && existing->second != nCommandId) {
 		OutputDebugString(_T("JPEGView: OcrShortcut conflicts with another command; ignored.\n"));
+		RecordRejectedShortcut(CString(_T("INI OcrShortcut '")) + sShortcutText + _T("'"), _T("conflicts with another command; the existing binding is kept"));
 		return;
 	}
 

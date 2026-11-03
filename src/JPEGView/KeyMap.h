@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hash_map>
+#include <vector>
 
 #define VK_LBUTTONDBLCLK 7
 
@@ -30,6 +31,15 @@ private:
 
 	// key is the key code, value the command ID
 	stdext::hash_map<int, int> m_keyMap;
+
+	// Shortcut definitions rejected while loading (KeyMap.txt lines,
+	// displaced bindings, INI overrides), each with its reason. Shown once
+	// at the end of construction so a bad shortcut is visible instead of
+	// silently dead. English text on purpose: no strings-file entry.
+	std::vector<CString> m_rejectedShortcuts;
+
+	void RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason);
+	void ShowRejectedShortcuts();
 
 	void AddDefaultEscapeHandling();
 	// 应用 INI 中的快捷键覆盖（见 SettingsProvider::OcrShortcut）
