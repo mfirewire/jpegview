@@ -118,7 +118,7 @@ private:
 	void ProcessReadQOIRequest(CRequest * request);
 	void ProcessReadPSDRequest(CRequest * request);
 	void ProcessReadRAWRequest(CRequest * request);
-	void ProcessReadGDIPlusRequest(CRequest * request);
+	void ProcessReadGDIPlusRequest(CRequest * request, void* pEXIFData = NULL, __int64 nJPEGFileHash = 0);
 	void ProcessReadWICRequest(CRequest* request);
 
 	static void SetFileDependentProcessParams(CRequest * request);

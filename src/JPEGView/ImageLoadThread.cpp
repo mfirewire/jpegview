@@ -543,9 +543,18 @@ static void ApplyEmbeddedICCProfile(void* pPixelData, int nWidth, int nHeight, i
 // amounts, so the output is the additive inverse of the ink. Flip all four
 // channels back to ink and, in the same pass, swap C and Y because lcms2's
 // FORMAT_YMCK expects Y-M-C-K. The embedded profile is used when present;
+// R-07 (not fixed, annotated only): the invert-all-four step above is
+// validated only for Adobe-polarity output, which is what all measured
+// test files produce (all three carry APP14). A genuinely non-Adobe CMYK
+// file without APP14 was never measured on a device decoder, so its
+// polarity is unknown and this path may invert it wrongly. No branch is
+// added here without such a measurement; see the decision list.
 // otherwise CreateTransform falls back to the shipped cmyk.icm. Returns NULL
 // when no transform could be built (lcms2 or cmyk.icm missing, e.g. the XP
-// build), so the caller can still try GDI+.
+// build). On every NULL return the plane has already been converted in
+// place to YMCK ink by the loop above, so the caller can still run the
+// naive ink-formula conversion on it (R-09 fallback step 3) instead of
+// falling straight back to GDI+.
 static void* ConvertCmykToRgb(void* pCmyk, int nWidth, int nHeight, void* pJPEGStream, int nStreamLength) {
 	// Invert all four channels and swap C<->Y in one pass. TJPAD(width*4) ==
 	// width*4 (already 4-aligned), so there is no row padding. Walk by pixel
@@ -586,6 +595,41 @@ static void* ConvertCmykToRgb(void* pCmyk, int nWidth, int nHeight, void* pJPEGS
 		return NULL;
 	}
 	ICCProfileTransform::DeleteTransform(transform);
+	return pRgb;
+}
+
+// R-09 fallback step 3: naive YMCK-ink to BGR conversion, used when no lcms2
+// transform could be built (embedded profile unreadable and cmyk.icm
+// missing). Input is the plane ConvertCmykToRgb already converted in place
+// to YMCK ink: p[0] = Y, p[1] = M, p[2] = C, p[3] = K, each 0..255.
+// The ink formula gives approximate color with no profile and no GDI+:
+//   R = (255 - C) * (255 - K) / 255, and likewise G from M, B from Y.
+// Output is BGR with the same padded stride as the lcms2 path, so the
+// caller can use it interchangeably. Returns NULL only when the output
+// buffer cannot be allocated.
+static void* ConvertYmckInkToRgbNaive(void* pYmck, int nWidth, int nHeight) {
+	const size_t outStride = (size_t)Helpers::DoPadding(nWidth * 3, 4);
+	size_t outBytes = 0;
+	if (!IsImageBufferSizeOk(outStride, (size_t)nHeight, &outBytes)) {
+		return NULL;
+	}
+	unsigned char* pRgb = new(std::nothrow) unsigned char[outBytes];
+	if (pRgb == NULL) {
+		return NULL;
+	}
+	const unsigned char* p = (const unsigned char*)pYmck;
+	unsigned char* q = pRgb;
+	for (int y = 0; y < nHeight; y++) {
+		unsigned char* row = q;
+		for (int x = 0; x < nWidth; x++, p += 4) {
+			const unsigned int inkK = 255 - p[3];
+			row[0] = (unsigned char)((255 - p[0]) * inkK / 255); // B from Y
+			row[1] = (unsigned char)((255 - p[1]) * inkK / 255); // G from M
+			row[2] = (unsigned char)((255 - p[2]) * inkK / 255); // R from C
+			row += 3;
+		}
+		q += outStride;
+	}
 	return pRgb;
 }
 
@@ -650,6 +694,14 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 				// CMYK/YCCK JPEGs decode to a 4-component C-M-Y-K plane; convert to BGR here.
 				if (pPixelData != NULL && nBPP == 4) {
 					void* pRGB = ConvertCmykToRgb(pPixelData, nWidth, nHeight, pBuffer, (int) nFileSize);
+					if (pRGB == NULL) {
+						// R-09 fallback step 3: the plane was already
+						// converted in place to YMCK ink before the
+						// transform failed, so the naive ink-formula
+						// conversion can reuse it. Approximate color,
+						// but no GDI+ and no crash risk.
+						pRGB = ConvertYmckInkToRgbNaive(pPixelData, nWidth, nHeight);
+					}
 					delete[] pPixelData;
 					if (pRGB != NULL) {
 						request->Image = new CJPEGImage(nWidth, nHeight, pRGB, 
@@ -668,8 +720,28 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 						}
 						request->Image->SetJPEGChromoSampling(eChromoSubSampling);
 					} else {
-						// No CMYK transform available (lcms2 or cmyk.icm missing, e.g. XP build).
-						ProcessReadGDIPlusRequest(request);
+						// R-09 fallback step 4: both the profile
+						// transform and the naive conversion failed.
+#ifdef WINXP
+						// GDI+ only on XP, where lcms2 is unavailable.
+						// Logging the fallback matters: on non-XP builds
+						// this path is never taken, so a silent GDI+
+						// fallback cannot re-expose the large-profile
+						// heap corruption 91d1d61 was meant to avoid.
+						OutputDebugString(_T("JPEGView: CMYK transform unavailable, falling back to GDI+ (XP only).\n"));
+						// Pass the EXIF block and hash from the original
+						// JPEG buffer, like the success path does; the
+						// plain GDI+ path passes NULL/0 and loses both.
+						ProcessReadGDIPlusRequest(request,
+							Helpers::FindEXIFBlock(pBuffer, nFileSize),
+							Helpers::CalculateJPEGFileHash(pBuffer, nFileSize));
+#else
+						// On builds with lcms2 the naive conversion
+						// only fails when its output buffer cannot be
+						// allocated, so report out of memory instead
+						// of falling back to GDI+.
+						request->OutOfMemory = true;
+#endif
 					}
 				} else if (pPixelData != NULL && (nBPP == 3 || nBPP == 1)) {
 					ApplyEmbeddedICCProfile(pPixelData, nWidth, nHeight, nBPP, pBuffer, (int) nFileSize);
@@ -1148,10 +1220,377 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 // image according to the dimensions the file declares, and neither checks those
 // dimensions against the file's real size. A DNG that declares 65535x21846 but
 // carries only a few KB reads past its buffer inside them and crashes
-// intermittently (observed: 2 crashes in 4 opens). Parse the TIFF IFD0 here,
-// before either decoder runs, and compare the declared data size with the file
-// size using 64-bit arithmetic. Files that are not TIFF-shaped are let through
-// to the decoders rather than being mis-classified.
+// intermittently (observed: 2 crashes in 4 opens). Parse the TIFF IFDs here
+// (IFD0 plus SubIFDs), before either decoder runs, and compare the declared
+// data size with the file size using 64-bit arithmetic. Files that are not
+// TIFF-shaped are let through to the decoders rather than being mis-classified.
+// R-03/R-04/R-05: this gate is a 32-bit TIFF gate, not a general RAW gate.
+// It deliberately does NOT cover BigTIFF (magic 43, passed through below),
+// non-TIFF RAW formats (CRW/RAF/X3F and friends, passed through below), or
+// the "next IFD" chain after each IFD's entries. Those still rely on the
+// decoders' own protection. What it does cover: IFD0 plus SubIFDs (tag
+// 330, depth <= 2), strip (273/279) and tile (324/325) arrays, read by
+// seeking to their file offsets instead of from a 1 MB prefix, so an IFD
+// past 1 MB is no longer falsely rejected and external values past 1 MB
+// are no longer silently skipped. A width/height above JPEGView's
+// MAX_IMAGE_DIMENSION (65535) is rejected for every IFD visited: the
+// viewer cannot display such an image anyway, and the gate only returns a
+// bool, so "over the viewer limit" and "corrupt" are intentionally not
+// distinguished here.
+struct TiffGateArray {
+	bool present;
+	unsigned long long type;
+	unsigned long long count;
+	unsigned long long dataOff; // file offset of the first element
+	TiffGateArray() : present(false), type(0), count(0), dataOff(0) {}
+};
+
+struct TiffGateIFD {
+	unsigned long long width;
+	unsigned long long height;
+	unsigned long long compression;
+	unsigned long long samples;
+	unsigned long long bits;
+	bool samplesPresent;
+	bool bitsPresent;
+	TiffGateArray stripOff;
+	TiffGateArray stripCnt;
+	TiffGateArray tileOff;
+	TiffGateArray tileCnt;
+	std::vector<unsigned long long> subIFDs;
+	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0),
+		samplesPresent(false), bitsPresent(false) {}
+};
+
+class TiffGateReader {
+public:
+	TiffGateReader(HANDLE hFile, unsigned long long fileSize, bool little)
+		: m_hFile(hFile), m_fileSize(fileSize), m_little(little) {}
+
+	// Seek-read exactly n bytes. Fails closed on any short read, so a
+	// truncated file can never yield a half-read value that looks valid.
+	bool ReadAt(unsigned long long off, unsigned char* dst, unsigned long long n) const {
+		if (off > m_fileSize || n > m_fileSize - off) {
+			return false;
+		}
+		LARGE_INTEGER li;
+		li.QuadPart = (LONGLONG)off;
+		if (!::SetFilePointerEx(m_hFile, li, NULL, FILE_BEGIN)) {
+			return false;
+		}
+		DWORD got = 0;
+		// All callers bound n (IFD <= 65535 * 12 bytes, array chunks <= 4 KB).
+		return ::ReadFile(m_hFile, dst, (DWORD)n, &got, NULL) && got == n;
+	}
+
+	unsigned long long Rd16(const unsigned char* p) const {
+		return m_little ? (p[0] | ((unsigned long long)p[1] << 8))
+			: (((unsigned long long)p[0] << 8) | p[1]);
+	}
+
+	unsigned long long Rd32(const unsigned char* p) const {
+		if (m_little) {
+			return p[0] | ((unsigned long long)p[1] << 8) |
+				((unsigned long long)p[2] << 16) | ((unsigned long long)p[3] << 24);
+		}
+		return ((unsigned long long)p[0] << 24) | ((unsigned long long)p[1] << 16) |
+			((unsigned long long)p[2] << 8) | p[3];
+	}
+
+	static unsigned long long TypeSize(unsigned long long type) {
+		switch (type) {
+			case 1: case 2: case 6: case 7: return 1;
+			case 3: return 2;
+			case 4: case 9: case 11: return 4;
+			case 5: case 10: return 8;
+			default: return 0;
+		}
+	}
+
+	static const unsigned long long kInvalid = (unsigned long long)-1;
+
+	// First value of a scalar tag at a file offset (inline value fields
+	// are addressed by their own file offset too, so this is uniform).
+	// Returns 0 when the value cannot be read; callers that care about
+	// presence track it separately.
+	unsigned long long ReadScalar(unsigned long long dataOff, unsigned long long type) const {
+		unsigned long long size = TypeSize(type);
+		if (size == 0 || size > 8) {
+			return 0;
+		}
+		unsigned char buf[8];
+		if (!ReadAt(dataOff, buf, size)) {
+			return 0;
+		}
+		if (size == 1) {
+			return buf[0];
+		}
+		if (size == 2) {
+			return Rd16(buf);
+		}
+		return Rd32(buf); // LONG/SLONG/FLOAT, and the numerator of RATIONAL
+	}
+
+	// One element of an array tag. kInvalid when it cannot be read.
+	unsigned long long ReadElement(unsigned long long dataOff, unsigned long long type, unsigned long long j) const {
+		unsigned long long size = TypeSize(type);
+		if (size == 0) {
+			return kInvalid;
+		}
+		unsigned char buf[8];
+		if (!ReadAt(dataOff + j * size, buf, size)) {
+			return kInvalid;
+		}
+		if (size == 1) {
+			return buf[0];
+		}
+		if (size == 2) {
+			return Rd16(buf);
+		}
+		return Rd32(buf);
+	}
+
+	// R-16: bits is per-channel; the maximum over all channels, not the
+	// first value. Only SHORT/LONG element types are meaningful here.
+	bool ReadBitsArray(unsigned long long dataOff, unsigned long long type, unsigned long long count, unsigned long long& maxOut) const {
+		if (type != 3 && type != 4) {
+			return false;
+		}
+		unsigned long long size = TypeSize(type);
+		std::vector<unsigned char> buf((size_t)(count * size));
+		if (!ReadAt(dataOff, &buf[0], count * size)) {
+			return false;
+		}
+		maxOut = 0;
+		for (unsigned long long j = 0; j < count; ++j) {
+			unsigned long long v = (type == 3) ? Rd16(&buf[(size_t)(j * 2)]) : Rd32(&buf[(size_t)(j * 4)]);
+			if (v > maxOut) {
+				maxOut = v;
+			}
+		}
+		return true;
+	}
+
+	static void FillArray(TiffGateArray& a, unsigned long long type, unsigned long long count, unsigned long long dataOff) {
+		// Only SHORT/LONG are valid strip/tile arrays; anything else is
+		// left absent so the completeness rule below rejects it when it
+		// matters (compressed branch).
+		if (type != 3 && type != 4) {
+			return;
+		}
+		a.present = true;
+		a.type = type;
+		a.count = count;
+		a.dataOff = dataOff;
+	}
+
+	// Reads one IFD's entries into info. Returns false when the IFD
+	// itself is malformed (truncated, unreadable, absurd SubIFD count).
+	// Tag values that cannot be read are left missing; CheckIFD decides
+	// what a missing value means for each branch.
+	bool ReadIFD(unsigned long long ifdOff, TiffGateIFD& info) const {
+		unsigned char countBuf[2];
+		if (!ReadAt(ifdOff, countBuf, 2)) {
+			return false;
+		}
+		unsigned long long n = Rd16(countBuf);
+		if (n == 0) {
+			return false;
+		}
+		// n is a uint16, so the entry block is at most 65535 * 12 bytes.
+		unsigned long long entriesSize = n * 12;
+		if (ifdOff + 2 > m_fileSize || entriesSize > m_fileSize - (ifdOff + 2)) {
+			return false;
+		}
+		std::vector<unsigned char> entries((size_t)entriesSize);
+		if (!ReadAt(ifdOff + 2, &entries[0], entriesSize)) {
+			return false;
+		}
+		for (unsigned long long k = 0; k < n; ++k) {
+			const unsigned char* e = &entries[(size_t)(k * 12)];
+			unsigned long long tag = Rd16(e);
+			unsigned long long type = Rd16(e + 2);
+			unsigned long long count = Rd32(e + 4);
+			unsigned long long typeSize = TypeSize(type);
+			if (typeSize == 0 || count == 0) {
+				continue;
+			}
+			// Guard against a hostile count overflowing the byte total.
+			if (count > (0xFFFFFFFFULL / typeSize)) {
+				continue;
+			}
+			unsigned long long byteCount = typeSize * count;
+			unsigned long long dataOff;
+			if (byteCount <= 4) {
+				// Inline: the value field's own file offset.
+				dataOff = ifdOff + 2 + k * 12 + 8;
+			} else {
+				dataOff = Rd32(e + 8);
+				if (dataOff > m_fileSize || byteCount > m_fileSize - dataOff) {
+					continue; // external value outside the file: tag missing
+				}
+			}
+			switch (tag) {
+				case 256: info.width = ReadScalar(dataOff, type); break;
+				case 257: info.height = ReadScalar(dataOff, type); break;
+				case 259: info.compression = ReadScalar(dataOff, type); break;
+				case 277:
+					info.samples = ReadScalar(dataOff, type);
+					info.samplesPresent = true;
+					break;
+				case 258:
+					// R-16: an oversized bits array cannot be a real
+					// per-channel list; leave bits missing so the
+					// uncompressed verdict below rejects the file.
+					if (count <= 1024) {
+						unsigned long long m = 0;
+						if (ReadBitsArray(dataOff, type, count, m)) {
+							info.bits = m;
+							info.bitsPresent = true;
+						}
+					}
+					break;
+				case 273: FillArray(info.stripOff, type, count, dataOff); break;
+				case 279: FillArray(info.stripCnt, type, count, dataOff); break;
+				case 324: FillArray(info.tileOff, type, count, dataOff); break;
+				case 325: FillArray(info.tileCnt, type, count, dataOff); break;
+				case 330:
+					// SubIFD offsets. No real camera file lists more
+					// than a handful; an absurd count is malformed.
+					if (count > 1024 || (type != 3 && type != 4)) {
+						return false;
+					}
+					for (unsigned long long j = 0; j < count; ++j) {
+						unsigned long long v = ReadElement(dataOff, type, j);
+						if (v == kInvalid) {
+							return false;
+						}
+						info.subIFDs.push_back(v);
+					}
+					break;
+				default: break;
+			}
+		}
+		return true;
+	}
+
+	// Plausibility verdict for one parsed IFD. Strip/tile ranges stream
+	// both partner arrays in lockstep (R-05: no 512 cap, nothing stored).
+	bool CheckIFD(const TiffGateIFD& info) const {
+		if (info.width == 0 || info.height == 0 || info.width > 65535 || info.height > 65535) {
+			return false;
+		}
+		// R-02: with these caps the product below cannot overflow 64 bit
+		// (65535^2 * 8 * 64 / 8 is far below 2^64).
+		if (info.samplesPresent && info.samples > 8) {
+			return false;
+		}
+		if (info.bitsPresent && info.bits > 64) {
+			return false;
+		}
+		unsigned long long declaredPixels = info.width * info.height;
+		if (info.compression == 1 || info.compression == 0) {
+			// R-16: missing samples/bits no longer default to 1. A
+			// missing declaration makes the bound meaningless, so the
+			// file is rejected instead of passing a weakened check.
+			if (!info.samplesPresent || !info.bitsPresent) {
+				return false;
+			}
+			unsigned long long declaredBytes = declaredPixels * info.samples * info.bits / 8;
+			if (declaredBytes > m_fileSize) {
+				return false;
+			}
+		} else {
+			if (m_fileSize < declaredPixels / 8) {
+				return false;
+			}
+			if (!CheckArrayPair(info.stripOff, info.stripCnt)) {
+				return false;
+			}
+			if (!CheckArrayPair(info.tileOff, info.tileCnt)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool CheckArrayPair(const TiffGateArray& offs, const TiffGateArray& cnts) const {
+		// R-10, applied to strips and tiles alike: both absent is fine
+		// (then only the pixels/8 bound applies); anything else must be
+		// complete and matched, or the file is rejected.
+		if (!offs.present && !cnts.present) {
+			return true;
+		}
+		if (offs.present != cnts.present || offs.count != cnts.count) {
+			return false;
+		}
+		const unsigned long long kChunk = 1024;
+		std::vector<unsigned char> bufOff;
+		std::vector<unsigned char> bufCnt;
+		for (unsigned long long base = 0; base < offs.count; base += kChunk) {
+			unsigned long long chunk = offs.count - base;
+			if (chunk > kChunk) {
+				chunk = kChunk;
+			}
+			unsigned long long offSize = chunk * TypeSize(offs.type);
+			unsigned long long cntSize = chunk * TypeSize(cnts.type);
+			bufOff.assign((size_t)offSize, 0);
+			bufCnt.assign((size_t)cntSize, 0);
+			if (!ReadAt(offs.dataOff + base * TypeSize(offs.type), &bufOff[0], offSize)) {
+				return false;
+			}
+			if (!ReadAt(cnts.dataOff + base * TypeSize(cnts.type), &bufCnt[0], cntSize)) {
+				return false;
+			}
+			for (unsigned long long j = 0; j < chunk; ++j) {
+				unsigned long long o = (offs.type == 3)
+					? Rd16(&bufOff[(size_t)(j * 2)])
+					: Rd32(&bufOff[(size_t)(j * 4)]);
+				unsigned long long c = (cnts.type == 3)
+					? Rd16(&bufCnt[(size_t)(j * 2)])
+					: Rd32(&bufCnt[(size_t)(j * 4)]);
+				if (o > m_fileSize || c > m_fileSize - o) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	// R-04: IFD0 plus SubIFDs, depth <= 2 (IFD0 is depth 0; SubIFDs found
+	// at depth 2 are not followed). Every IFD visited must pass the same
+	// verdict: a malformed dimension hidden in a SubIFD is exactly what
+	// this gate is for, and a plausible-looking IFD0 preview does not
+	// excuse it.
+	bool CheckIFDTree(unsigned long long ifdOff, int depth) const {
+		TiffGateIFD info;
+		if (!ReadIFD(ifdOff, info)) {
+			return false;
+		}
+		if (!CheckIFD(info)) {
+			return false;
+		}
+		if (depth >= 2) {
+			return true;
+		}
+		for (size_t i = 0; i < info.subIFDs.size(); ++i) {
+			unsigned long long sub = info.subIFDs[i];
+			if (sub == 0) {
+				continue; // 0 means "no SubIFD" for this entry
+			}
+			if (!CheckIFDTree(sub, depth + 1)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+private:
+	HANDLE m_hFile;
+	unsigned long long m_fileSize;
+	bool m_little;
+};
+
 static bool IsPlausibleRawFile(LPCTSTR fileName) {
 	HANDLE hFile = ::CreateFile(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
@@ -1162,176 +1601,45 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 		::CloseHandle(hFile);
 		return false;
 	}
-	const unsigned long long fileSize = (unsigned long long)liSize.QuadPart;
-
-	// TIFF metadata sits at the front of the file; the first 1 MB covers the
-	// IFD and virtually every tag's external value. If it cannot be read, let
-	// the decoder report its own error rather than guessing.
-	const unsigned long long metaBytes = (fileSize < 1048576ULL) ? fileSize : 1048576ULL;
-	std::vector<unsigned char> buf((size_t)metaBytes);
+	unsigned long long fileSize = (unsigned long long)liSize.QuadPart;
+	unsigned char header[8];
 	DWORD got = 0;
-	if (!::ReadFile(hFile, &buf[0], (DWORD)metaBytes, &got, NULL) || got < 8) {
+	if (!::ReadFile(hFile, header, 8, &got, NULL) || got != 8) {
 		::CloseHandle(hFile);
 		return false;
 	}
-	::CloseHandle(hFile);
 
 	bool little;
-	if (buf[0] == 'I' && buf[1] == 'I') {
+	if (header[0] == 'I' && header[1] == 'I') {
 		little = true;
-	} else if (buf[0] == 'M' && buf[1] == 'M') {
+	} else if (header[0] == 'M' && header[1] == 'M') {
 		little = false;
 	} else {
+		::CloseHandle(hFile);
 		return true; // not TIFF, leave it to the decoders
 	}
 
-	const unsigned long long kInvalid = (unsigned long long)-1;
-	auto u16 = [&](unsigned long long off) -> unsigned long long {
-		if (off + 2 > (unsigned long long)buf.size()) return kInvalid;
-		if (little) return buf[(size_t)off] | ((unsigned long long)buf[(size_t)off + 1] << 8);
-		return ((unsigned long long)buf[(size_t)off] << 8) | buf[(size_t)off + 1];
-	};
-	auto u32 = [&](unsigned long long off) -> unsigned long long {
-		if (off + 4 > (unsigned long long)buf.size()) return kInvalid;
-		if (little)
-			return buf[(size_t)off] | ((unsigned long long)buf[(size_t)off + 1] << 8) |
-				((unsigned long long)buf[(size_t)off + 2] << 16) | ((unsigned long long)buf[(size_t)off + 3] << 24);
-		return ((unsigned long long)buf[(size_t)off] << 24) | ((unsigned long long)buf[(size_t)off + 1] << 16) |
-			((unsigned long long)buf[(size_t)off + 2] << 8) | buf[(size_t)off + 3];
-	};
-
-	if (u16(2) != 42) return true; // not a standard TIFF
-
-	const unsigned long long ifdOff = u32(4);
-	if (ifdOff == kInvalid || ifdOff + 2 > (unsigned long long)buf.size()) {
-		return false; // claims to be TIFF but the IFD is unreadable
+	// Byte-order-aware magic, read straight from the header bytes.
+	unsigned long long magic = little ? (header[2] | ((unsigned long long)header[3] << 8))
+		: (((unsigned long long)header[2] << 8) | header[3]);
+	if (magic != 42) {
+		::CloseHandle(hFile);
+		return true; // not a standard TIFF (includes BigTIFF, magic 43)
 	}
-	const unsigned long long n = u16(ifdOff);
-	if (n == kInvalid || n == 0 || n > 512) {
-		return false;
+	unsigned long long ifdOff = little
+		? (header[4] | ((unsigned long long)header[5] << 8) |
+			((unsigned long long)header[6] << 16) | ((unsigned long long)header[7] << 24))
+		: (((unsigned long long)header[4] << 24) | ((unsigned long long)header[5] << 16) |
+			((unsigned long long)header[6] << 8) | header[7]);
+	if (ifdOff == 0) {
+		::CloseHandle(hFile);
+		return false; // claims to be TIFF but has no IFD
 	}
 
-	unsigned long long width = 0, height = 0, compression = 1, samples = 0, bits = 0;
-	unsigned long long stripOffsets[512];
-	unsigned long long stripByteCounts[512];
-	int nStripOff = 0, nStripCnt = 0;
-	// R-10: whether a usable 273/279 array was seen at all. A strip array
-	// present without its partner (or with a different count) is itself
-	// malformed and must not silently check zero strips.
-	bool hasStripOff = false, hasStripCnt = false;
-	// R-01: a strip value that cannot be read at all (see below) fails the
-	// array closed instead of storing garbage or kInvalid, which would wrap
-	// on the offset+count add in the compressed branch.
-	bool stripOffBad = false, stripCntBad = false;
-
-	for (unsigned long long k = 0; k < n; ++k) {
-		const unsigned long long e = ifdOff + 2 + k * 12;
-		if (e + 12 > (unsigned long long)buf.size()) break;
-		const unsigned long long tag = u16(e);
-		const unsigned long long type = u16(e + 2);
-		const unsigned long long count = u32(e + 4);
-		if (count == kInvalid || count == 0 || count > 512) continue;
-
-		unsigned long long typeSize = 0;
-		switch (type) {
-			case 1: case 2: case 6: case 7: typeSize = 1; break;
-			case 3: typeSize = 2; break;
-			case 4: case 9: case 11: typeSize = 4; break;
-			case 5: case 10: typeSize = 8; break;
-			default: continue;
-		}
-		const unsigned long long byteCount = typeSize * count;
-
-		// Inline value (<= 4 bytes) or offset to the external value.
-		unsigned long long valOff = e + 8;
-		if (byteCount > 4) {
-			valOff = u32(e + 8);
-			if (valOff == kInvalid || valOff + byteCount > (unsigned long long)buf.size()) continue;
-		}
-
-		// Read the first value in its own width. A SHORT is left-justified in the
-		// 4-byte value field, so reading it as a LONG would shift it by 16 bits
-		// on big-endian files.
-		unsigned long long val = 0;
-		switch (type) {
-			case 3: val = u16(valOff); break; // SHORT
-			case 1: case 2: case 6: case 7: val = buf[(size_t)valOff]; break; // BYTE/ASCII
-			default: val = u32(valOff); break; // LONG/SLONG/FLOAT/RATIONAL numerator
-		}
-
-		switch (tag) {
-			case 256: width = val; break;
-			case 257: height = val; break;
-			case 259: compression = val; break;
-			case 277: samples = val; break;
-			case 258: bits = val; break;
-			case 273:
-				// R-01: strip arrays step by their own type. SHORT strips are
-				// 2 bytes apart (inline or external), LONG strips 4 bytes.
-				// Reading SHORT arrays with a 4-byte stride used to return
-				// garbage and falsely reject valid files; other types are
-				// not valid strip arrays and are ignored.
-				if (type == 3 || type == 4) {
-					hasStripOff = true;
-					for (unsigned long long j = 0; j < count && nStripOff < 512; ++j) {
-						unsigned long long v = (type == 3) ? u16(valOff + j * 2) : u32(valOff + j * 4);
-						if (v == kInvalid) { stripOffBad = true; break; }
-						stripOffsets[nStripOff++] = v;
-					}
-				}
-				break;
-			case 279:
-				if (type == 3 || type == 4) {
-					hasStripCnt = true;
-					for (unsigned long long j = 0; j < count && nStripCnt < 512; ++j) {
-						unsigned long long v = (type == 3) ? u16(valOff + j * 2) : u32(valOff + j * 4);
-						if (v == kInvalid) { stripCntBad = true; break; }
-						stripByteCounts[nStripCnt++] = v;
-					}
-				}
-				break;
-		}
-	}
-
-	// No sane declared size, or a size beyond any real sensor, is itself
-	// suspicious.
-	if (width == 0 || height == 0 || width > 65535 || height > 65535) {
-		return false;
-	}
-
-	// R-02: width/height <= 65535 alone does NOT keep the product below from
-	// overflowing: samples (277) and bits (258) are read as LONG u32 values
-	// with no cap, so a hostile file could wrap declaredBytes to a small
-	// value and defeat the check. TIFF semantics need no more than 8
-	// samples or 64 bits per sample; anything above that is malformed.
-	if (samples > 8 || bits > 64) {
-		return false;
-	}
-
-	const unsigned long long declaredPixels = width * height;
-
-	if (compression == 1 || compression == 0) {
-		// Uncompressed (0 is a missing/invalid value, treated conservatively as
-		// uncompressed): the file must actually hold every declared pixel.
-		const unsigned long long samplesPerPixel = samples ? samples : 1;
-		const unsigned long long bitsPerSample = bits ? bits : 1;
-		const unsigned long long declaredBytes = declaredPixels * samplesPerPixel * bitsPerSample / 8;
-		if (declaredBytes > fileSize) return false;
-	} else {
-		// Compressed: at least one bit per pixel must fit, and every strip's
-		// data range must lie inside the file.
-		if (fileSize < declaredPixels / 8) return false;
-		// R-10: the two strip arrays must either both be absent (then only
-		// the pixels/8 bound applies) or both be present with equal counts.
-		// One array without the other, unequal counts, or an unreadable
-		// value used to check zero strips and let the file through.
-		if (hasStripOff != hasStripCnt || nStripOff != nStripCnt || stripOffBad || stripCntBad) return false;
-		int nStrip = nStripOff < nStripCnt ? nStripOff : nStripCnt;
-		for (int i = 0; i < nStrip; ++i) {
-			if (stripOffsets[i] + stripByteCounts[i] > fileSize) return false;
-		}
-	}
-	return true;
+	TiffGateReader reader(hFile, fileSize, little);
+	bool ok = reader.CheckIFDTree(ifdOff, 0);
+	::CloseHandle(hFile);
+	return ok;
 }
 
 void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
@@ -1375,7 +1683,11 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	}
 }
 
-void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request) {
+// pEXIFData/nJPEGFileHash are only supplied by the JPEG CMYK fallback
+// (R-09), so a GDI+ fallback keeps the EXIF block and file hash the
+// success path would have attached. All other callers keep the defaults
+// and behave exactly as before.
+void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIFData, __int64 nJPEGFileHash) {
 	const wchar_t* sFileName;
 	sFileName = (const wchar_t*)request->FileName;
 
@@ -1388,7 +1700,7 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request) {
 		m_sLastFileName = sFileName;
 	}
 	bool isOutOfMemory, isAnimatedGIF;
-	request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, NULL, 0, isOutOfMemory, isAnimatedGIF);
+	request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF);
 	request->OutOfMemory = request->Image == NULL && isOutOfMemory;
 	if (request->OutOfMemory && GetBitmapFormat(pBitmap) == IF_TIFF) {
 		request->OutOfMemory = false; // reset before WIC retry
