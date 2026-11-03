@@ -69,8 +69,12 @@ bool CWorkThread::Terminate() {
 		m_bStopped = bStopped;
 		return bStopped;
 	}
-	m_bStopped = true;
-	return true;
+	// A NULL handle means Terminate already ran once: report what that run
+	// actually achieved instead of claiming success. After a timeout
+	// m_bStopped is false, and a second call must not rewrite it to true
+	// (the destructor relies on this to leak, not delete, the thread's
+	// critical section and event while it is still running).
+	return m_bStopped;
 }
 
 void CWorkThread::Abort() {

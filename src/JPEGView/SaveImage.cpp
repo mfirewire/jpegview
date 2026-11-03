@@ -289,7 +289,9 @@ static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, boo
 		int nQuality = CSettingsProvider::This().JXLSaveQuality();
 		pOutput = (uint8*)JxlReader::Compress((uint8*)pData, nWidth, nHeight, nSize, nQuality, bUseLosslessJXL);
 		if (pOutput == NULL) throw 1;
-		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
+		// Like WebP/QOI below: a zero-byte "success" would leave an empty
+		// file behind, so nSize > 0 is part of the success test.
+		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
 		fclose(fptr);
 		JxlReader::Free(pOutput);
 	}
@@ -528,7 +530,8 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
 		delete[] pBuffer;
 		pBuffer = NULL;
 		if (pOutput == NULL) throw 1;
-		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
+		// See SaveJXL above: nSize > 0, or an empty file counts as success.
+		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
 		fclose(fptr);
 		JxlReader::Free(pOutput);
 	}

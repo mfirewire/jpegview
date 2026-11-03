@@ -1018,6 +1018,13 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 			} else {
 				DeleteCachedJxlDecoder();
 			}
+		} else {
+			// L-D09: the read failed before JxlReader ever took ownership
+			// of pBuffer (it only releases buffers it received), so the
+			// old code fell through and leaked it. Release it here.
+			// pBuffer is NULL on the cached path, where this branch is
+			// unreachable, so delete[] is safe in all cases.
+			delete[] pBuffer;
 		}
 	}
 	catch (...) {

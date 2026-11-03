@@ -99,11 +99,8 @@ static unsigned char* _ReadFile(LPCTSTR sFileName, unsigned int & nLengthBytes) 
 
 static bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int nLengthBytes) {
 	LPCTSTR sTempEnding = _T("");
-	FILETIME lastWriteTime;
-	bool bRestoreWriteTime = false;
 	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile != INVALID_HANDLE_VALUE) {
-		bRestoreWriteTime = ::GetFileTime(hFile, NULL, NULL, &lastWriteTime);
 		::CloseHandle(hFile);
 		sTempEnding = _T(".tmp");
 	}
@@ -118,11 +115,13 @@ static bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int n
 
 	unsigned int nNumBytesWritten;
 	bool bOk = ::WriteFile(hFile, pBuffer, nLengthBytes, (LPDWORD) &nNumBytesWritten, NULL) && nNumBytesWritten == nLengthBytes;
-	
-	if (bOk && bRestoreWriteTime) {
-		::SetFileTime(hFile, NULL, NULL, &lastWriteTime);
-	}
 
+	// M-U2: the old code restored the original file's mtime onto the .tmp
+	// before ReplaceFile swapped it in, so the content changed while the
+	// mtime did not. A second instance's watcher and date-based sorting
+	// then never noticed the save. The mtime is deliberately left at the
+	// write time now. (This is not the UserCommand "keep modification
+	// date" option, which is an explicit user opt-in and is untouched.)
 	::CloseHandle(hFile);
 
 	// If the file was written to a temporary file and it succeeded, swap it in.

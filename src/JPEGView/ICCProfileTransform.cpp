@@ -141,13 +141,27 @@ void ICCProfileTransform::DeleteTransform(void* transform)
 		cmsDeleteTransform(transform);
 }
 
+static double XYZDistance(const cmsCIEXYZ* p, double x, double y, double z) {
+	const double dx = p->X - x;
+	const double dy = p->Y - y;
+	const double dz = p->Z - z;
+	return sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 bool ICCProfileTransform::IsNoTransformNeeded(const void* profile, unsigned int size)
 {
 	if (profile == NULL || size == 0)
-		return true;
+		return true; // no profile at all: nothing to apply
 	cmsHPROFILE hProfile = cmsOpenProfileFromMem(profile, size);
-	if (hProfile == NULL)
-		return true; // unreadable profile: nothing to apply
+	if (hProfile == NULL) {
+		// M-ICC1: an unreadable profile used to be silently skipped, exactly
+		// like a verified sRGB profile, so a corrupt embedded profile
+		// displayed unconverted with no trace. Do not skip it: return
+		// false so the caller attempts the conversion (CreateTransform
+		// will fail cleanly on the same bytes), and log the failure.
+		OutputDebugString(_T("JPEGView: embedded ICC profile could not be opened; conversion attempted anyway.\n"));
+		return false;
+	}
 	bool bSkip;
 	if (cmsGetColorSpace(hProfile) != cmsSigRgbData) {
 		// A gray or CMYK profile, while every caller here hands over RGB pixels.
@@ -157,8 +171,9 @@ bool ICCProfileTransform::IsNoTransformNeeded(const void* profile, unsigned int 
 		// Only skip when the profile really is sRGB. The description alone was not
 		// enough: a wide gamut profile whose description happens to contain "sRGB"
 		// was skipped and its colors went unconverted (wrong colors). Verify the
-		// colorant matrix as well. A genuinely sRGB profile with unusual numbers
-		// merely gets a harmless identity transform, which is the safe direction.
+		// colorant matrix and the white point as well. A genuinely sRGB profile
+		// with unusual numbers merely gets a harmless identity transform, which
+		// is the safe direction.
 		char text[128] = { 0 };
 		cmsGetProfileInfoASCII(hProfile, cmsInfoDescription, "en", "US", text, (cmsUInt32Number) sizeof(text) - 1);
 		bSkip = false;
@@ -166,14 +181,25 @@ bool ICCProfileTransform::IsNoTransformNeeded(const void* profile, unsigned int 
 			const cmsCIEXYZ* pRed = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigRedColorantTag);
 			const cmsCIEXYZ* pGreen = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigGreenColorantTag);
 			const cmsCIEXYZ* pBlue = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigBlueColorantTag);
-			// sRGB colorants in the D50-adapted ICC PCS. The tolerance accepts vendor
-			// variants but stays far from Adobe RGB and Display P3, whose red
-			// primaries differ by more than 0.1.
+			const cmsCIEXYZ* pWhite = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigMediaWhitePointTag);
+			// M-ICC1: reference values are sRGB in the D50-adapted ICC PCS;
+			// the white point is D65 expressed in that PCS (0.9642, 1.0,
+			// 0.8249). The tolerance is a Euclidean distance in XYZ per
+			// primary (and for the white point), not nine independent
+			// per-channel bounds: a profile passes only if each primary
+			// and the white point lie within 0.05 of sRGB. That still
+			// accepts vendor variants but stays far from Adobe RGB and
+			// Display P3, whose red primaries differ by about 0.19.
+			// Note the tolerance also admits a native-D50 white point,
+			// which differs from the D65 value only in Z by 0.0002;
+			// the check exists to catch a materially different white,
+			// not to split D50 from D65.
 			const double dTolerance = 0.05;
-			bSkip = pRed != NULL && pGreen != NULL && pBlue != NULL
-				&& fabs(pRed->X - 0.4361) < dTolerance && fabs(pRed->Y - 0.2225) < dTolerance && fabs(pRed->Z - 0.0139) < dTolerance
-				&& fabs(pGreen->X - 0.3851) < dTolerance && fabs(pGreen->Y - 0.7169) < dTolerance && fabs(pGreen->Z - 0.0971) < dTolerance
-				&& fabs(pBlue->X - 0.1431) < dTolerance && fabs(pBlue->Y - 0.0606) < dTolerance && fabs(pBlue->Z - 0.7141) < dTolerance;
+			bSkip = pRed != NULL && pGreen != NULL && pBlue != NULL && pWhite != NULL
+				&& XYZDistance(pRed, 0.4361, 0.2225, 0.0139) < dTolerance
+				&& XYZDistance(pGreen, 0.3851, 0.7169, 0.0971) < dTolerance
+				&& XYZDistance(pBlue, 0.1431, 0.0606, 0.7141) < dTolerance
+				&& XYZDistance(pWhite, 0.9642, 1.0, 0.8249) < dTolerance;
 		}
 	}
 	cmsCloseProfile(hProfile);

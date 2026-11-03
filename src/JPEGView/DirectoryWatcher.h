@@ -28,7 +28,11 @@ private:
 	CString m_sCurrentFile;
 	BOOL m_bModificationTimeValid;
 	FILETIME m_modificationTimeCurrentFile;
-	__int64 m_lastFileChangedTick; // tick count of last WM_DISPLAYED_FILE_CHANGED_ON_DISK posted, to debounce bursty FS notifications
+	DWORD m_lastFileChangedTick; // GetTickCount() of the most recent detected displayed-file change (H7b trailing-edge debounce).
+	// DWORD, not __int64: GetTickCount itself is a DWORD that wraps every 49.7 days, and the elapsed-time
+	// subtraction below is done in DWORD arithmetic where the wrap is well-defined, so a wrapped tick still
+	// yields the correct small difference for the 800 ms window. (GetTickCount64 would be cleaner but needs
+	// Vista+, and this still targets XP.)
 
 	static void  __cdecl ThreadFunc(void* arg);
 };

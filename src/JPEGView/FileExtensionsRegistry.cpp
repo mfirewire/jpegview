@@ -336,6 +336,12 @@ static RegResult UnregisterExtension(LPCTSTR sExtension, bool bNewRegistryFormat
 
 	HKEY key;
 	bool bCanWriteKey = (RegOpenKeyEx(HKEY_CURRENT_USER, sRegKeyPathForExtension, 0, DELETE | KEY_WRITE | KEY_READ, &key) == ERROR_SUCCESS);
+	if (bCanWriteKey) {
+		// This open is only a write probe; the key is reopened below.
+		// Without closing it here the first handle leaked (the
+		// registration function already does this; unregistration did not).
+		::RegCloseKey(key);
+	}
 	if (!bCanWriteKey) {
 		if (ExistsKey(sRegKeyPathForExtension)) {
 			// no rights to write to the key

@@ -2,6 +2,7 @@
 #include "SettingsProvider.h"
 #include "NLS.h"
 #include <float.h>
+#include <limits.h>
 #include <shlobj.h>
 #include <algorithm>
 
@@ -92,7 +93,36 @@ CSettingsProvider::CSettingsProvider(void) {
 		m_sIniNameUser = CString(Helpers::JPEGViewAppDataPath()) + m_sIniFileTitle;
 		m_bUserINIExists = (::GetFileAttributes(m_sIniNameUser) != INVALID_FILE_ATTRIBUTES);
 	} else {
+		// R-13: the shipped default flipped from false to true, so an
+		// upgrader who used to keep settings in AppData would silently
+		// start from defaults. On the first run under the new default
+		// (no EXE-dir INI exists, so the true above came from the
+		// default, not from a file) with an AppData INI present, copy
+		// it to the EXE dir and log the source. The destination check
+		// also protects an existing EXE-dir INI from being overwritten:
+		// that file may hold settings of its own, and merging two INIs
+		// is out of scope here. The lookup maps are reset after the
+		// copy so this run already reads the migrated file instead of
+		// the empty map loaded from the missing EXE-dir INI above.
+		// NOTE: the AppData path must be captured before the redirect
+		// below, because SetJPEGViewAppDataPath overwrites the static
+		// buffer JPEGViewAppDataPath returns.
+		CString sAppDataIni = CString(Helpers::JPEGViewAppDataPath()) + m_sIniFileTitle;
 		Helpers::SetJPEGViewAppDataPath(m_sEXEPath);
+		if (::GetFileAttributes(m_sIniNameUser) == INVALID_FILE_ATTRIBUTES &&
+			::GetFileAttributes(sAppDataIni) != INVALID_FILE_ATTRIBUTES &&
+			::CopyFile(sAppDataIni, m_sIniNameUser, TRUE)) {
+			OutputDebugString(CString(_T("JPEGView: migrated user INI from AppData: ")) + sAppDataIni + _T("\n"));
+			delete m_pGlobalKeys;
+			delete m_pUserKeys;
+			delete[] m_pIniGlobalSectionBuffer;
+			delete[] m_pIniUserSectionBuffer;
+			m_pGlobalKeys = NULL;
+			m_pUserKeys = NULL;
+			m_pIniGlobalSectionBuffer = NULL;
+			m_pIniUserSectionBuffer = NULL;
+			m_bUserINIExists = true;
+		}
 	}
 
 	// OCR 快捷键：默认 Ctrl+Q。KeyMap 会用它替换 KeyMap.txt 中对 IDM_OCR 的映射，
@@ -791,6 +821,12 @@ int CSettingsProvider::GetInt(LPCTSTR sKey, int nDefault, int nMin, int nMax) {
 	// "1e999" parses to infinity and casting it to int is undefined; reject any
 	// non-finite value instead of clamping it.
 	if (!_finite(dValue)) {
+		return nDefault;
+	}
+	// _finite only blocks inf/NaN: a finite 1e20 still casts with undefined
+	// behavior and only gets clamped afterwards. Reject out-of-range values
+	// before the cast, so they fall back to the default like any bad value.
+	if (dValue < INT_MIN || dValue > INT_MAX) {
 		return nDefault;
 	}
 	int nValue = (int)dValue;

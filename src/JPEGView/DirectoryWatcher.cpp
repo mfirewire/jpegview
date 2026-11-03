@@ -99,6 +99,7 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 	CDirectoryWatcher* thisPtr = (CDirectoryWatcher*) arg;
 	bool bTerminate = false;
 	bool bSetupNewDirectory = true;
+	bool bFileChangePending = false; // H7b: a displayed-file change was detected but not yet posted
 	HANDLE waitHandles[4]{ 0 };
 	do {
 		waitHandles[0] = thisPtr->m_terminateEvent;
@@ -119,8 +120,17 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 		}
 		::LeaveCriticalSection(&thisPtr->m_lock);
 
-		// wait for events on file system or wakeup event
-		DWORD waitStatus = ::WaitForMultipleObjects(numHandles, waitHandles, FALSE, INFINITE);
+		// wait for events on file system or wakeup event. While a displayed-file
+		// change is pending (H7b), wait only until 800 ms after the most recent
+		// detected change; a new change during the wait re-arms the timer (see
+		// the WAIT_OBJECT_0 + 3 case), so a burst produces one message for its
+		// last change instead of dropping it.
+		DWORD waitTimeout = INFINITE;
+		if (bFileChangePending) {
+			DWORD elapsed = ::GetTickCount() - thisPtr->m_lastFileChangedTick;
+			waitTimeout = (elapsed >= 800) ? 0 : 800 - elapsed;
+		}
+		DWORD waitStatus = ::WaitForMultipleObjects(numHandles, waitHandles, FALSE, waitTimeout);
 
 		switch (waitStatus) {
 			case WAIT_OBJECT_0:
@@ -165,23 +175,24 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 				::LeaveCriticalSection(&thisPtr->m_lock);
 
 				if (sendMessage) {
-					// Debounce: bursty filesystem notifications must not trigger repeated reloads.
-					// GetTickCount wraps every 49.7 days; the subtraction is done in 32-bit
-					// unsigned arithmetic where the wrap is well-defined, so a tick that has
-					// wrapped still yields the correct small difference for this 800 ms window.
-					// (GetTickCount64 would be cleaner but needs Vista+, and this still targets XP.)
-					DWORD now = ::GetTickCount();
-					if (now - (DWORD)thisPtr->m_lastFileChangedTick < 800) {
-						sendMessage = false; // skip: too soon since last reload
-					} else {
-						thisPtr->m_lastFileChangedTick = now;
-					}
-				}
-				if (sendMessage) {
-					::PostMessage(thisPtr->m_hTargetWindow, WM_DISPLAYED_FILE_CHANGED_ON_DISK, 0, 0);
+					// H7b trailing-edge debounce: arm (or re-arm) the pending
+					// notification instead of posting immediately. The message
+					// goes out only after 800 ms with no further change, so
+					// the last change in a burst is delivered. The old code
+					// discarded any change within 800 ms of the last posted
+					// message, which lost exactly the tail change.
+					bFileChangePending = true;
+					thisPtr->m_lastFileChangedTick = ::GetTickCount();
 				}
 				break;
 				}
+			case WAIT_TIMEOUT:
+				// 800 ms passed with no new change: deliver the pending notification.
+				if (bFileChangePending) {
+					bFileChangePending = false;
+					::PostMessage(thisPtr->m_hTargetWindow, WM_DISPLAYED_FILE_CHANGED_ON_DISK, 0, 0);
+				}
+				break;
 			default:
 				// unexpected, terminate
 				bTerminate = true;
@@ -189,6 +200,12 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 		}
 
 		if (bTerminate || bSetupNewDirectory) {
+			// A pending notification belongs to the old watched directory;
+			// drop it when the directory is re-set up instead of posting
+			// a stale change for a file that is no longer watched.
+			if (bSetupNewDirectory) {
+				bFileChangePending = false;
+			}
 			if (waitHandles[2] != NULL && waitHandles[2] != INVALID_HANDLE_VALUE) {
 				::FindCloseChangeNotification(waitHandles[2]);
 				waitHandles[2] = NULL;

@@ -98,24 +98,49 @@ static int _GetKeyCode(LPTSTR sKey) {
 		}
 	}
 
-	// A token that is not a modifier, an F key or a single character ("Foo" in
-	// "Foo+Q") silently contributes 0 and the command ends up on a different key
-	// than the user intended. Log it so the mistake is visible under a debugger.
+	// M-OCR14: a token that is not a modifier, an F key or a single character
+	// ("Foo" in "Foo+Q") returns -1 instead of silently contributing 0, so
+	// _ParseKeys can reject the whole shortcut. The old 0 made the command
+	// end up on a different key than the user intended (bare Q above).
+	// No valid token returns -1: every table entry and F key is positive.
 	OutputDebugString(_T("KeyMap: unrecognized key token: "));
 	OutputDebugString(sKey);
 	OutputDebugString(_T("\n"));
-	return 0;
+	return -1;
 }
 
+// Returns the combined key code, or -1 when the shortcut is invalid: an
+// unrecognized token, a repeated modifier ("Ctrl+Ctrl+Q" would sum the
+// modifier bit twice into a value no real key press ever produces), or a
+// second base key ("Q+W" likewise never matches a single key press).
+// Callers treat -1 like 0 (no mapping); both are <= 0, so a single
+// "nKeyCode <= 0" check covers the old empty case and the new rejects.
 static int _ParseKeys(LPTSTR sKeys) {
 	int nKeyCode = 0;
+	int nModifiersSeen = 0;
+	bool bBaseKeySeen = false;
 	bool bContinue = true;
 	while (bContinue) {
 		LPTSTR sStart = sKeys;
 		while (*sKeys != _T('+') && *sKeys != 0) sKeys++;
 		if (*sKeys == 0) bContinue = false;
 		*sKeys = 0;
-		nKeyCode += _GetKeyCode(sStart);
+		int nCode = _GetKeyCode(sStart);
+		if (nCode < 0) {
+			return -1;
+		}
+		if (nCode == M_ALT || nCode == M_CTRL || nCode == M_SHIFT) {
+			if ((nModifiersSeen & nCode) != 0) {
+				return -1; // repeated modifier: dead mapping
+			}
+			nModifiersSeen |= nCode;
+		} else {
+			if (bBaseKeySeen) {
+				return -1; // second base key: dead mapping
+			}
+			bBaseKeySeen = true;
+		}
+		nKeyCode += nCode;
 		sKeys++;
 	}
 	return nKeyCode;
@@ -248,7 +273,7 @@ CKeyMap::CKeyMap() {
 		int nCommandId = _FindCommandId(m_symbolMap, sCommandId);
 		if (nCommandId < 0) continue;
 		int nKeyCode = _ParseKeys(sLine);
-		if (nKeyCode == 0) continue;
+		if (nKeyCode <= 0) continue;
 		m_keyMap[nKeyCode] = nCommandId;
 	}
 
@@ -266,7 +291,7 @@ int CKeyMap::GetVirtualKeyCode(LPCTSTR keyName) {
 	}
 	LPTSTR buffer = sBuffer.GetBuffer(sBuffer.GetLength());
 	int key = _ParseKeys(buffer);
-	return (key == 0) ? -1 : key;
+	return (key <= 0) ? -1 : key;
 }
 
 int CKeyMap::GetCombinedKeyCode(int keyCode, bool alt, bool control, bool shift) {
@@ -317,7 +342,7 @@ void CKeyMap::ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut) {
 		nKeyCode = _ParseKeys(pBuffer);
 		sBuffer.ReleaseBuffer();
 	}
-	if (nKeyCode == 0) return;
+	if (nKeyCode <= 0) return;
 
 	// Esc 和鼠标左键承载基本交互（退出当前模式、平移、裁剪）。让配置把它们
 	// 抢走会把用户困在一个没有常规出口的模式里，直接拒绝。

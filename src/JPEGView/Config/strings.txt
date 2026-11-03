@@ -201,6 +201,7 @@ Loop through files in current directory and all sibling folders (folders on same
 Loop through files in current directory and all subfolders	
 Loop through files in current folder	
 Lossless JPEG transformations	
+Lossless transformation is not available because the image has been edited in memory. Save the image first.	
 M - G	
 Magenta-Green	
 Manage 'Open image with' menu...	
@@ -221,6 +222,7 @@ New size:
 New width:	
 Next image	
 No image loaded!	
+No OCR engine could be created for the configured languages.	
 No user INI file exists yet. Create user INI file from INI file template?	
 None	
 Not enough memory available	

@@ -58,6 +58,12 @@ void CZoomNavigatorCtl::DoDragging(int nDeltaX, int nDeltaY) {
 		int nNewX = m_capturedPosZoomNavSection.x + nDeltaX;
 		int nNewY = m_capturedPosZoomNavSection.y + nDeltaY;
 		CRect fullRect = CZoomNavigator::GetNavigatorRect(m_pMainDlg->GetCurrentImage(), m_pImageProcPanel->PanelRect(), m_pNavigationPanel->PanelRect());
+		// An empty navigator rect (no image, or a collapsed panel) would
+		// divide by a zero Width/Height below: float division yields inf
+		// and the conversion to int is undefined. There is nothing to pan.
+		if (fullRect.IsRectEmpty()) {
+			return;
+		}
 		CPoint newOffsets = CJPEGImage::ConvertOffset(fullRect.Size(), m_zoomNavigator.LastVisibleRect().Size(), CPoint(nNewX - fullRect.left, nNewY - fullRect.top));
 		m_pMainDlg->PerformPan((int)(newOffsets.x * (float)virtualImageSize.cx/fullRect.Width()), 
 			(int)(newOffsets.y * (float)virtualImageSize.cy/fullRect.Height()), true);

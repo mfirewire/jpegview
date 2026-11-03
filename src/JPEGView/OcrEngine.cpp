@@ -9,6 +9,7 @@
 #undef min
 #endif
 #include "OcrEngine.h"
+#include "NLS.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -304,7 +305,11 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
         // 所有候选语言都创建失败（标签写错、语言包全卸载）时，上面两个都是空、
         // error 也是空，调用方连个提示都弹不出来。给一个明确的原因。
         if (attempts == 0 && result.words.empty()) {
-            result.error = L"No OCR engine could be created for the configured languages.";
+            // M-OCR11: this used to be a raw literal, so it never went through the
+            // language tables at all. Route it through CNLS like every other user-
+            // facing message; the key is in strings.txt (English baseline) and
+            // awaits translation in the other language files.
+            result.error = CNLS::GetString(_T("No OCR engine could be created for the configured languages."));
         }
     } catch (const std::exception&) {
         result.error = L"OCR recognition failed.";
@@ -367,7 +372,33 @@ static bool SplitInsideLatinWord(const Word& prev, const Word& next) {
 // 时才这样判定——词尾的 "word'" 或真正的词间破折号（en/em dash）不在其列，仍按
 // 普通词间空格处理。ASCII 与 Unicode 弯撇号/连字符都收进来。
 static bool IsStandaloneWordInternalPunct(const std::wstring& s) {
-    return s == L"'" || s == L"\u2019" || s == L"-" || s == L"\u2010";
+    return s == L"'" || s == L"\u2019" || s == L"-" || s == L"\u2010" || s == L"\u2011";
+}
+
+// R-12: punctuation joining is gap-checked, unlike the old code which joined
+// any standalone quote/hyphen regardless of distance. A quote only joins
+// when it sits close to its neighbor: an opening quote in "said 'hello'"
+// and the dashes in "A - B" are word gaps, not word-internal punctuation.
+// The reference char width comes from the non-punct side, because a punct
+// box itself is too narrow to calibrate against (a 1 px gap next to a 3 px
+// quote box would otherwise fail a 0.2-width test and split "don't").
+static bool PunctJoinsWithoutSpace(const Word& prev, const Word& next) {
+    const bool prevPunct = IsStandaloneWordInternalPunct(prev.text);
+    const bool nextPunct = IsStandaloneWordInternalPunct(next.text);
+    if (!prevPunct && !nextPunct) return false;
+    auto charWidth = [](const Word& w) {
+        return w.text.empty() ? 0.0f : (w.corners[1].x - w.corners[0].x) / float(w.text.size());
+    };
+    float reference = 0.0f;
+    if (prevPunct && nextPunct) {
+        reference = std::min(charWidth(prev), charWidth(next));
+    } else if (prevPunct) {
+        reference = charWidth(next);
+    } else {
+        reference = charWidth(prev);
+    }
+    const float gap = next.corners[0].x - prev.corners[1].x;
+    return reference > 0 && gap < reference * 0.2f;
 }
 
 std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool>& selected) {
@@ -382,15 +413,18 @@ std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool
         if (text.empty()) continue;
         if (previous >= 0) {
             // 跨行保留换行；行内按语言决定是否插入空格。
-            // 多选时 previous 是上一个被选中的词，中间可能隔了没选中的词，
-            // 所以 SplitInsideLatinWord 的几何判断在这里仍然成立：
-            // 隔得远的两个词 gap 大，不会被当成同一个拉丁词的断行。
+            // R-12: 拼接判定看词表里的直接前驱 words[i - 1]，而不是上一个
+            // 被选中的词。选中 don + t、中间的 ' 框没被选中时，直接前驱
+            // 就是这个 '，按词内标点紧密拼接得到 don't；若按上一个被选
+            // 中词判定，don 与 t 之间隔着 ' 框，间隙大，会被误判为两个词。
+            // 标点拼接带间隙判定（见 PunctJoinsWithoutSpace），所以开头的
+            // 引号（said 'hello'）与词间横线（A - B）不会被错误粘连。
+            const Word& directPrev = words[i - 1];
             if (words[i].line != lastLine) {
                 out += L"\r\n";
             } else if (NeedsSpaceBetween(out.back(), text.front())
-                       && !SplitInsideLatinWord(words[previous], words[i])
-                       && !IsStandaloneWordInternalPunct(words[previous].text)
-                       && !IsStandaloneWordInternalPunct(text)) {
+                       && !SplitInsideLatinWord(directPrev, words[i])
+                       && !PunctJoinsWithoutSpace(directPrev, words[i])) {
                 out += L' ';
             }
         }

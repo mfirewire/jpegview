@@ -424,6 +424,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 			if (transform != NULL) {
 				uint32* pImage32 = (uint32*)pPixelData;
 
+				// S-L5: the nChannels == 5 cases below are dead branches,
+				// annotated rather than deleted. CMYK starts with up to 5
+				// channels, but the ICC block above forces nChannels = 4
+				// for CMYK (alpha is disabled there), so a 5-channel CMYK
+				// image never reaches this loop. The branches are kept so
+				// a future alpha-capable CMYK path can revive the layout
+				// deliberately instead of rediscovering it.
 				for (int i = 0; i < nWidth * nHeight; i++) {
 					if (nChannels == 5)
 						pImage32 = (uint32*)((uint8*)pImage32 + 1);
