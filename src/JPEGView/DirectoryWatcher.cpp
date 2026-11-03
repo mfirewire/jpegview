@@ -166,10 +166,12 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 
 				if (sendMessage) {
 					// Debounce: bursty filesystem notifications must not trigger repeated reloads.
-					// GetTickCount wraps every 49.7 days, which made the subtraction go
-					// permanently negative and stopped every reload; the 64-bit form does not.
-					__int64 now = ::GetTickCount64();
-					if (now - thisPtr->m_lastFileChangedTick < 800) {
+					// GetTickCount wraps every 49.7 days; the subtraction is done in 32-bit
+					// unsigned arithmetic where the wrap is well-defined, so a tick that has
+					// wrapped still yields the correct small difference for this 800 ms window.
+					// (GetTickCount64 would be cleaner but needs Vista+, and this still targets XP.)
+					DWORD now = ::GetTickCount();
+					if (now - (DWORD)thisPtr->m_lastFileChangedTick < 800) {
 						sendMessage = false; // skip: too soon since last reload
 					} else {
 						thisPtr->m_lastFileChangedTick = now;
