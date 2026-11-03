@@ -824,15 +824,42 @@ CFileList* CFileList::TryCreateFileList(const CString& directory, int nNewLevel)
 void CFileList::FindFiles() {
 	m_fileList.clear();
 	if (!m_sDirectory.IsEmpty()) {
-		CFindFile fileFind;
+		// One pass over the directory, matching the ending in memory. The old loop
+		// asked the file system once per ending - up to 48 of them once the RAW and
+		// WIC lists from the ini are added - and a suffix wildcard like "*.jpg"
+		// cannot use the directory index, so each of those calls re-scanned the
+		// whole directory. Asking for "*" once turns that into a single scan.
+		//
+		// The "has an ending" test deliberately mirrors the old comparison instead
+		// of following the usual "a leading dot is not an extension" rule: the old
+		// code took everything after the last dot and compared it, so a file named
+		// ".jpg" was listed, and rejecting leading dots here would silently drop
+		// it. ".gitignore" still falls out on its own because "gitignore" is not a
+		// supported ending. Only a name without a dot, or one ending in a dot, is
+		// rejected up front. The ending itself is compared exactly, which also
+		// covers the reason the old code needed expectedExtension: FindFirstFile
+		// ("*.tif") also returns ".tiff" files through their 8.3 short name.
 		LPCTSTR* allFileEndings = GetSupportedFileEndingList();
-		for (int i = 0; i < nNumEndings; i++) {
-			if (fileFind.FindFile(m_sDirectory + _T("\\*.") + allFileEndings[i])) {
-				AddToFileList(m_fileList, fileFind, allFileEndings[i]);
-				while (fileFind.FindNextFile()) {
-					AddToFileList(m_fileList, fileFind, allFileEndings[i]);
+		CFindFile fileFind;
+		if (fileFind.FindFile(m_sDirectory + _T("\\*"))) {
+			do {
+				if (fileFind.IsDirectory()) {
+					continue;
 				}
-			}
+				const CString& sFileName = fileFind.GetFileName();
+				int nLastDot = sFileName.ReverseFind(_T('.'));
+				if (nLastDot < 0 || nLastDot == sFileName.GetLength() - 1) {
+					continue;
+				}
+				LPCTSTR sEnding = ((LPCTSTR) sFileName) + nLastDot + 1;
+				bool bSupported = false;
+				for (int i = 0; i < nNumEndings && !bSupported; i++) {
+					bSupported = (_tcsicmp(sEnding, allFileEndings[i]) == 0);
+				}
+				if (bSupported) {
+					AddToFileList(m_fileList, fileFind, NULL);
+				}
+			} while (fileFind.FindNextFile());
 		}
 	}
 
