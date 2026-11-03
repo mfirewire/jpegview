@@ -318,6 +318,8 @@ ForceGDIPlus=false
 ; 0.1-0.3 s for a 12 MP photo, more for larger ones. The image is still loaded
 ; asynchronously, it just appears that much later.
 ; TIFF is color-managed by GDI+ and is not affected by this setting.
+; CMYK JPEGs decode through GDI+ (TurboJPEG rejects 4-component images) and their
+; embedded CMYK profile is not applied; the base colors are still correct.
 UseEmbeddedColorProfiles=true
 
 ; -----------------------------------------------

@@ -95,6 +95,12 @@ static HRESULT CopyWICBitmapToBuffer(IWICBitmapSource *piBitmapSource, byte* tar
 
 	IFS(CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_IWICImagingFactory, (LPVOID*) &piImagingFactory));
 	IFS(piImagingFactory->CreateFormatConverter(&piFormatConverter));
+	// Colour management here is WIC's, not ours. IWICFormatConverter::Initialize
+	// applies the source bitmap's embedded colour context when it converts to
+	// 32bppBGR, even though no destination context is passed. That is deliberate
+	// and verified: a wide-gamut image forced through this path renders identically
+	// with and without an ICC profile under UseEmbeddedColorProfiles. Do not swap
+	// this for a conversion path that drops the source colour context.
 	IFS(piFormatConverter->Initialize(piBitmapSource, GUID_WICPixelFormat32bppBGR, WICBitmapDitherTypeNone, NULL, 0.0, WICBitmapPaletteTypeCustom));
 	IFS(piFormatConverter->GetSize(&width, &height));
 
