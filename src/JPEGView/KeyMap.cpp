@@ -98,6 +98,12 @@ static int _GetKeyCode(LPTSTR sKey) {
 		}
 	}
 
+	// A token that is not a modifier, an F key or a single character ("Foo" in
+	// "Foo+Q") silently contributes 0 and the command ends up on a different key
+	// than the user intended. Log it so the mistake is visible under a debugger.
+	OutputDebugString(_T("KeyMap: unrecognized key token: "));
+	OutputDebugString(sKey);
+	OutputDebugString(_T("\n"));
 	return 0;
 }
 

@@ -902,7 +902,14 @@ static bool IsInFileEndingList(LPCTSTR sFileEndings, LPCTSTR sEnding) {
 }
 
 EImageFormat GetImageFormat(LPCTSTR sFileName) {
-	LPCTSTR sEnding = _tcsrchr(sFileName, _T('.'));
+	// Look for the dot only in the file name, not the whole path. _tcsrchr over
+	// the full path took the last dot anywhere, so a file without an extension in
+	// a dotted directory (C:\my.dir\photo) was matched against "dir\photo".
+	LPCTSTR sBase = _tcsrchr(sFileName, _T('\\'));
+	LPCTSTR sBaseAlt = _tcsrchr(sFileName, _T('/'));
+	if (sBaseAlt != NULL && (sBase == NULL || sBaseAlt > sBase)) sBase = sBaseAlt;
+	sBase = (sBase == NULL) ? sFileName : (sBase + 1);
+	LPCTSTR sEnding = _tcsrchr(sBase, _T('.'));
 	if (sEnding != NULL) {
 		sEnding += 1;
 		if (_tcsicmp(sEnding, _T("JPG")) == 0 || _tcsicmp(sEnding, _T("JPEG")) == 0 || _tcsicmp(sEnding, _T("JFIF")) == 0) {

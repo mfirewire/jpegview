@@ -362,6 +362,14 @@ static bool SplitInsideLatinWord(const Word& prev, const Word& next) {
     return reference > 0 && gap < reference * 0.2f;
 }
 
+// 撇号与连字符是词内标点。OCR 会把 "don't" / "well-known" 切成 "don" + "'" + "t"、
+// "well" + "-" + "known"，这三个框之间都不能有空格。只有当整框就是一个标点字符
+// 时才这样判定——词尾的 "word'" 或真正的词间破折号（en/em dash）不在其列，仍按
+// 普通词间空格处理。ASCII 与 Unicode 弯撇号/连字符都收进来。
+static bool IsStandaloneWordInternalPunct(const std::wstring& s) {
+    return s == L"'" || s == L"\u2019" || s == L"-" || s == L"\u2010";
+}
+
 std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool>& selected) {
     if (words.empty() || selected.size() != words.size()) return L"";
 
@@ -379,7 +387,10 @@ std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool
             // 隔得远的两个词 gap 大，不会被当成同一个拉丁词的断行。
             if (words[i].line != lastLine) {
                 out += L"\r\n";
-            } else if (NeedsSpaceBetween(out.back(), text.front()) && !SplitInsideLatinWord(words[previous], words[i])) {
+            } else if (NeedsSpaceBetween(out.back(), text.front())
+                       && !SplitInsideLatinWord(words[previous], words[i])
+                       && !IsStandaloneWordInternalPunct(words[previous].text)
+                       && !IsStandaloneWordInternalPunct(text)) {
                 out += L' ';
             }
         }
