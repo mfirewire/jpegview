@@ -85,7 +85,7 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_pGlobalKeys = NULL;
 	m_pUserKeys = NULL;
 	m_sIniNameUser = m_sIniNameGlobal;
-	m_bStoreToEXEPath = GetBool(_T("StoreToEXEPath"), false);
+	m_bStoreToEXEPath = GetBool(_T("StoreToEXEPath"), true);
 
 	if (!m_bStoreToEXEPath) {
 		// User INI file
@@ -121,7 +121,7 @@ CSettingsProvider::CSettingsProvider(void) {
 	ReadWriteableINISettings();
 
 	m_bAutoFullScreen = GetString(_T("ShowFullScreen"), _T("")).CompareNoCase(_T("auto")) == 0;
-	m_bShowFullScreen = m_bAutoFullScreen ? true : GetBool(_T("ShowFullScreen"), true);
+	m_bShowFullScreen = m_bAutoFullScreen ? true : GetBool(_T("ShowFullScreen"), false);
 	m_bShowEXIFDateInTitle = GetBool(_T("ShowEXIFDateInTitle"), true);
 	m_bShowFullPathInTitle = GetBool(_T("ShowFilePathInTitle"), false);
 	m_bShowHistogram = GetBool(_T("ShowHistogram"), false);
@@ -164,7 +164,7 @@ CSettingsProvider::CSettingsProvider(void) {
 		m_eDownsamplingFilter = Filter_Downsampling_Best_Quality;
 	}
 
-	m_bNavigateMouseWheel = GetBool(_T("NavigateWithMouseWheel"), false);
+	m_bNavigateMouseWheel = GetBool(_T("NavigateWithMouseWheel"), true);
 	m_dMouseWheelZoomSpeed = GetDouble(_T("MouseWheelZoomSpeed"), 1.0, 0.1, 10);
 
 	CString sDeleteConfirmation = GetString(_T("DeleteConfirmation"), _T("OnlyWhenNoRecycleBin"));
@@ -434,7 +434,7 @@ void CSettingsProvider::ReadWriteableINISettings() {
 	else {
 		m_eNavigation = Helpers::NM_LoopDirectory;
 	}
-	CString sSorting = GetString(_T("FileDisplayOrder"), _T("LastModDate"));
+	CString sSorting = GetString(_T("FileDisplayOrder"), _T("FileName"));
 	if (sSorting.CompareNoCase(_T("CreationDate")) == 0) {
 		m_eSorting = Helpers::FS_CreationTime;
 	}
