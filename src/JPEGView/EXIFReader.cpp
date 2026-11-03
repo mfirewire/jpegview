@@ -265,11 +265,19 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 	m_dAltitude = UNKNOWN_DOUBLE_VALUE;
 
 	m_pApp1 = (uint8*)pApp1Block;
+	m_nApp1Size = 0;
 	// APP1 marker
 	if (m_pApp1[0] != 0xFF || m_pApp1[1] != 0xE1) {
 		return;
 	}
 	int nApp1Size = m_pApp1[2]*256 + m_pApp1[3] + 2;
+	m_nApp1Size = nApp1Size;
+	// The TIFF header sits at offset 10 and is 8 bytes, so anything shorter is
+	// not a real EXIF block. Without this a truncated APP1 read past the end of
+	// the block below.
+	if (nApp1Size < 18) {
+		return;
+	}
 
 	// Read TIFF header
 	uint8* pTIFFHeader = m_pApp1 + 10;
@@ -424,6 +432,14 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 			if (pTagOffsetSOI != NULL && pTagJPEGLen != NULL) {
 				uint32 nOffsetSOI = ReadLongTag(pTagOffsetSOI, bLittleEndian);
 				uint32 nJPEGBytes = ReadLongTag(pTagJPEGLen, bLittleEndian);
+				// Both values come straight from the file and neither was bounded
+				// against the block. A crafted offset made pTIFFHeader + nOffsetSOI
+				// point outside the EXIF block and FindJPEGMarker then read from
+				// it; a length larger than the block did the same on the far side.
+				if (nOffsetSOI > (uint32)(m_nApp1Size - 10) ||
+					nJPEGBytes > (uint32)(m_nApp1Size - 10) - nOffsetSOI) {
+					return;
+				}
 				uint8* pSOI = pTIFFHeader + nOffsetSOI;
 				uint8* pSOF = (uint8*) Helpers::FindJPEGMarker(pSOI, nJPEGBytes, 0xC0);
 				// FindJPEGMarker only guarantees the marker bytes themselves. The

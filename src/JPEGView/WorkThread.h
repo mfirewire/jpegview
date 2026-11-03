@@ -35,8 +35,10 @@ public:
 	CWorkThread(bool bCoInitialize);
 	virtual ~CWorkThread(void);
 
-	// Clean termination, finishes the currently processed request before terminating
-	void Terminate();
+	// Clean termination, finishes the currently processed request before terminating.
+	// Returns true if the thread actually stopped within the wait window, false if it
+	// was still running (the caller must then not touch the thread's resources).
+	bool Terminate();
 
 	// Aborts the thread immediately. Leaves an undefined state - only call on process termination.
 	void Abort();
@@ -68,6 +70,7 @@ protected:
 	HANDLE m_wakeUp; // wake up event for the tread (it sleeps while there is nothing to process)
 	HANDLE m_hThread; // working thread
 	volatile bool m_bTerminate; // flags termination for thread
+	bool m_bStopped; // true once the thread has been observed to exit
 
 private:
 	static void  __cdecl ThreadFunc(void* arg);

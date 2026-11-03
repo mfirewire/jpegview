@@ -38,6 +38,12 @@ CRect CZoomNavigator::GetNavigatorBound(const CRect& panelRect) {
 }
 
 CRect CZoomNavigator::GetNavigatorRect(CJPEGImage* pImage, const CRect& panelRect, const CRect& navigatorRect) {
+	// The tilt-correction panel calls this while it is visible even when the
+	// current image is gone (reload failed, file deleted). GetImageRect below
+	// dereferences pImage unconditionally.
+	if (pImage == NULL) {
+		return CRect(0, 0, 0, 0);
+	}
 	CSize thumbSize = GetThumbSize(panelRect.Width());
 	double dZoom;
 	CSize sizeThumbOriginal = Helpers::GetImageRect(pImage->OrigWidth(), pImage->OrigHeight(), thumbSize.cy, thumbSize.cy, 

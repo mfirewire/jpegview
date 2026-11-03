@@ -142,6 +142,8 @@ bool COcrController::MouseDown(CMainDlg& main, CPoint point) {
     // The word is not toggled yet: a click (press and release without moving)
     // toggles it in MouseUp, a drag replaces the selection with the swept range.
     m_dragAnchor = m_dragEnd = hit;
+    m_dragStart = point;
+    m_dragMoved = false;
     m_selecting = true;
     main.Invalidate(FALSE);
     return true;
@@ -152,6 +154,13 @@ bool COcrController::MouseMove(CMainDlg& main, CPoint point) {
     const int hit = Hit(main, point);
     m_hovering = hit >= 0;
     if (m_selecting) {
+        // A few pixels of jitter while pressing must not turn a click into a
+        // drag, otherwise tapping a word replaces the whole selection.
+        const int dx = point.x - m_dragStart.x;
+        const int dy = point.y - m_dragStart.y;
+        if (!m_dragMoved && (dx > 4 || dx < -4 || dy > 4 || dy < -4)) {
+            m_dragMoved = true;
+        }
         if (hit >= 0 && m_dragEnd != hit) { m_dragEnd = hit; main.Invalidate(FALSE); }
         ::SetCursor(::LoadCursor(nullptr, IDC_IBEAM));
         return true; // swallow while a selection is being dragged
@@ -167,15 +176,17 @@ bool COcrController::MouseUp(CMainDlg& main) {
     const bool wasSelecting = m_selecting;
     m_selecting = false;
     const int anchor = m_dragAnchor, end = m_dragEnd;
+    const bool dragMoved = m_dragMoved;
     m_dragAnchor = m_dragEnd = -1;
+    m_dragMoved = false;
     if (!wasSelecting || anchor < 0) return false;
 
-    if (end < 0 || end == anchor) {
+    if (!dragMoved) {
         // A click toggles one word, so a second click on it deselects again.
         if (size_t(anchor) < m_selected.size()) {
             m_selected[size_t(anchor)] = !m_selected[anchor];
         }
-    } else {
+    } else if (end != anchor) {
         // A drag is a fresh selection: the swept range replaces what was there.
         // 这里不用 std::min/std::max：windows.h 把它们定义成了宏，而本文件没有
         // #undef（OcrEngine.cpp 里有），展开后会变成语法错误。
@@ -186,6 +197,8 @@ bool COcrController::MouseUp(CMainDlg& main) {
             m_selected[size_t(i)] = true;
         }
     }
+    // else: dragged off the words and released over empty space, keep the
+    // selection as it was.
     main.Invalidate(FALSE);
     return true;
 }

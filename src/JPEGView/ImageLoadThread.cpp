@@ -254,12 +254,15 @@ CImageLoadThread::~CImageLoadThread(void) {
 	// Stop the worker before releasing the caches it may still be reading. The
 	// base destructor runs after this one, so without this call the caches were
 	// freed first and a WebP/PNG/JXL/AVIF frame decode in flight used freed memory.
-	Terminate();
-	DeleteCachedGDIBitmap();
-	DeleteCachedWebpDecoder();
-	DeleteCachedPngDecoder();
-	DeleteCachedJxlDecoder();
-	DeleteCachedAvifDecoder();
+	// Terminate() returns false when the thread outlives its 10 s window; on that
+	// path the caches are leaked rather than freed out from under a running decode.
+	if (Terminate()) {
+		DeleteCachedGDIBitmap();
+		DeleteCachedWebpDecoder();
+		DeleteCachedPngDecoder();
+		DeleteCachedJxlDecoder();
+		DeleteCachedAvifDecoder();
+	}
 }
 
 int CImageLoadThread::AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished) {

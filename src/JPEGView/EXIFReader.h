@@ -140,6 +140,7 @@ private:
 
 	bool m_bLittleEndian;
 	uint8* m_pApp1;
+	int m_nApp1Size;   // length of the APP1 block in bytes, used to bound offset reads
 	uint8* m_pTagOrientation;
 	uint8* m_pLastIFD0;
 	uint8* m_pIFD1;

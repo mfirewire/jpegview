@@ -262,6 +262,10 @@ void CNavigationPanelCtl::DoNavPanelAnimation() {
 								  *m_pNavPanel, CPoint(-rectNavPanel.left, -rectNavPanel.top), m_fCurrentBlendingFactorNavPanel);
 			screenDC.BitBlt(rectNavPanel.left, rectNavPanel.top, rectNavPanel.Width(), rectNavPanel.Height(), *m_pMemDCAnimation, 0, 0, SRCCOPY);
 		}
+		// GetDC above paired with ReleaseDC here, outside the pDIBData check so
+		// every path releases. Without it every animation frame leaked a device
+		// context until GDI ran out of handles.
+		m_pMainDlg->ReleaseDC(screenDC);
 	}
 	if (bTerminate) {
 		EndNavPanelAnimation();

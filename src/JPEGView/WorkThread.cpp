@@ -11,6 +11,7 @@ CWorkThread::CWorkThread(bool bCoInitialize)
 	: m_csList{ 0 }
 {
 	m_bTerminate = false;
+	m_bStopped = false;
 	m_bCoInitialize = bCoInitialize;
 	::InitializeCriticalSection(&m_csList);
 	m_wakeUp = ::CreateEvent(0, TRUE, FALSE, NULL);
@@ -19,11 +20,18 @@ CWorkThread::CWorkThread(bool bCoInitialize)
 }
 
 CWorkThread::~CWorkThread(void) {
+	bool bStopped = m_bStopped;
 	if (!m_bTerminate) {
-		Terminate();
+		bStopped = Terminate();
 	}
-	::DeleteCriticalSection(&m_csList);
-	::CloseHandle(m_wakeUp);
+	// Only release what the thread is done with. Terminate() waits 10 s and on
+	// timeout leaves the thread running; deleting the critical section and the
+	// event while it still uses them is a use-after-free. On that path leak them
+	// instead - the process is exiting and the OS reclaims everything.
+	if (bStopped) {
+		::DeleteCriticalSection(&m_csList);
+		::CloseHandle(m_wakeUp);
+	}
 }
 
 void CWorkThread::ProcessAndWait(CRequestBase* pRequest) {
@@ -50,13 +58,19 @@ void CWorkThread::ProcessAsync(CRequestBase* pRequest) {
 	::SetEvent(m_wakeUp);
 }
 
-void CWorkThread::Terminate() { 
+bool CWorkThread::Terminate() { 
 	m_bTerminate = true;
 	if (m_hThread != NULL) {
 		::SetEvent(m_wakeUp);
-		::WaitForSingleObject(m_hThread, 10000);
+		// The return value was ignored: a thread that outlives the 10 s window
+		// is still running, and anything deleted afterwards is a use-after-free.
+		const bool bStopped = WAIT_OBJECT_0 == ::WaitForSingleObject(m_hThread, 10000);
 		m_hThread = NULL;
+		m_bStopped = bStopped;
+		return bStopped;
 	}
+	m_bStopped = true;
+	return true;
 }
 
 void CWorkThread::Abort() {

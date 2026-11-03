@@ -38,6 +38,12 @@ private:
     // 拖动则用一段连续范围整体替换。复制时按索引顺序拼接，天然是原文顺序。
     std::vector<bool> m_selected;
     int m_dragAnchor = -1, m_dragEnd = -1;
+    // Screen point of the press and whether the pointer moved far enough to turn
+    // the gesture from a click into a drag. Without the threshold a shaky click
+    // that grazes a neighbour word replaced the whole multi-selection, and a
+    // drag released over empty space was misread as a click.
+    CPoint m_dragStart;
+    bool m_dragMoved = false;
     bool IsSelected(size_t index) const { return index < m_selected.size() && m_selected[index]; }
     int Hit(CMainDlg& main, CPoint point) const;
 };
