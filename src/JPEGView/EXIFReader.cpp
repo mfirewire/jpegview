@@ -54,12 +54,12 @@ static uint8* FindTag(uint8* ptr, uint8* ptrLast, uint16 nTag, bool bLittleEndia
 // (m_pApp1 + nApp1Size); the check runs in 64 bit so a huge offset cannot
 // wrap around and pass. Callers pass the TIFF header, offsets are relative
 // to it.
-static bool IsTIFFRangeValid(uint8* pTIFFHeader, const uint8* pTIFFEnd, uint32 nOffset, uint64 nLength) {
+static bool IsTIFFRangeValid(uint8* pTIFFHeader, const uint8* pTIFFEnd, uint32 nOffset, unsigned __int64 nLength) {
 	if (pTIFFEnd < pTIFFHeader) {
 		return false;
 	}
-	uint64 nTIFFLen = (uint64)(pTIFFEnd - pTIFFHeader);
-	return (uint64)nOffset <= nTIFFLen && nLength <= nTIFFLen - (uint64)nOffset;
+	unsigned __int64 nTIFFLen = (unsigned __int64)(pTIFFEnd - pTIFFHeader);
+	return (unsigned __int64)nOffset <= nTIFFLen && nLength <= nTIFFLen - (unsigned __int64)nOffset;
 }
 
 static void ReadStringTag(CString & strOut, uint8* ptr, uint8* pTIFFHeader, const uint8* pTIFFEnd, bool bLittleEndian, bool bTryReadAsUTF8 = false, uint32 maxLength = 65536) {
@@ -205,7 +205,7 @@ static int ReadRationalTag(Rational & rational, uint8* ptr, uint8* pTIFFHeader, 
 		if (index >= 0 && (uint32)index < nCount) {
 			if (nType == 5 || nType == 10) {
 				uint32 nBase = ReadUInt(ptr + 8, bLittleEndian);
-				if (!IsTIFFRangeValid(pTIFFHeader, pTIFFEnd, nBase, (uint64)index * 8 + 8)) {
+				if (!IsTIFFRangeValid(pTIFFHeader, pTIFFEnd, nBase, (unsigned __int64)index * 8 + 8)) {
 					return nType;
 				}
 				int nOffset = (int)(nBase + (uint32)index * 8);
