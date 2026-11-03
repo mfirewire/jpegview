@@ -536,6 +536,51 @@ static void ApplyEmbeddedICCProfile(void* pPixelData, int nWidth, int nHeight, i
 	delete[] pProfile;
 }
 
+// Convert a TJPF_CMYK plane to BGR. libjpeg-turbo hands back C-M-Y-K, while
+// lcms2's FORMAT_YMCK expects Y-M-C-K, so swap C and Y first. The embedded
+// profile is used when present; otherwise CreateTransform falls back to the
+// shipped cmyk.icm. Returns NULL when no transform could be built (lcms2 or
+// cmyk.icm missing, e.g. the XP build), so the caller can still try GDI+.
+static void* ConvertCmykToRgb(void* pCmyk, int nWidth, int nHeight, void* pJPEGStream, int nStreamLength) {
+	// Swap C<->Y in place. TJPAD(width*4) == width*4 (already 4-aligned), so
+	// there is no row padding and the plane can be walked pixel by pixel.
+	unsigned char* p = (unsigned char*)pCmyk;
+	for (int i = 0; i < nWidth * nHeight; i++) {
+		unsigned char c = p[0];
+		p[0] = p[2];
+		p[2] = c;
+		p += 4;
+	}
+
+	unsigned int nProfileSize = 0;
+	uint8* pProfile = (uint8*) Helpers::ExtractICCProfile(pJPEGStream, nStreamLength, &nProfileSize);
+	void* transform = ICCProfileTransform::CreateTransform(pProfile, nProfileSize, ICCProfileTransform::FORMAT_YMCK);
+	delete[] pProfile;
+	if (transform == NULL) {
+		return NULL;
+	}
+
+	const size_t outStride = (size_t)Helpers::DoPadding(nWidth * 3, 4);
+	size_t outBytes = 0;
+	if (!IsImageBufferSizeOk(outStride, (size_t)nHeight, &outBytes)) {
+		ICCProfileTransform::DeleteTransform(transform);
+		return NULL;
+	}
+	void* pRgb = new(std::nothrow) unsigned char[outBytes];
+	if (pRgb == NULL) {
+		ICCProfileTransform::DeleteTransform(transform);
+		return NULL;
+	}
+
+	if (!ICCProfileTransform::DoTransform(transform, pCmyk, pRgb, nWidth, nHeight, (unsigned int)(nWidth * 4))) {
+		delete[] pRgb;
+		ICCProfileTransform::DeleteTransform(transform);
+		return NULL;
+	}
+	ICCProfileTransform::DeleteTransform(transform);
+	return pRgb;
+}
+
 void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 	HANDLE hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
@@ -594,8 +639,21 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 				::MessageBox(NULL, CString(_T("Elapsed ticks: ")) + buffer, _T("Time"), MB_OK);
 				*/
 
-				// Color and b/w JPEG is supported
-				if (pPixelData != NULL && (nBPP == 3 || nBPP == 1)) {
+				// CMYK/YCCK JPEGs decode to a 4-component C-M-Y-K plane; convert to BGR here.
+				if (pPixelData != NULL && nBPP == 4) {
+					void* pRGB = ConvertCmykToRgb(pPixelData, nWidth, nHeight, pBuffer, (int) nFileSize);
+					delete[] pPixelData;
+					if (pRGB != NULL) {
+						request->Image = new CJPEGImage(nWidth, nHeight, pRGB, 
+							Helpers::FindEXIFBlock(pBuffer, nFileSize), 3, 
+							Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
+						request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
+						request->Image->SetJPEGChromoSampling(eChromoSubSampling);
+					} else {
+						// No CMYK transform available (lcms2 or cmyk.icm missing, e.g. XP build).
+						ProcessReadGDIPlusRequest(request);
+					}
+				} else if (pPixelData != NULL && (nBPP == 3 || nBPP == 1)) {
 					ApplyEmbeddedICCProfile(pPixelData, nWidth, nHeight, nBPP, pBuffer, (int) nFileSize);
 					request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, 
 						Helpers::FindEXIFBlock(pBuffer, nFileSize), nBPP, 
