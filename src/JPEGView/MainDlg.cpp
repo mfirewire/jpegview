@@ -720,7 +720,11 @@ LRESULT CMainDlg::OnGetMinMaxInfo(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPara
 LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
 	bHandled = FALSE;
 	COPYDATASTRUCT* pData = (COPYDATASTRUCT*)lParam;
-	if (pData != NULL && pData->dwData == KEY_MAGIC && pData->cbData > 0 && 
+	// cbData is attacker-controlled (any process can post WM_COPYDATA). An odd or
+	// too-small length made the division below truncate and the -1 underflow to
+	// SIZE_MAX, which CString then read as "scan to the terminating NUL" past the
+	// message payload. Only accept a whole number of characters.
+	if (pData != NULL && pData->dwData == KEY_MAGIC && pData->cbData >= sizeof(TCHAR) && pData->cbData % sizeof(TCHAR) == 0 && 
 		((m_bFullScreenMode && CSettingsProvider::This().SingleFullScreenInstance()) || CSettingsProvider::This().SingleInstance())) {
 		m_sStartupFile = CString((LPCTSTR)pData->lpData, pData->cbData / sizeof(TCHAR) - 1);
 		::PostMessage(m_hWnd, WM_LOAD_FILE_ASYNCH, 0, KEY_MAGIC);
@@ -1095,7 +1099,10 @@ LRESULT CMainDlg::OnDropFiles(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, B
 		const int BUFF_SIZE = 512;
 		TCHAR buff[BUFF_SIZE];
 		if (::DragQueryFile(hDrop, 0, (LPTSTR) &buff, BUFF_SIZE - 1) > 0) {
-			if (::GetFileAttributes(buff) & FILE_ATTRIBUTE_DIRECTORY) {
+			// INVALID_FILE_ATTRIBUTES has every bit set including DIRECTORY, so the
+			// old test treated a path that does not exist as a folder.
+			DWORD dwAttrib = ::GetFileAttributes(buff);
+			if (dwAttrib != INVALID_FILE_ATTRIBUTES && (dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
 				_tcsncat_s(buff, BUFF_SIZE, _T("\\"), BUFF_SIZE);
 			}
 			OpenFile(buff, false);
@@ -1846,8 +1853,10 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				// restore hidden title bar if enabled
 				SetCurrentWindowStyle();
 
+				// LR_SHARED like OnInitDialog: the unshared load below leaked one
+				// HICON every time fullscreen was left, since it was never destroyed.
 				HICON hIconSmall = (HICON)::LoadImage(_Module.GetResourceInstance(), MAKEINTRESOURCE(IDR_MAINFRAME), 
-					IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+					IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR | LR_SHARED);
 				SetIcon(hIconSmall, FALSE);
 				CRect defaultWindowRect = CMultiMonitorSupport::GetDefaultWindowRect();
 				double dZoom = -1;

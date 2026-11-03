@@ -65,9 +65,14 @@ void CProcessingThreadPool::CreateThreadPoolThreads() {
 
 void CProcessingThreadPool::StopAllThreads() {
 	for (int i = 0; i < m_nNumThreads; i++) {
-		m_threads[i]->Terminate();
-		delete m_threads[i];
+		// Terminate() returns false when the thread outlives its wait window; in
+		// that case deleting it would free an object the thread is still using, so
+		// leak it instead - this only runs at process exit and the OS reclaims it.
+		if (m_threads[i]->Terminate()) {
+			delete m_threads[i];
+		}
 	}
+	delete[] m_threads;   // the pointer array itself used to leak
 	m_nNumThreads = 0;
 	m_threads = NULL;
 }

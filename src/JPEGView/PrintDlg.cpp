@@ -58,6 +58,12 @@ CPrintDlg::~CPrintDlg(void) {
 	delete[] m_paperTypes;
 	delete[] m_paperSizes;
 	delete[] m_paperTrays;
+	// RecreatePrinterDC swaps this out but the destructor never released the last
+	// one, leaking a printer DC per dialog.
+	if (m_hPrinterDC != NULL) {
+		::DeleteDC(m_hPrinterDC);
+		m_hPrinterDC = NULL;
+	}
 }
 
 LRESULT CPrintDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
@@ -573,7 +579,7 @@ void CPrintDlg::SetupDataForCurrentPrinter() {
 		for (int i = 0; i < m_numberOfPapers; i++) {
 			m_cbPaper.AddString(paperNames[i]);
 		}
-		delete (char*)paperNames;
+		delete[] (char*)paperNames;
 
 		int index;
 		if ((m_pDeviceMode->dmFields & DM_PAPERSIZE) != 0 && (index = GetIndexOfPaper(m_pDeviceMode->dmPaperSize)) >= 0) {
@@ -594,7 +600,7 @@ void CPrintDlg::SetupDataForCurrentPrinter() {
 		for (int i = 0; i < m_numberOfTrays; i++) {
 			m_cbPaperTray.AddString(trayNames[i]);
 		}
-		delete (char*)trayNames;
+		delete[] (char*)trayNames;
 
 		if ((m_pDeviceMode->dmFields & DM_DEFAULTSOURCE) != 0) {
 			for (int i = 0; i < m_numberOfTrays; i++) {

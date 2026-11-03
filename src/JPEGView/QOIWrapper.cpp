@@ -72,6 +72,9 @@ void* QoiReaderWriter::Compress(const void* source,
 
 	int nchannels = 3;
 	void* pOutput = NULL;
+	// qoi_encode does not write *out_len when it fails, and the caller's len is
+	// uninitialised, so fwrite would use a garbage size. Make failure observable.
+	len = 0;
 
 	qoi_desc desc;
 	desc.width = width;

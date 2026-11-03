@@ -62,6 +62,8 @@ CCropCtl::CCropCtl(CMainDlg* pMainDlg) {
 	m_cropEnd = CPoint(INT_MIN, INT_MIN);
 	m_cropMouse = CPoint(INT_MIN, INT_MIN);
 	m_startTrackMousePos = CPoint(INT_MIN, INT_MIN);
+	// Read by OnPaint before any zoom change has been seen; uninitialised here.
+	m_dLastZoom = 0.0;
 }
 
 

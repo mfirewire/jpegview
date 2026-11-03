@@ -332,7 +332,10 @@ int CBatchCopyDlg::CreateItemList() {
 }
 
 CString CBatchCopyDlg::GetPatternText() {
-	TCHAR strPattern[MAX_PATH];
+	// One element larger than the advertised size: GetLine copies up to MAX_PATH
+	// characters and then we null-terminate at strPattern[numChars], which with
+	// numChars == MAX_PATH wrote one past the array.
+	TCHAR strPattern[MAX_PATH + 1];
 	((short*)strPattern)[0] = MAX_PATH;
 	int numChars = m_edtPattern.GetLine(0, strPattern);
 	strPattern[numChars] = 0;

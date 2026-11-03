@@ -252,7 +252,9 @@ static bool SaveWebP(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bo
 		size_t nSize;
 		int nQuality = CSettingsProvider::This().WEBPSaveQuality();
 		pOutput = (uint8*)WebpReaderWriter::Compress((uint8*)pData, nWidth, nHeight, nSize, nQuality, bUseLosslessWEBP);
-		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
+		// WebPEncode returns 0 bytes on failure; fwrite(NULL, 1, 0) returns 0, so
+		// "0 == 0" made this look like a successful 0-byte save.
+		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
 		fclose(fptr);
 		WebpReaderWriter::FreeMemory(pOutput);
 	} catch(...) {
@@ -311,7 +313,9 @@ static bool SaveQOI(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 		uint8* pOutput;
 		int nSize;
 		pOutput = (uint8*)QoiReaderWriter::Compress((uint8*)pData, nWidth, nHeight, nSize);
-		bSuccess = fwrite(pOutput, 1, nSize, fptr) == nSize;
+		// Compress leaves nSize at 0 on failure, so a failed encode was reported as
+		// a successful 0-byte save.
+		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
 		fclose(fptr);
 		QoiReaderWriter::FreeMemory(pOutput);
 	}

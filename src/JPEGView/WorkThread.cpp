@@ -108,6 +108,11 @@ void CWorkThread::ThreadFunc(void* arg) {
 		CRequestBase* requestHandled = NULL;
 		int nNumUnprocessedRequests = 0;
 		std::list<CRequestBase*>::iterator iter;
+		// Deliberately no break here: the loop ends with requestHandled on the
+		// last unprocessed request (LIFO). For read-ahead that favours the most
+		// recently submitted request. Correctness does not depend on the order -
+		// completion is matched by handle, and the thread only sleeps once none
+		// are left.
 		for (iter = thisPtr->m_requestList.begin( ); iter != thisPtr->m_requestList.end( ); iter++ ) {
 			if ((*iter)->Processed == false) {
 				requestHandled = *iter;
@@ -161,17 +166,16 @@ void CWorkThread::ThreadFunc(void* arg) {
 }
 
 void CWorkThread::DeleteAllRequestsMarkedForDeletion(CWorkThread* thisPtr) {
-	bool bDeleted = false;
-	std::list<CRequestBase*>::iterator iter;
-	for (iter = thisPtr->m_requestList.begin( ); iter != thisPtr->m_requestList.end( ); iter++ ) {
+	// Iterative erase-returning-next, where the old code deleted one element and
+	// then recursed to rescan the whole list - quadratic and, for a long queue,
+	// deep recursion.
+	std::list<CRequestBase*>::iterator iter = thisPtr->m_requestList.begin();
+	while (iter != thisPtr->m_requestList.end()) {
 		if ((*iter)->Deleted) {
 			delete *iter;
-			thisPtr->m_requestList.erase(iter);
-			bDeleted = true;
-			break;
+			iter = thisPtr->m_requestList.erase(iter);
+		} else {
+			++iter;
 		}
-	}
-	if (bDeleted) {
-		DeleteAllRequestsMarkedForDeletion(thisPtr);
 	}
 }

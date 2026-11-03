@@ -273,6 +273,11 @@ static RegResult RegisterExtension(LPCTSTR sExtension, bool bNewRegistryFormat, 
 
 	HKEY key;
 	bool bCanWriteKey = (RegCreateKeyEx(HKEY_CURRENT_USER, sRegKeyPathForExtension, 0, NULL, 0, KEY_WRITE | KEY_READ, NULL, &key, NULL) == ERROR_SUCCESS);
+	if (bCanWriteKey) {
+		// This open is only a write probe; the key is reopened below with an
+		// auto_hkey guard. Without closing it here the first handle leaked.
+		::RegCloseKey(key);
+	}
 	if (!bCanWriteKey) {
 		if (ExistsKey(sRegKeyPathForExtension)) {
 			// no rights to write to the key

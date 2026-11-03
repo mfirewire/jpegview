@@ -881,13 +881,16 @@ void CFileList::FindFiles() {
 }
 
 void CFileList::VerifyFiles() {
-	std::list<CFileDesc>::iterator iter;
-	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
+	// The old for-loop did "iter = erase(iter)" and then the loop's own iter++,
+	// which skipped the element after each deleted one, leaving dead entries
+	// behind when several consecutive files were gone. Iterative erase-returning-
+	// next visits every element exactly once.
+	std::list<CFileDesc>::iterator iter = m_fileList.begin();
+	while (iter != m_fileList.end()) {
 		if (::GetFileAttributes(iter->GetName()) == INVALID_FILE_ATTRIBUTES) {
 			iter = m_fileList.erase(iter);
-			if (iter == m_fileList.end()) {
-				break;
-			}
+		} else {
+			++iter;
 		}
 	}
 }
