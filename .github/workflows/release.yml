@@ -139,7 +139,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref_name }}
-        name: ${{ github.ref_name }} - 36 audit fixes across the decoders and UI, single-pass folder scan, colour profiles on by default.
+        name: ${{ github.ref_name }} - memory-safety and stability fixes: RAW heap overflow, thread-pool deadlock, worker-thread UAF, OCR multi-select.
         draft: false
         prerelease: false
         files: |
