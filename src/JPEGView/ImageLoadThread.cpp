@@ -543,12 +543,13 @@ static void ApplyEmbeddedICCProfile(void* pPixelData, int nWidth, int nHeight, i
 // amounts, so the output is the additive inverse of the ink. Flip all four
 // channels back to ink and, in the same pass, swap C and Y because lcms2's
 // FORMAT_YMCK expects Y-M-C-K. The embedded profile is used when present;
-// R-07 (not fixed, annotated only): the invert-all-four step above is
-// validated only for Adobe-polarity output, which is what all measured
-// test files produce (all three carry APP14). A genuinely non-Adobe CMYK
-// file without APP14 was never measured on a device decoder, so its
-// polarity is unknown and this path may invert it wrongly. No branch is
-// added here without such a measurement; see the decision list.
+// R-07 (measured 2026-11-04, closed): the invert-all-four step above was
+// validated only for Adobe-polarity output until a genuinely non-Adobe CMYK
+// file without APP14 was measured: a 1600x860 test chart with 16 known-ink
+// patches (no APP14, no embedded ICC, ASCII C/M/Y/K component IDs) displayed
+// normally on an aa26097 build, so the device decoder's output for no-APP14
+// files is the same Adobe polarity (255-ink) as for APP14 files. No separate
+// branch is needed for the no-APP14 case.
 // otherwise CreateTransform falls back to the shipped cmyk.icm. Returns NULL
 // when no transform could be built (lcms2 or cmyk.icm missing, e.g. the XP
 // build). On every NULL return the plane has already been converted in
