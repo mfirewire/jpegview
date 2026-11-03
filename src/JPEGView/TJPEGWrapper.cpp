@@ -28,20 +28,30 @@ void * TurboJpeg::ReadImage(int &width,
 		width = tj3Get(hDecoder, TJPARAM_JPEGWIDTH);
 		height = tj3Get(hDecoder, TJPARAM_JPEGHEIGHT);
 		chromoSubsampling = (TJSAMP)tj3Get(hDecoder, TJPARAM_SUBSAMP);
+		// CMYK/YCCK JPEGs carry 4 components, which the 3-channel BGR output
+		// cannot accept (jdcolor.c ERREXITs on it). Decode them to a packed CMYK
+		// plane instead and let the caller convert to RGB; this also stops them
+		// from falling back to GDI+, whose colour management mis-renders them.
+		const int colorSpace = tj3Get(hDecoder, TJPARAM_COLORSPACE);
+		const bool bCMYK = (colorSpace == TJCS_CMYK || colorSpace == TJCS_YCCK);
 		if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
 			outOfMemory = true;
-		} else if (width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION && chromoSubsampling != TJSAMP_UNKNOWN) {
-			// TJPAD 是 int 运算，但 width<=65535 时 width*3 最大 196605，不会溢出；
-			// 真正的风险在 stride*height：65535x21846x3 是 4.29GB，32 位回绕成
-			// 128KB，分配之后 tj3Decompress8 仍按 196608 的行距写满 21846 行。
-			const size_t stride = (size_t)TJPAD(width * 3);
+		} else if (width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION && (chromoSubsampling != TJSAMP_UNKNOWN || bCMYK)) {
+			// TJPAD is int arithmetic, but width <= 65535 keeps width*bytesPerPixel
+			// (max 262140) inside int. The real risk is stride*height: 65535 rows of
+			// 21846 by 4 channels is 5.7 GB and wraps in 32 bits, so the byte count
+			// must be checked through the helper rather than multiplied directly.
+			const int bytesPerPixel = bCMYK ? 4 : 3;
+			const int pixelFormat = bCMYK ? TJPF_CMYK : TJPF_BGR;
+			nchannels = bytesPerPixel;
+			const size_t stride = (size_t)TJPAD(width * bytesPerPixel);
 			size_t bytes = 0;
 			if (!IsImageBufferSizeOk(stride, (size_t)height, &bytes)) {
 				outOfMemory = true;
 			} else {
 				pPixelData = new(std::nothrow) unsigned char[bytes];
 				if (pPixelData != NULL) {
-					nResult = tj3Decompress8(hDecoder, (unsigned char*)buffer, sizebytes, pPixelData, (int)stride, TJPF_BGR);
+					nResult = tj3Decompress8(hDecoder, (unsigned char*)buffer, sizebytes, pPixelData, (int)stride, pixelFormat);
 					if (nResult != 0) {
 						delete[] pPixelData;
 						pPixelData = NULL;
