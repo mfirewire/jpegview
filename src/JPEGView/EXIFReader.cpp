@@ -426,7 +426,11 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 				uint32 nJPEGBytes = ReadLongTag(pTagJPEGLen, bLittleEndian);
 				uint8* pSOI = pTIFFHeader + nOffsetSOI;
 				uint8* pSOF = (uint8*) Helpers::FindJPEGMarker(pSOI, nJPEGBytes, 0xC0);
-				if (pSOF != NULL) {
+				// FindJPEGMarker only guarantees the marker bytes themselves. The
+				// SOF body is read at fixed offsets 5..8, so the segment has to be
+				// long enough: with a short or truncated thumbnail stream those
+				// reads went past the end of the EXIF block.
+				if (pSOF != NULL && (int)(pSOF - pSOI) + 9 <= (int)nJPEGBytes) {
 					m_nThumbWidth = pSOF[7]*256 + pSOF[8];
 					m_nThumbHeight = pSOF[5]*256 + pSOF[6];
 					m_nJPEGThumbStreamLen = nJPEGBytes;

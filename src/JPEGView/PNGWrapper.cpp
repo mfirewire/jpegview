@@ -8,6 +8,7 @@
 #include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
 #include <stdexcept>
+#include <new>
 
 // Uncomment to build without APNG support
 //#undef PNG_APNG_SUPPORTED
@@ -173,7 +174,10 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 		size_t pixelsSize = 0;
 		if (!IsImageBufferSizeOk((size_t)cache.width * cache.channels, (size_t)cache.height, &pixelsSize))
 			return NULL;
-		pixels = malloc(pixelsSize);
+		// CJPEGImage takes ownership and releases it with delete[]; the buffer
+		// used to come from malloc, which is a mismatch the release CRT happens
+		// to tolerate and the debug CRT asserts on.
+		pixels = new(std::nothrow) unsigned char[pixelsSize];
 	}
 	if (pixels == NULL)
 		return NULL;
@@ -414,7 +418,7 @@ void* PngReader::ReadImage(int& width,
 	bool read_two = cache.frame_index < cache.first;
 	void* pixels = ReadNextFrame(&exif, &exif_size);
 	if (pixels && read_two) {
-		free(pixels); // hidden first frame is skipped; release it before reading the next
+		delete[] (unsigned char*)pixels; // hidden first frame is skipped; release it before reading the next
 		pixels = ReadNextFrame(&exif, &exif_size);
 	}
 	

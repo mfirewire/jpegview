@@ -105,7 +105,16 @@ void CWorkThread::ThreadFunc(void* arg) {
 
 		// process this request
 		if (requestHandled != NULL) {
-			thisPtr->ProcessRequest(*requestHandled);
+			try {
+				thisPtr->ProcessRequest(*requestHandled);
+			} catch (...) {
+				// A decoder that throws must not escape the thread function. Even
+				// if the process survived that, Processed would stay false and the
+				// event below would never be set, so every ProcessAndWait caller
+				// (ReleaseFile runs on the UI thread) would block forever. Swallow
+				// it and fall through to the normal completion path: the request
+				// reports failure by leaving its image NULL.
+			}
 			requestHandled->Processed = true;
 
 			// signal end of processing

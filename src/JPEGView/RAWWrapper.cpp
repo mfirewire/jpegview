@@ -38,20 +38,29 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool b
 			return NULL;
 		}
 
-		int stride = Helpers::DoPadding(width * colors, 4);
-		
-		pPixelData = new(std::nothrow) unsigned char[stride * height];
+		// stride * height is int arithmetic: 65535 columns by 21846 rows of 3
+		// channels is 4.29 GB and wraps to ~256 KB, after which copy_mem_image
+		// still writes the real size. MAX_IMAGE_PIXELS only bounds the pixel
+		// count as a double, never the byte count, so it does not catch this.
+		const size_t stride = (size_t)Helpers::DoPadding(width * colors, 4);
+		size_t bytes = 0;
+		if (!IsImageBufferSizeOk(stride, (size_t)height, &bytes)) {
+			bOutOfMemory = true;
+			return NULL;
+		}
+
+		pPixelData = new(std::nothrow) unsigned char[bytes];
 		if (pPixelData == NULL) {
 			bOutOfMemory = true;
 			return NULL;
 		}
-		if (RawProcessor.copy_mem_image(pPixelData, stride, 1) != LIBRAW_SUCCESS) {
+		if (RawProcessor.copy_mem_image(pPixelData, (int)stride, 1) != LIBRAW_SUCCESS) {
 			delete[] pPixelData;
 			return NULL;
 		}
 
 		void* transform = ICCProfileTransform::CreateTransform(RawProcessor.imgdata.color.profile, RawProcessor.imgdata.color.profile_length, ICCProfileTransform::FORMAT_BGR);
-		ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, width, height, stride);
+		ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, width, height, (unsigned int)stride);
 		ICCProfileTransform::DeleteTransform(transform);
 
 		CRawMetadata* metadata = new CRawMetadata(RawProcessor.imgdata.idata.make, RawProcessor.imgdata.idata.model, RawProcessor.imgdata.other.timestamp,

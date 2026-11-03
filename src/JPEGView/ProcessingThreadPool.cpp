@@ -78,22 +78,26 @@ bool CProcessingThreadPool::Process(CProcessingRequest* pRequest) {
 	if (m_nNumThreads == 0) {
 		CProcessingThread::DoProcess(pRequest, 0, nTargetCY);
 	} else {
-		if (nTargetCX * nTargetCY < 100000 || nTargetCY <= 12) {
+		if ((long long)nTargetCX * nTargetCY < 100000 || nTargetCY <= 12) {
 			CProcessingThread::DoProcess(pRequest, 0, nTargetCY);
 		} else {
 			// Important: All slices must have a height dividable by 'StripPadding', except the last one
 			int nNumThreadsUsed = m_nNumThreads + 1; // we also use the calling thread, thus +1
-			int nSliceCY;
-			// The > 1 guard is the correctness fix: with AVX2 StripPadding is 16 and
-			// a target height of 13..15 always yields a slice of 0, so the loop used
-			// to decrement to 0 and divide by zero on the next evaluation. The
-			// assignment below is only there so the single-thread fallback reads
-			// clearly; nLastCY already ignores the stale value via (nNumThreadsUsed-1).
+			int nSliceCY = 0;
+			// The > 1 guard below stops the loop from reaching zero threads: with
+			// AVX2 StripPadding is 16, so a target height of 13..15 would make the
+			// slice 0 and the next division by zero.
 			while (nNumThreadsUsed > 1 && (nSliceCY = ~(pRequest->StripPadding - 1) & (nTargetCY / nNumThreadsUsed)) < pRequest->StripPadding) {
 				nNumThreadsUsed--;
 			}
 			if (nNumThreadsUsed == 1) {
-				nSliceCY = nTargetCY;
+				// Nothing below would run: the loop that hands out strips has
+				// zero iterations, so no wrapped request ever decrements
+				// nRequestThreadCounter and eventFinished is never set. Waiting
+				// for it afterwards blocked the caller forever. Process the whole
+				// image on this thread and skip the event machinery entirely.
+				CProcessingThread::DoProcess(pRequest, 0, nTargetCY);
+				return pRequest->Success;
 			}
 			int nLastCY = nTargetCY - (nNumThreadsUsed - 1)*nSliceCY;
 			volatile LONG nRequestThreadCounter = nNumThreadsUsed - 1;

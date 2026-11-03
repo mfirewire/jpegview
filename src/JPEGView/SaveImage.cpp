@@ -20,16 +20,27 @@
 // Removes an existing comment segment (if any) and returns the new JPEG stream, NULL if no comment was found in stream
 static uint8* RemoveExistingCommentSegment(void* pJPEGStream, int& nStreamLength) {
 	uint8* pCommentSeg = (uint8*)Helpers::FindJPEGMarker(pJPEGStream, nStreamLength, 0xFE);
-	if (pCommentSeg != NULL) {
-		int nLenSegment = pCommentSeg[2] * 256 + pCommentSeg[3];
-		int nHeader = (int)(pCommentSeg - (uint8*)pJPEGStream);
-		uint8* pNewBuffer = new uint8[nStreamLength - nLenSegment];
-		memcpy(pNewBuffer, pJPEGStream, nHeader);
-		memcpy(&(pNewBuffer[nHeader]), pCommentSeg + nLenSegment, nStreamLength - nHeader - nLenSegment);
-		nStreamLength = nStreamLength - nLenSegment;
-		return pNewBuffer;
+	if (pCommentSeg == NULL) {
+		return NULL;
 	}
-	return NULL;
+	// FindJPEGMarker only guarantees that the two marker bytes are inside the
+	// stream. Everything below reads at fixed offsets or trusts the length
+	// field, so both have to be validated here: a stream ending right after
+	// "FF FE" read two bytes past the end, and a length field larger than the
+	// stream made both memcpy sizes wrong (one of them negative).
+	const int nHeader = (int)(pCommentSeg - (uint8*)pJPEGStream);
+	if (nHeader + 4 > nStreamLength) {
+		return NULL;
+	}
+	const int nLenSegment = pCommentSeg[2] * 256 + pCommentSeg[3];
+	if (nLenSegment < 2 || nHeader + nLenSegment > nStreamLength) {
+		return NULL;
+	}
+	uint8* pNewBuffer = new uint8[nStreamLength - nLenSegment];
+	memcpy(pNewBuffer, pJPEGStream, nHeader);
+	memcpy(&(pNewBuffer[nHeader]), pCommentSeg + nLenSegment, nStreamLength - nHeader - nLenSegment);
+	nStreamLength = nStreamLength - nLenSegment;
+	return pNewBuffer;
 }
 
 // Finds first JPEG marker, returns NULL if none found (invalid JPEG stream?)
