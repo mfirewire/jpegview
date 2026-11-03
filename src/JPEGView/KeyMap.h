@@ -38,8 +38,22 @@ private:
 	// silently dead. English text on purpose: no strings-file entry.
 	std::vector<CString> m_rejectedShortcuts;
 
+	// Physical line numbers of the loaded user KeyMap.txt rejected by
+	// _ParseKeys (invalid token or dead mapping). After loading, those
+	// lines are commented out in the user's file (CommentOutRejectedLines).
+	// Displaced bindings are not in here: the later line of a duplicate
+	// binding is live, so commenting it would break a working binding.
+	// INI overrides are not in here either: they are not KeyMap.txt lines.
+	std::vector<int> m_rejectedKeyMapLines;
+
+	// KeyMap.txt rewrite outcome: 0 = not attempted (no user file loaded,
+	// or nothing rejected), 1 = rejected lines commented out,
+	// -1 = rewrite attempted but failed (file left untouched).
+	int m_nKeyMapRewriteResult = 0;
+
 	void RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason);
 	void ShowRejectedShortcuts();
+	void CommentOutRejectedLines(LPCTSTR sPath);
 
 	void AddDefaultEscapeHandling();
 	// 应用 INI 中的快捷键覆盖（见 SettingsProvider::OcrShortcut）

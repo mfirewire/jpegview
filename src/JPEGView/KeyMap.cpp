@@ -206,12 +206,24 @@ CKeyMap::CKeyMap() {
 
 	// TODO: ParseCommandLineForKeyMapFile or something... where you can specify a custom full file path name for a keymap you'd like to use instead of the default search order
 
+	// Which file was actually loaded, and whether it is the user's own
+	// KeyMap.txt. Only a user file is ever rewritten (commenting out
+	// rejected lines); the shipped KeyMap.txt.default is never touched.
+	CString sLoadedKeyMapPath;
+	bool bLoadedKeyMapIsUserFile = false;
+
 	// check if the use directory keymap.txt exists
 	fkm_ptr = _tfopen(CString(Helpers::JPEGViewAppDataPath()) + KEYMAP_USER_FILE_NAME, _T("r"));
-	if (fkm_ptr == NULL) {
+	if (fkm_ptr != NULL) {
+		sLoadedKeyMapPath = CString(Helpers::JPEGViewAppDataPath()) + KEYMAP_USER_FILE_NAME;
+		bLoadedKeyMapIsUserFile = true;
+	} else {
 		// the appdata one doesn't exist, try the local directory
 		fkm_ptr = _tfopen(exe_path + KEYMAP_USER_FILE_NAME, _T("r"));
-		if (fkm_ptr == NULL) {
+		if (fkm_ptr != NULL) {
+			sLoadedKeyMapPath = exe_path + KEYMAP_USER_FILE_NAME;
+			bLoadedKeyMapIsUserFile = true;
+		} else {
 			// the user one doesn't exist either, load the default file (if that doesn't exist either someone messed up)
 			fkm_ptr = _tfopen(exe_path + KEYMAP_DEFAULT_FILE_NAME, _T("r"));
 		}
@@ -268,7 +280,13 @@ CKeyMap::CKeyMap() {
 	fclose(fsym_ptr);
 
 	// read just the keymap file
+	// Physical line number of the chunk being read. The counter increments
+	// for every chunk, including skipped ones, so it matches physical line
+	// numbers whenever a rewrite happens (see CommentOutRejectedLines for
+	// the long-line guard that keeps this true).
+	int nKeyMapLine = 0;
 	while (_fgetts(lineBuff, BUFF_LEN, fkm_ptr) != NULL) {
+		int nThisLine = nKeyMapLine++;
 		LPTSTR sLine = _SkipWhiteSpace(lineBuff);
 		if (*sLine == 0) continue;
 		if (_IsComment(sLine)) continue;
@@ -290,6 +308,7 @@ CKeyMap::CKeyMap() {
 		int nKeyCode = _ParseKeys(sLine, &sParseReason);
 		if (nKeyCode <= 0) {
 			RecordRejectedShortcut(sRawLine, sParseReason.IsEmpty() ? _T("invalid shortcut") : (LPCTSTR)sParseReason);
+			m_rejectedKeyMapLines.push_back(nThisLine);
 			continue;
 		}
 		// A later line for the same key displaces the earlier command's
@@ -304,9 +323,17 @@ CKeyMap::CKeyMap() {
 		m_keyMap[nKeyCode] = nCommandId;
 	}
 
-	AddDefaultEscapeHandling();
-
+	// The file handle is closed before rewriting: replacing a file that
+	// is still open for reading is not reliable on Windows. The dialog is
+	// shown by AddDefaultEscapeHandling below, after the rewrite, so it can
+	// report whether the lines were commented out.
 	fclose(fkm_ptr);
+
+	if (bLoadedKeyMapIsUserFile && !m_rejectedKeyMapLines.empty()) {
+		CommentOutRejectedLines(sLoadedKeyMapPath);
+	}
+
+	AddDefaultEscapeHandling();
 }
 
 int CKeyMap::GetVirtualKeyCode(LPCTSTR keyName) {
@@ -375,7 +402,110 @@ void CKeyMap::ShowRejectedShortcuts() {
 		sMessage += sMore;
 	}
 	sMessage += _T("\n\nCheck KeyMap.txt and the INI file (OcrShortcut) and fix or remove them.");
+	if (m_nKeyMapRewriteResult == 1) {
+		sMessage += _T("\nRejected KeyMap.txt lines have been commented out (//) in the file.");
+	} else if (m_nKeyMapRewriteResult == -1) {
+		sMessage += _T("\nKeyMap.txt could not be updated; rejected lines were left unchanged.");
+	}
 	::MessageBox(NULL, sMessage, _T("JPEGView"), MB_OK | MB_ICONWARNING);
+}
+
+// Comment out the rejected KeyMap.txt lines in the user's file, in place.
+// The file is read as raw bytes and rewritten through a temp file in the
+// same directory, then moved over the original, so the original encoding
+// and line endings survive untouched; only "//" is inserted at the start
+// of each rejected line. Lines that were already comments are never in
+// the rejected list (the parser skips them), so no line is double-commented.
+//
+// The rewrite is refused and the file left untouched (result -1) when any
+// physical line holds more than 254 content bytes: _fgetts with BUFF_LEN 256
+// reads at most 255 characters, so a longer line would already have been split
+// into several chunks by the parser and chunk numbers would no longer match
+// physical line numbers. When every line is at most 254 bytes, each chunk the
+// parser saw is exactly one physical line, in both ANSI and Unicode builds
+// (a line's wide-character count never exceeds its byte count). A UTF-8 BOM,
+// if present, stays at the front of the file; a UTF-16 BOM aborts the rewrite.
+void CKeyMap::CommentOutRejectedLines(LPCTSTR sPath) {
+	m_nKeyMapRewriteResult = -1;
+	if (sPath == NULL || m_rejectedKeyMapLines.empty()) {
+		return;
+	}
+	FILE* f = _tfopen(sPath, _T("rb"));
+	if (f == NULL) {
+		return;
+	}
+	fseek(f, 0, SEEK_END);
+	long nSize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (nSize < 0) {
+		fclose(f);
+		return;
+	}
+	std::vector<char> bytes((size_t)nSize);
+	if (nSize > 0 && fread(&bytes[0], 1, (size_t)nSize, f) != (size_t)nSize) {
+		fclose(f);
+		return;
+	}
+	fclose(f);
+
+	// UTF-16 files would not have parsed as text anyway; do not byte-edit them.
+	size_t nStart = 0;
+	if (nSize >= 2 && (unsigned char)bytes[0] == 0xFF && (unsigned char)bytes[1] == 0xFE) return;
+	if (nSize >= 2 && (unsigned char)bytes[0] == 0xFE && (unsigned char)bytes[1] == 0xFF) return;
+	if (nSize >= 3 && (unsigned char)bytes[0] == 0xEF && (unsigned char)bytes[1] == 0xBB && (unsigned char)bytes[2] == 0xBF) nStart = 3;
+
+	// Split into physical lines, keeping each line's ending.
+	struct LineSpan { size_t nBegin; size_t nEnd; };
+	std::vector<LineSpan> lines;
+	size_t nPos = nStart;
+	while (nPos < (size_t)nSize) {
+		LineSpan span;
+		span.nBegin = nPos;
+		while (nPos < (size_t)nSize && bytes[nPos] != '\n') nPos++;
+		if (nPos < (size_t)nSize) nPos++; // keep the '\n'
+		span.nEnd = nPos;
+		lines.push_back(span);
+	}
+	for (size_t i = 0; i < lines.size(); i++) {
+		size_t nContentEnd = lines[i].nEnd;
+		if (nContentEnd > lines[i].nBegin && bytes[nContentEnd - 1] == '\n') nContentEnd--;
+		if (nContentEnd > lines[i].nBegin && bytes[nContentEnd - 1] == '\r') nContentEnd--;
+		if (nContentEnd - lines[i].nBegin > 254) {
+			return; // long line: chunk numbers no longer match physical lines
+		}
+	}
+	std::vector<char> rejected(lines.size(), 0);
+	for (size_t i = 0; i < m_rejectedKeyMapLines.size(); i++) {
+		if (m_rejectedKeyMapLines[i] < 0 || (size_t)m_rejectedKeyMapLines[i] >= lines.size()) {
+			return; // inconsistent index: fail safe, touch nothing
+		}
+		rejected[(size_t)m_rejectedKeyMapLines[i]] = 1;
+	}
+
+	std::vector<char> out;
+	out.reserve(bytes.size() + m_rejectedKeyMapLines.size() * 2);
+	for (size_t i = 0; i < nStart; i++) out.push_back(bytes[i]);
+	for (size_t i = 0; i < lines.size(); i++) {
+		if (rejected[i]) { out.push_back('/'); out.push_back('/'); }
+		for (size_t j = lines[i].nBegin; j < lines[i].nEnd; j++) out.push_back(bytes[j]);
+	}
+
+	CString sTempPath = CString(sPath) + _T(".tmp");
+	FILE* fo = _tfopen(sTempPath, _T("wb"));
+	if (fo == NULL) {
+		return;
+	}
+	bool bOk = out.empty() || fwrite(&out[0], 1, out.size(), fo) == out.size();
+	fclose(fo);
+	if (!bOk) {
+		_tremove(sTempPath);
+		return;
+	}
+	if (::MoveFileEx(sTempPath, sPath, MOVEFILE_REPLACE_EXISTING) == 0) {
+		_tremove(sTempPath);
+		return;
+	}
+	m_nKeyMapRewriteResult = 1;
 }
 
 // 用 INI 中的设置覆盖 KeyMap 里的快捷键。目前只有 OCR。
