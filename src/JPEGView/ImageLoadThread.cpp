@@ -536,20 +536,27 @@ static void ApplyEmbeddedICCProfile(void* pPixelData, int nWidth, int nHeight, i
 	delete[] pProfile;
 }
 
-// Convert a TJPF_CMYK plane to BGR. libjpeg-turbo hands back C-M-Y-K, while
-// lcms2's FORMAT_YMCK expects Y-M-C-K, so swap C and Y first. The embedded
-// profile is used when present; otherwise CreateTransform falls back to the
-// shipped cmyk.icm. Returns NULL when no transform could be built (lcms2 or
-// cmyk.icm missing, e.g. the XP build), so the caller can still try GDI+.
+// Convert a TJPF_CMYK plane to BGR. libjpeg-turbo hands back inverted CMYK
+// (255-C, 255-M, 255-Y, 255-K): ycck_cmyk_convert writes 255-R/G/B into the
+// first three components, and for a YCCK source those R/G/B are already the ink
+// amounts, so the output is the additive inverse of the ink. Flip all four
+// channels back to ink and, in the same pass, swap C and Y because lcms2's
+// FORMAT_YMCK expects Y-M-C-K. The embedded profile is used when present;
+// otherwise CreateTransform falls back to the shipped cmyk.icm. Returns NULL
+// when no transform could be built (lcms2 or cmyk.icm missing, e.g. the XP
+// build), so the caller can still try GDI+.
 static void* ConvertCmykToRgb(void* pCmyk, int nWidth, int nHeight, void* pJPEGStream, int nStreamLength) {
-	// Swap C<->Y in place. TJPAD(width*4) == width*4 (already 4-aligned), so
-	// there is no row padding and the plane can be walked pixel by pixel.
+	// Invert all four channels and swap C<->Y in one pass. TJPAD(width*4) ==
+	// width*4 (already 4-aligned), so there is no row padding. Walk by pixel
+	// count as size_t: nWidth*nHeight can exceed INT_MAX for large images.
 	unsigned char* p = (unsigned char*)pCmyk;
-	for (int i = 0; i < nWidth * nHeight; i++) {
-		unsigned char c = p[0];
-		p[0] = p[2];
-		p[2] = c;
-		p += 4;
+	const size_t nPixels = (size_t)nWidth * (size_t)nHeight;
+	for (size_t i = 0; i < nPixels; i++, p += 4) {
+		const unsigned char c = p[0];
+		p[0] = (unsigned char)(255 - p[2]); // Y -> C slot
+		p[2] = (unsigned char)(255 - c);    // C -> Y slot
+		p[1] = (unsigned char)(255 - p[1]); // M
+		p[3] = (unsigned char)(255 - p[3]); // K
 	}
 
 	unsigned int nProfileSize = 0;

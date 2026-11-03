@@ -29,9 +29,10 @@ void * TurboJpeg::ReadImage(int &width,
 		height = tj3Get(hDecoder, TJPARAM_JPEGHEIGHT);
 		chromoSubsampling = (TJSAMP)tj3Get(hDecoder, TJPARAM_SUBSAMP);
 		// CMYK/YCCK JPEGs carry 4 components, which the 3-channel BGR output
-		// cannot accept (jdcolor.c ERREXITs on it). Decode them to a packed CMYK
-		// plane instead and let the caller convert to RGB; this also stops them
-		// from falling back to GDI+, whose colour management mis-renders them.
+		// cannot accept (jdcolor.c ERREXITs on it). Decode them to a packed
+		// inverted-CMYK plane (TJPF_CMYK, 255-C/255-M/255-Y/255-K) and let the
+		// caller flip and convert to RGB; this also stops them from falling back
+		// to GDI+, whose colour management mis-renders them.
 		const int colorSpace = tj3Get(hDecoder, TJPARAM_COLORSPACE);
 		const bool bCMYK = (colorSpace == TJCS_CMYK || colorSpace == TJCS_YCCK);
 		if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
