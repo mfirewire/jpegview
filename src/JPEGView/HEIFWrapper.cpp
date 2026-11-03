@@ -43,7 +43,12 @@ void * HeifReader::ReadImage(int &width,
 	if (width < 1 || height < 1 || width * nchannels > stride)
 		return NULL;
 
-	int size = width * nchannels * height;
+	// int 乘法会在 32768x32768x4 这类尺寸下回绕成 0；用 64 位算并校验上限。
+	size_t size = 0;
+	if (!IsImageBufferSizeOk((size_t)width * nchannels, (size_t)height, &size)) {
+		outOfMemory = true;
+		return NULL;
+	}
 	pPixelData = new(std::nothrow) unsigned char[size];
 	if (pPixelData == NULL) {
 		outOfMemory = true;

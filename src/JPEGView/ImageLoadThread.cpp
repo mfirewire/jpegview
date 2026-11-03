@@ -27,6 +27,22 @@
 
 using namespace Gdiplus;
 
+namespace {
+// SetErrorMode is process-global. The decode paths that call it have early
+// returns for oversized files and failed allocations; with a bare
+// SetErrorMode/restore pair those returns skipped the restore and left
+// SEM_FAILCRITICALERRORS in effect for the rest of the process.
+class CErrorModeGuard {
+public:
+	CErrorModeGuard() : m_nPrev(::SetErrorMode(SEM_FAILCRITICALERRORS)) {}
+	~CErrorModeGuard() { ::SetErrorMode(m_nPrev); }
+private:
+	UINT m_nPrev;
+	CErrorModeGuard(const CErrorModeGuard&);
+	CErrorModeGuard& operator=(const CErrorModeGuard&);
+};
+}
+
 // static initializers
 volatile int CImageLoadThread::m_curHandle = 0;
 
@@ -161,7 +177,13 @@ static CJPEGImage* ConvertGDIPlusBitmapToJPEGImage(Gdiplus::Bitmap* pBitmap, int
 		if (nTagFrameDelaySize > 0) {
 			PropertyItem* pPropertyItem = (PropertyItem*)new char[nTagFrameDelaySize];
 			if (pBitmap->GetPropertyItem(PropertyTagFrameDelay, nTagFrameDelaySize, pPropertyItem) == Gdiplus::Ok) {
-				nFrameTimeMs = ((long*)pPropertyItem->value)[nFrameIndex] * 10;
+				// GDI+ does not guarantee one delay entry per frame. A forged GIF/TIFF
+				// with fewer entries than frames made [nFrameIndex] read past the
+				// property buffer.
+				const size_t needed = ((size_t)nFrameIndex + 1) * sizeof(long);
+				if (pPropertyItem->length >= needed && (size_t)nTagFrameDelaySize >= needed) {
+					nFrameTimeMs = ((long*)pPropertyItem->value)[nFrameIndex] * 10;
+				}
 			}
 			delete[] pPropertyItem;
 		}
@@ -229,6 +251,10 @@ CImageLoadThread::CImageLoadThread(void) : CWorkThread(true) {
 }
 
 CImageLoadThread::~CImageLoadThread(void) {
+	// Stop the worker before releasing the caches it may still be reading. The
+	// base destructor runs after this one, so without this call the caches were
+	// freed first and a WebP/PNG/JXL/AVIF frame decode in flight used freed memory.
+	Terminate();
 	DeleteCachedGDIBitmap();
 	DeleteCachedWebpDecoder();
 	DeleteCachedPngDecoder();
@@ -469,11 +495,10 @@ void CImageLoadThread::DeleteCachedJxlDecoder() {
 void CImageLoadThread::DeleteCachedAvifDecoder() {
 #ifndef WINXP
 	// prevent crashing when libavif/dav1d fail or missing
-	UINT nPrevErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+	CErrorModeGuard errorModeGuard;
 	try {
 		AvifReader::DeleteCache();
 	} catch (...) {}
-	SetErrorMode(nPrevErrorMode);
 	m_sLastAvifFileName.Empty();
 #endif
 }
@@ -732,8 +757,9 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			void* pEXIFData = NULL;
 
 #ifndef WINXP
-			// libpng applies the iCCP profile itself now, so color management is
-			// no longer a reason to take the slower GDI+ path.
+			// The iCCP profile is applied by PngReader::ReadNextFrame through lcms2,
+			// not by libpng itself — libpng only inflates the chunk. Do not delete
+			// that conversion; the only reason to take GDI+ would be ForceGDIPlus.
 			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseCachedDecoder || !bUseGDIPlus || PngReader::MustUseLibpng(pBuffer, nFileSize))
 				pPixelData = (uint8*)PngReader::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
@@ -798,8 +824,8 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 			return;
 		}
 	}
-	char* pBuffer = NULL;
-	UINT nPrevErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+	uint8_t* pBuffer = NULL; // JxlReader takes ownership and releases with delete[]
+	CErrorModeGuard errorModeGuard;
 	try {
 		long long nFileSize = 0;
 		unsigned int nNumBytesRead;
@@ -812,7 +838,7 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 				return;
 			}
 
-			pBuffer = new(std::nothrow) char[nFileSize];
+			pBuffer = new(std::nothrow) uint8_t[nFileSize];
 			if (pBuffer == NULL) {
 				request->OutOfMemory = true;
 				::CloseHandle(hFile);
@@ -844,7 +870,6 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 		request->Image = NULL;
 		request->ExceptionError = true;
 	}
-	SetErrorMode(nPrevErrorMode);
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
 		// delete[] pBuffer;
@@ -872,7 +897,7 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 		}
 	}
 	char* pBuffer = NULL;
-	UINT nPrevErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+	CErrorModeGuard errorModeGuard;
 	try {
 		long long nFileSize = 0;
 		unsigned int nNumBytesRead;
@@ -919,7 +944,6 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 		request->Image = NULL;
 		request->ExceptionError = true;
 	}
-	SetErrorMode(nPrevErrorMode);
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
 		delete[] pBuffer;
@@ -937,7 +961,7 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request) {
 		return;
 	}
 	char* pBuffer = NULL;
-	UINT nPrevErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+	CErrorModeGuard errorModeGuard;
 	try {
 		unsigned int nNumBytesRead;
 		// Don't read too huge files
@@ -979,7 +1003,6 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request) {
 		request->Image = NULL;
 		request->ExceptionError = true;
 	}
-	SetErrorMode(nPrevErrorMode);
 	::CloseHandle(hFile);
 	delete[] pBuffer;
 }
@@ -1045,7 +1068,7 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 
 #ifndef WINXP
 		// Try with libraw
-		UINT nPrevErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS);
+		CErrorModeGuard errorModeGuard;
 		try {
 			if (fullsize == 2 || fullsize == 3) {
 				request->Image = RawReader::ReadImage(request->FileName, bOutOfMemory, fullsize == 2);
@@ -1059,7 +1082,6 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 		} catch (...) {
 			// libraw.dll not found or VC++ Runtime not installed
 		}
-		SetErrorMode(nPrevErrorMode);
 #else
 		fullsize = fullsize == 1;
 #endif

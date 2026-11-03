@@ -46,6 +46,12 @@ void* AvifReader::ReadImage(int& width,
 		}
 		memcpy(cache.data, buffer, sizebytes);
 		cache.decoder = avifDecoderCreate();
+		if (cache.decoder == NULL) {
+			// libavif returns NULL on OOM or when no decoder was compiled in.
+			outOfMemory = true;
+			DeleteCache();
+			return NULL;
+		}
 		cache.decoder->maxThreads = nthreads;
 		cache.decoder->strictFlags = AVIF_STRICT_DISABLED;
 		result = avifDecoderSetIOMemory(cache.decoder, cache.data, sizebytes);
@@ -80,7 +86,22 @@ void* AvifReader::ReadImage(int& width,
 	frame_count = cache.decoder->imageCount;
 	frame_time = (int)(cache.decoder->imageTiming.duration * 1000.0);
 
-	size_t size = width * nchannels * height;
+	// This file used to have no dimension or pixel check at all; libavif will hand
+	// back whatever the container declares.
+	if (width < 1 || height < 1 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION
+			|| (double)width * height > MAX_IMAGE_PIXELS) {
+		DeleteCache();
+		return NULL;
+	}
+
+	// width * nchannels * height is int arithmetic: 32768x32768x4 wraps to 0 and
+	// allocates nothing while avifImageYUVToRGB writes 4GB.
+	size_t size = 0;
+	if (!IsImageBufferSizeOk((size_t)width * nchannels, (size_t)height, &size)) {
+		outOfMemory = true;
+		DeleteCache();
+		return NULL;
+	}
 	cache.rgb.pixels = new(std::nothrow) unsigned char[size];
 	if (cache.rgb.pixels == NULL) {
 		outOfMemory = true;

@@ -31,15 +31,24 @@ void * TurboJpeg::ReadImage(int &width,
 		if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
 			outOfMemory = true;
 		} else if (width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION && chromoSubsampling != TJSAMP_UNKNOWN) {
-			pPixelData = new(std::nothrow) unsigned char[TJPAD(width * 3) * height];
-			if (pPixelData != NULL) {
-				nResult = tj3Decompress8(hDecoder, (unsigned char*)buffer, sizebytes, pPixelData, TJPAD(width * 3), TJPF_BGR);
-				if (nResult != 0) {
-					delete[] pPixelData;
-					pPixelData = NULL;
-				}
-			} else {
+			// TJPAD 是 int 运算，但 width<=65535 时 width*3 最大 196605，不会溢出；
+			// 真正的风险在 stride*height：65535x21846x3 是 4.29GB，32 位回绕成
+			// 128KB，分配之后 tj3Decompress8 仍按 196608 的行距写满 21846 行。
+			const size_t stride = (size_t)TJPAD(width * 3);
+			size_t bytes = 0;
+			if (!IsImageBufferSizeOk(stride, (size_t)height, &bytes)) {
 				outOfMemory = true;
+			} else {
+				pPixelData = new(std::nothrow) unsigned char[bytes];
+				if (pPixelData != NULL) {
+					nResult = tj3Decompress8(hDecoder, (unsigned char*)buffer, sizebytes, pPixelData, (int)stride, TJPF_BGR);
+					if (nResult != 0) {
+						delete[] pPixelData;
+						pPixelData = NULL;
+					}
+				} else {
+					outOfMemory = true;
+				}
 			}
 		}
 	}

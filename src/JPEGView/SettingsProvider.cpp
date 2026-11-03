@@ -700,7 +700,12 @@ LPCTSTR CSettingsProvider::ReadGlobalIniString(LPCTSTR key) {
 LPCTSTR CSettingsProvider::ReadIniString(LPCTSTR key, LPCTSTR fileName, IniHashMap*& keyMap, TCHAR*& pBuffer) {
 	if (keyMap == NULL) {
 		keyMap = new IniHashMap();
-		ReadIniFile(m_sIniNameUser, keyMap, pBuffer);
+		// fileName used to be ignored here in favour of m_sIniNameUser, so every
+		// "global" lookup actually read the user INI once StoreToEXEPath redirected
+		// m_sIniNameUser to AppData. The current constructor order happens to mask
+		// it (the first lookup runs before the redirect), but the parameter is what
+		// the two callers already pass and what the two maps are supposed to mean.
+		ReadIniFile(fileName, keyMap, pBuffer);
 	}
 	hash_map<LPCTSTR, LPCTSTR, CHashCompareLPCTSTR>::const_iterator iter;
 	iter = keyMap->find(key);
@@ -765,7 +770,20 @@ int CSettingsProvider::GetInt(LPCTSTR sKey, int nDefault, int nMin, int nMax) {
 	if (s.IsEmpty()) {
 		return nDefault;
 	}
-	int nValue = (int)_wtof((LPCTSTR)s);
+	// A non-numeric value used to go through _wtof, which yields 0 and then gets
+	// clamped — "JPEGSaveQuality=abc" silently became the minimum instead of the
+	// default. Reject anything that is not a clean number, like GetBool does.
+	LPCTSTR pStart = (LPCTSTR)s;
+	TCHAR* pEnd = NULL;
+	double dValue = _tcstod(pStart, &pEnd);
+	if (pEnd == pStart) {
+		return nDefault;
+	}
+	while (*pEnd != 0 && _istspace(*pEnd)) pEnd++;
+	if (*pEnd != 0) {
+		return nDefault;
+	}
+	int nValue = (int)dValue;
 	return min(nMax, max(nMin, nValue));
 }
 
@@ -774,7 +792,16 @@ double CSettingsProvider::GetDouble(LPCTSTR sKey, double dDefault, double dMin, 
 	if (s.IsEmpty()) {
 		return dDefault;
 	}
-	double dValue = _wtof((LPCTSTR)s);
+	LPCTSTR pStart = (LPCTSTR)s;
+	TCHAR* pEnd = NULL;
+	double dValue = _tcstod(pStart, &pEnd);
+	if (pEnd == pStart) {
+		return dDefault;
+	}
+	while (*pEnd != 0 && _istspace(*pEnd)) pEnd++;
+	if (*pEnd != 0) {
+		return dDefault;
+	}
 	return min(dMax, max(dMin, dValue));
 }
 

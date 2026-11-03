@@ -238,7 +238,9 @@ void* JxlReader::ReadImage(int& width,
 }
 
 void JxlReader::DeleteCache() {
-	free(cache.data);
+	// The buffer is allocated with new[] in ProcessReadJXLRequest; freeing it with
+	// free() was undefined behaviour and asserts on the debug CRT.
+	delete[] cache.data;
 	ICCProfileTransform::DeleteTransform(cache.transform);
 	// Setting the decoder and runner to 0 (NULL) will automatically destroy them
 	cache = { 0 };

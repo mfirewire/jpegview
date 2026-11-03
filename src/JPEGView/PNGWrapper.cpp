@@ -62,7 +62,7 @@ struct PngReader::png_cache {
 	unsigned char* p_image;
 	unsigned char* p_frame;
 	unsigned char* p_temp;
-	unsigned int size;
+	size_t size;
 	unsigned int width;
 	unsigned int height;
 	unsigned int channels;
@@ -146,7 +146,16 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 		for (j = 0; j < cache.h0; j++)
 			memcpy(cache.rows_image[j + cache.y0] + cache.x0 * 4, cache.rows_frame[j], cache.w0 * 4);
 
-	void* pixels = malloc(cache.width * cache.height * cache.channels);
+	void* pixels = NULL;
+	{
+		// cache.width * cache.height * cache.channels is unsigned int arithmetic and
+		// wraps for large APNG canvases; the copy loops below then write the real
+		// size. Compute in size_t and reject anything that wrapped or exceeds the cap.
+		size_t pixelsSize = 0;
+		if (!IsImageBufferSizeOk((size_t)cache.width * cache.channels, (size_t)cache.height, &pixelsSize))
+			return NULL;
+		pixels = malloc(pixelsSize);
+	}
 	if (pixels == NULL)
 		return NULL;
 	for (j = 0; j < cache.height; j++)
@@ -172,7 +181,8 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 
 bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 {
-	unsigned int    width, height, channels, rowbytes, size, j;
+	unsigned int    width, height, channels, rowbytes, j;
+	size_t          size;
 	png_bytepp      rows_image;
 	png_bytepp      rows_frame;
 	unsigned char*  p_image;
@@ -235,7 +245,13 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 			return false;
 		}
 		rowbytes = (unsigned int)png_get_rowbytes(png_ptr, info_ptr);
-		size = height * rowbytes;
+		// height * rowbytes used to be multiplied as unsigned int: 65535 x 262140
+		// wraps to 1.43GB while png_read_image still writes 5.73GB.
+		if (!IsImageBufferSizeOk((size_t)rowbytes, (size_t)height, &size)) {
+			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+			outOfMemory = true;
+			return false;
+		}
 		p_image = (unsigned char*)malloc(size);
 		p_frame = (unsigned char*)malloc(size);
 		p_temp = (unsigned char*)malloc(size);

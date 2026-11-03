@@ -235,7 +235,10 @@ CKeyMap::CKeyMap() {
 		if (_tcsncmp(sLine, _T("#define"), 7) == 0) continue; // the symbols in the KeyMap are ignored (in case you have an old keymap file which defined the symbols and keybindings together)
 
 		LPTSTR sCommandId = _Parse(sLine);
-		if (*sCommandId == 0) continue;
+		// _Parse returns NULL when the line holds only one token (a dangling key
+		// with no command). The symbol file loop above already null-checks; this
+		// one used to dereference the NULL and crash at startup.
+		if (sCommandId == NULL || *sCommandId == 0) continue;
 		int nCommandId = _FindCommandId(m_symbolMap, sCommandId);
 		if (nCommandId < 0) continue;
 		int nKeyCode = _ParseKeys(sLine);
@@ -309,6 +312,22 @@ void CKeyMap::ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut) {
 		sBuffer.ReleaseBuffer();
 	}
 	if (nKeyCode == 0) return;
+
+	// Esc 和鼠标左键承载基本交互（退出当前模式、平移、裁剪）。让配置把它们
+	// 抢走会把用户困在一个没有常规出口的模式里，直接拒绝。
+	if (nKeyCode == VK_ESCAPE || nKeyCode == VK_LBUTTON) {
+		OutputDebugString(_T("JPEGView: OcrShortcut may not use Esc or the left mouse button; ignored.\n"));
+		return;
+	}
+
+	// 不要静默顶掉别的命令。原来的写法直接覆盖 m_keyMap[nKeyCode]，把
+	// OcrShortcut 设为 Ctrl+C 就会悄悄删掉“复制图像”的绑定。冲突时保留
+	// 原命令，并通过调试输出留下记录。
+	stdext::hash_map<int, int>::const_iterator existing = m_keyMap.find(nKeyCode);
+	if (existing != m_keyMap.end() && existing->second != nCommandId) {
+		OutputDebugString(_T("JPEGView: OcrShortcut conflicts with another command; ignored.\n"));
+		return;
+	}
 
 	// 先移除该命令已有的映射，否则同一个命令会同时响应 KeyMap.txt 里的旧键和新键。
 	for (stdext::hash_map<int, int>::iterator it = m_keyMap.begin(); it != m_keyMap.end(); ) {

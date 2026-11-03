@@ -48,7 +48,7 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	FILE *pFile = NULL;					// The file pointer
 	int channels = 0;					// The channels of the image (3 = RGA : 4 = RGBA)
 	int stride = 0;						// The stride (channels * width)
-	int i = 0;							// A counter
+	size_t i = 0;						// A counter
 
 	// Open a file pointer to the targa file and check if it was found and opened 
 	if((pFile = _tfopen(strFileName, _T("rb"))) == NULL) 
@@ -101,11 +101,18 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 
 	// check memory footprint
 	int targetChannels = (bits == 32) ? 4 : 3;
-	int targetStride = Helpers::DoPadding(width * targetChannels, 4);
-	uint32 numberOfBytesRequired = targetStride * height;
+	size_t targetStride = (size_t)Helpers::DoPadding(width * targetChannels, 4);
+	size_t numberOfBytesRequired = 0;
 
 	if ((double)width * height > MAX_IMAGE_PIXELS)
 	{
+		bOutOfMemory = true;
+		fclose(pFile);
+		return NULL;
+	}
+	// targetStride * height was uint32 arithmetic and wrapped just below the
+	// 65535-pixel limit; the RLE loop then walked the real dimensions.
+	if (!IsImageBufferSizeOk(targetStride, (size_t)height, &numberOfBytesRequired)) {
 		bOutOfMemory = true;
 		fclose(pFile);
 		return NULL;
@@ -248,14 +255,16 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 		int colorsRead = 0;
 		channels = bits / 8;
 		int x = 0;
-		int padding = targetStride - targetChannels * width;
+		int padding = (int)(targetStride - (size_t)targetChannels * width);
 
 		uint8 colors[4];
 		byte* pColors = (byte*)colors;
 		byte* pImage = pImageData;
 
 		// Load in all the pixel data
-		int numPixels = width*height;
+		// width*height as int goes negative near the pixel limit, which made the RLE
+		// loop read nothing and return an uninitialised buffer.
+		size_t numPixels = (size_t)width * height;
 		while(i < numPixels)
 		{
 			// Read in the current color count + 1
@@ -339,7 +348,7 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	// If image needs to be flipped, do this inplace
 	if (flipVertically)
 	{
-		CBasicProcessing::MirrorVInplace(width, height, targetStride, pImageData);
+		CBasicProcessing::MirrorVInplace(width, height, (int)targetStride, pImageData);
 	}
 
 	// 32 bit image - check alpha channel for validity and multiply RGB with alpha if valid

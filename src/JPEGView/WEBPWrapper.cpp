@@ -76,14 +76,24 @@ void* WebpReaderWriter::ReadImage(int& width,
 
 		has_animation = features.has_animation;
 		if (!has_animation) {
-			int nStride = width * nchannels;
-			int size = height * nStride;
+			size_t nStride = (size_t)width * nchannels;
+			size_t size = 0;
+			if (!IsImageBufferSizeOk(nStride, (size_t)height, &size)) {
+				outOfMemory = true;
+				return NULL;
+			}
 			pPixelData = new(std::nothrow) unsigned char[size];
 			if (pPixelData == NULL) {
 				outOfMemory = true;
 				return NULL;
 			}
-			WebPDecodeBGRAInto((const uint8_t*)buffer, sizebytes, pPixelData, size, nStride);
+			// WebPDecodeBGRAInto returns NULL on a corrupt bitstream. The old code
+			// ignored it and handed the caller an uninitialised buffer, which then
+			// got blended and displayed as if it were a valid image.
+			if (WebPDecodeBGRAInto((const uint8_t*)buffer, sizebytes, pPixelData, size, (int)nStride) == NULL) {
+				delete[] pPixelData;
+				return NULL;
+			}
 
 			// ICCP transform in place
 			ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, width, height);
@@ -97,7 +107,15 @@ void* WebpReaderWriter::ReadImage(int& width,
 		WebPAnimDecoderOptions anim_config;
 		WebPAnimDecoderOptionsInit(&anim_config);
 		anim_config.color_mode = MODE_BGRA;
-		uint8_t* cached_webp_bytes = new uint8_t[sizebytes];
+		// WebPDataClear releases this with free(), so it must not come from new[].
+		// Keep the cache = { 0 } in DeleteCache() as well: it is what clears
+		// data.bytes/data.size after the release.
+		uint8_t* cached_webp_bytes = (uint8_t*)malloc(sizebytes);
+		if (cached_webp_bytes == NULL) {
+			ICCProfileTransform::DeleteTransform(transform);
+			outOfMemory = true;
+			return NULL;
+		}
 		memcpy(cached_webp_bytes, buffer, sizebytes);
 		cache.data.bytes = cached_webp_bytes;
 		cache.data.size = sizebytes;
@@ -132,7 +150,15 @@ void* WebpReaderWriter::ReadImage(int& width,
 	frame_time = timestamp - cache.prev_frame_timestamp;
 	cache.prev_frame_timestamp = timestamp;
 
-	pPixelData = new(std::nothrow) unsigned char[width * height * nchannels];
+	// width * height * nchannels was int arithmetic; WebP caps at 16383x16383 so
+	// it cannot actually wrap today, but the decoder is the same shape as the rest
+	// and should not rely on a format-specific cap.
+	size_t frameBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)width * nchannels, (size_t)height, &frameBytes)) {
+		outOfMemory = true;
+		return NULL;
+	}
+	pPixelData = new(std::nothrow) unsigned char[frameBytes];
 	if (pPixelData == NULL) {
 		outOfMemory = true;
 		return NULL;
@@ -141,7 +167,7 @@ void* WebpReaderWriter::ReadImage(int& width,
 	// Try copying with ICCP transform
 	if (!ICCProfileTransform::DoTransform(cache.transform, buf, pPixelData, width, height)) {
 		// Copy frame to output buffer directly otherwise
-		memcpy(pPixelData, buf, width * height * nchannels);
+		memcpy(pPixelData, buf, frameBytes);
 	}
 
 	return pPixelData;

@@ -315,7 +315,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 		}
 
 		int nRowSize = Helpers::DoPadding(nWidth * nChannels, 4);
-		pPixelData = new(std::nothrow) char[nRowSize * nHeight];
+		// nRowSize * nHeight is int arithmetic: 262144 x 65535 is 17GB and wraps.
+		size_t allocSize = 0;
+		if (!IsImageBufferSizeOk((size_t)nRowSize, (size_t)nHeight, &allocSize)) {
+			bOutOfMemory = true;
+			ThrowIf(true);
+		}
+		pPixelData = new(std::nothrow) char[allocSize];
 		if (pPixelData == NULL) {
 			bOutOfMemory = true;
 			ThrowIf(true);
@@ -354,7 +360,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 							for (unsigned i = count; i < count + c; i++) {
 								unsigned char* scan = (unsigned char*)pPixelData + row * nRowSize + i * nChannels;
 								unsigned char* pixel = scan + rchannel;
-								ThrowIf(pixel >= (unsigned char*)pPixelData + nRowSize * nHeight);
+								ThrowIf(pixel >= (unsigned char*)pPixelData + allocSize);
 								*pixel = value;
 							}
 						} else if (c < 128) {
@@ -367,7 +373,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 
 								unsigned char* scan = (unsigned char*)pPixelData + row * nRowSize + i * nChannels;
 								unsigned char* pixel = scan + rchannel;
-								ThrowIf(pixel >= (unsigned char*)pPixelData + nRowSize * nHeight);
+								ThrowIf(pixel >= (unsigned char*)pPixelData + allocSize);
 								*pixel = value;
 							}
 						}
@@ -405,7 +411,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 
 						unsigned char* scan = (unsigned char*)pPixelData + row * nRowSize + count * nChannels;
 						unsigned char* pixel = scan + rchannel;
-						ThrowIf(pixel >= (unsigned char*)pPixelData + nRowSize * nHeight);
+						ThrowIf(pixel >= (unsigned char*)pPixelData + allocSize);
 						*pixel = value;
 					}
 				}
@@ -425,7 +431,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 				}
 
 				if (nChannels == 5) {
-					void* tempBuffer = new(std::nothrow) char[nRowSize * nHeight];
+					void* tempBuffer = new(std::nothrow) char[allocSize];
 					if (ICCProfileTransform::DoTransform(transform, pPixelData, tempBuffer, nWidth, nHeight, nRowSize)) {
 						delete[] pPixelData;
 						pPixelData = tempBuffer;

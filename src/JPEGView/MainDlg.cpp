@@ -975,21 +975,16 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 		return 1; // a panel has handled the key
 	}
 	// OCR 激活时优先消费这几个键，未激活时一律落到原有逻辑：
-	//   Ctrl+A  全选识别出的所有词（原绑定 IDM_EXCHANGE_PROC_PARAMS）
-	//   Ctrl+C  复制当前选取的文字（原绑定 IDM_COPY，复制图像）
-	//   Esc     隐藏识别结果与高亮框（原绑定 IDM_DEFAULT_ESC）
+	// OCR 激活时优先消费 Ctrl+A / Ctrl+C（原绑定分别是交换处理参数和复制图像），
+	// 但只在没有 Shift 时——Ctrl+Shift+A/C 在 KeyMap 里是不同的组合键。
+	// Esc 不在这里处理，否则会抢在“关闭帮助”和“取消裁剪”之前。
 	if (m_pOcrController && m_pOcrController->Active()) {
-		if (bCtrl && !bAlt && wParam == 'A' && m_pOcrController->SelectAll()) {
-			Invalidate(FALSE);
-			return 1;
-		}
-		if (wParam == VK_ESCAPE) {
-			m_pOcrController->Reset();
+		if (bCtrl && !bAlt && !bShift && wParam == 'A' && m_pOcrController->SelectAll()) {
 			Invalidate(FALSE);
 			return 1;
 		}
 		// Copy 在没有选区时返回 false，此时不拦截，继续走原来的复制图像逻辑
-		if (bCtrl && !bAlt && wParam == 'C' && m_pOcrController->Copy(m_hWnd)) {
+		if (bCtrl && !bAlt && !bShift && wParam == 'C' && m_pOcrController->Copy(m_hWnd)) {
 			Invalidate(FALSE);
 			return 1;
 		}
@@ -1000,6 +995,11 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 	} else if (wParam == VK_ESCAPE && m_pCropCtl->IsCropping()) {
 		bHandled = true;
 		m_pCropCtl->AbortCropping();
+	} else if (wParam == VK_ESCAPE && !bCtrl && !bAlt && !bShift && m_pOcrController && m_pOcrController->Active()) {
+		// 帮助和裁剪都没接管 Esc，才隐藏 OCR 结果。
+		bHandled = true;
+		m_pOcrController->Reset();
+		Invalidate(FALSE);
 	} else if (!bCtrl && wParam != VK_ESCAPE && m_nLastLoadError == HelpersGUI::FileLoad_NoFilesInDirectory && !m_sStartupFile.IsEmpty()) {
 		// search in subfolders if initial directory has no images
 		bHandled = true;
@@ -2594,7 +2594,12 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	}
 	m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
 	if (ePos == POS_Current || ePos == POS_AwayFromCurrent) {
-		m_pJPEGProvider->ClearRequest(m_pCurrentImage, ePos == POS_AwayFromCurrent);
+		// POS_Current is the reload path. It must release the locked file too:
+		// otherwise the animated-WebP/APNG/JXL/AVIF decoders stay keyed on the old
+		// file name and serve frames from the previous contents after an external
+		// edit. Parameters-only reloads pay one extra file read, which the OS
+		// cache absorbs.
+		m_pJPEGProvider->ClearRequest(m_pCurrentImage, true);
 	}
 	m_pCurrentImage = NULL;
 
