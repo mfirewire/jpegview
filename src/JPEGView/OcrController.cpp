@@ -177,9 +177,11 @@ bool COcrController::MouseUp(CMainDlg& main) {
         }
     } else {
         // A drag is a fresh selection: the swept range replaces what was there.
+        // 这里不用 std::min/std::max：windows.h 把它们定义成了宏，而本文件没有
+        // #undef（OcrEngine.cpp 里有），展开后会变成语法错误。
         std::fill(m_selected.begin(), m_selected.end(), false);
-        const int first = std::min(anchor, end);
-        const int last = std::max(anchor, end);
+        int first = anchor, last = end;
+        if (first > last) std::swap(first, last);
         for (int i = first; i <= last && size_t(i) < m_selected.size(); ++i) {
             m_selected[size_t(i)] = true;
         }
