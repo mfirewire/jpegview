@@ -38,6 +38,12 @@ private:
 	// silently dead. English text on purpose: no strings-file entry.
 	std::vector<CString> m_rejectedShortcuts;
 
+	// Parallel to m_rejectedShortcuts: whether the entry is a real conflict
+	// (a key already taken) rather than malformed input. Only conflicts pop
+	// up the dialog; malformed or dead definitions are handled quietly
+	// (commented out in KeyMap.txt, or logged) and never interrupt startup.
+	std::vector<char> m_rejectedShortcutsIsConflict;
+
 	// Physical line numbers of the loaded user KeyMap.txt rejected by
 	// _ParseKeys (invalid token or dead mapping). After loading, those
 	// lines are commented out in the user's file (CommentOutRejectedLines).
@@ -51,7 +57,7 @@ private:
 	// -1 = rewrite attempted but failed (file left untouched).
 	int m_nKeyMapRewriteResult = 0;
 
-	void RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason);
+	void RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason, bool bConflict);
 	void ShowRejectedShortcuts();
 	void CommentOutRejectedLines(LPCTSTR sPath);
 
