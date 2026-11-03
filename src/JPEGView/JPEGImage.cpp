@@ -405,13 +405,19 @@ bool CJPEGImage::ResizeOriginalPixels(EResizeFilter filter, CSize newSize) {
 
 	InvalidateAllCachedPixelData();
 
-	void* pResizedPixels = m_pOrigPixels;
 	int currentWidth = m_nOrigWidth;
 	int currentHeight = m_nOrigHeight;
 	int channels = m_nOriginalChannels;
 	double totalFactor = (double)currentWidth / newWidth;
 	int steps = (totalFactor > 5) ? (int)ceil(log(totalFactor) / log(5.0)) : 1;
 	double factor = (steps > 1) ? pow(totalFactor, 1.0 / steps) : 1.0;
+	// The original buffer is released only after every step succeeded. Freeing it
+	// as soon as step 0 completed left m_pOrigPixels dangling when a later step
+	// failed on OOM, and the caller did not check the return value, so the next
+	// paint read freed memory.
+	void* pOriginal = m_pOrigPixels;
+	void* pCurrent = pOriginal;
+	void* pPrev = NULL;
 	for (int i = 0; i < steps; i++) {
 		EResizeFilter usedFilter;
 		int oldWidth = currentWidth, oldHeight = currentHeight;
@@ -424,18 +430,26 @@ bool CJPEGImage::ResizeOriginalPixels(EResizeFilter filter, CSize newSize) {
 			currentHeight = newHeight;
 			usedFilter = filter;
 		}
-		void* pOldPixels = pResizedPixels;
-		pResizedPixels = InternalResize(pResizedPixels, channels, usedFilter, CSize(currentWidth, currentHeight), CSize(oldWidth, oldHeight));
-		if (pResizedPixels == NULL)
+		void* pNext = InternalResize(pCurrent, channels, usedFilter, CSize(currentWidth, currentHeight), CSize(oldWidth, oldHeight));
+		if (pNext == NULL) {
+			// Drop only the intermediate buffers. pOriginal is untouched and
+			// m_pOrigPixels still points at it, so the image stays displayable.
+			if (pCurrent != pOriginal) delete[] pCurrent;
+			if (pPrev != NULL && pPrev != pOriginal) delete[] pPrev;
 			return false;
-		delete[] pOldPixels;
+		}
+		if (pPrev != NULL && pPrev != pOriginal) delete[] pPrev;
+		pPrev = pCurrent;
+		pCurrent = pNext;
 		channels = 4;
 	}
+	if (pPrev != NULL && pPrev != pOriginal) delete[] pPrev;
+	delete[] pOriginal;
 
 	m_nOrigWidth = newWidth;
 	m_nOrigHeight = newHeight;
 	m_nOriginalChannels = 4;
-	m_pOrigPixels = pResizedPixels;
+	m_pOrigPixels = pCurrent;
 	MarkAsDestructivelyProcessed();
 	m_bIsProcessedNoParamDB = true;
 

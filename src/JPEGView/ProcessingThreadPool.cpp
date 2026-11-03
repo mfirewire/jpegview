@@ -84,8 +84,16 @@ bool CProcessingThreadPool::Process(CProcessingRequest* pRequest) {
 			// Important: All slices must have a height dividable by 'StripPadding', except the last one
 			int nNumThreadsUsed = m_nNumThreads + 1; // we also use the calling thread, thus +1
 			int nSliceCY;
-			while ((nSliceCY = ~(pRequest->StripPadding - 1) & (nTargetCY / nNumThreadsUsed)) < pRequest->StripPadding) {
+			// The > 1 guard is the correctness fix: with AVX2 StripPadding is 16 and
+			// a target height of 13..15 always yields a slice of 0, so the loop used
+			// to decrement to 0 and divide by zero on the next evaluation. The
+			// assignment below is only there so the single-thread fallback reads
+			// clearly; nLastCY already ignores the stale value via (nNumThreadsUsed-1).
+			while (nNumThreadsUsed > 1 && (nSliceCY = ~(pRequest->StripPadding - 1) & (nTargetCY / nNumThreadsUsed)) < pRequest->StripPadding) {
 				nNumThreadsUsed--;
+			}
+			if (nNumThreadsUsed == 1) {
+				nSliceCY = nTargetCY;
 			}
 			int nLastCY = nTargetCY - (nNumThreadsUsed - 1)*nSliceCY;
 			volatile LONG nRequestThreadCounter = nNumThreadsUsed - 1;

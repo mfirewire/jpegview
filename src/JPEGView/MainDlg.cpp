@@ -764,8 +764,9 @@ LRESULT CMainDlg::OnLButtonDown(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	bool bEatenByPanel = isCropping ? false : m_pPanelMgr->OnMouseLButton(MouseEvent_BtnDown, pointClicked.x, pointClicked.y);
 
 	if (!bEatenByPanel) {
-		// OCR word selection has priority when OCR result is active
-		if (m_pOcrController && m_pOcrController->MouseDown(*this, pointClicked)) {
+		// OCR word selection has priority when OCR result is active, but not while
+		// cropping: that click has to reach the crop handles instead.
+		if (!isCropping && m_pOcrController && m_pOcrController->MouseDown(*this, pointClicked)) {
 			return 0;
 		}
 		bool bCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -1610,6 +1611,10 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 					InitFromProcessingFlags(procFlags, m_bHQResampling, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, m_bLandscapeMode);
 					m_nRotation = m_pCurrentImage->GetInitialRotation();
 					m_nUserRotation = 0;
+					// Restoring the initial rotation makes VerifyRotation turn the
+					// pixels back on the next paint, so the word boxes from the
+					// rotated image no longer line up with the content.
+					ResetOcrResult();
 					m_dZoom = -1;
 					m_pCurrentImage->SetIsInParamDB(false);
 					m_pImageProcPanelCtl->ShowHideSaveDBButtons();
@@ -1624,9 +1629,16 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_ROTATE_270:
 			if (m_pCurrentImage != NULL) {
 				uint32 nRotationDelta = (nCommand == IDM_ROTATE_90) ? 90 : 270;
+				// Rotate first: if it fails the pixels are untouched, so the rotation
+				// counters and the window must not move either. The old order bumped
+				// them before the call, and VerifyRotation then retried the same
+				// failing rotation on every paint.
+				if (!m_pCurrentImage->Rotate(nRotationDelta)) {
+					ShowEditFailedMessage();
+					break;
+				}
 				m_nRotation = (m_nRotation + nRotationDelta) % 360;
 				m_nUserRotation = (m_nUserRotation + nRotationDelta) % 360;
-				m_pCurrentImage->Rotate(nRotationDelta);
 				ResetOcrResult();
 				if (!IsAdjustWindowToImage()) m_dZoom = -1;
 				m_bUserZoom = false;
@@ -1637,6 +1649,10 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_ROTATE:
 			m_pCropCtl->AbortCropping();
+			// The rotation panel previews the transform at DIB level while OCR
+			// overlays still use the unrotated OriginalPixels coordinates. Drop the
+			// result on entry instead of drawing misplaced boxes during the preview.
+			ResetOcrResult();
 			GetRotationPanelCtl()->SetVisible(true);
 			break;
 		case IDM_CHANGESIZE:
@@ -1645,9 +1661,13 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				CResizeDlg dlgResize(m_pCurrentImage->OrigSize());
 				if (dlgResize.DoModal(m_hWnd) == IDOK) {
 					HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
-					m_pCurrentImage->ResizeOriginalPixels(dlgResize.GetFilter(), dlgResize.GetNewSize());
-					ResetOcrResult();
+					bool bResized = m_pCurrentImage->ResizeOriginalPixels(dlgResize.GetFilter(), dlgResize.GetNewSize());
 					::SetCursor(hOldCursor);
+					if (!bResized) {
+						ShowEditFailedMessage();
+						break;
+					}
+					ResetOcrResult();
 					m_pImageProcPanelCtl->ShowHideSaveDBButtons();
 					this->Invalidate(FALSE);
 				}
@@ -1655,12 +1675,17 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_PERSPECTIVE:
 			m_pCropCtl->AbortCropping();
+			// Same reason as IDM_ROTATE: the preview is a DIB-level transform.
+			ResetOcrResult();
 			GetTiltCorrectionPanelCtl()->SetVisible(true);
 			break;
 		case IDM_MIRROR_H:
 		case IDM_MIRROR_V:
 			if (m_pCurrentImage != NULL) {
-				m_pCurrentImage->Mirror(nCommand == IDM_MIRROR_H);
+				if (!m_pCurrentImage->Mirror(nCommand == IDM_MIRROR_H)) {
+					ShowEditFailedMessage();
+					break;
+				}
 				ResetOcrResult();
 				m_pImageProcPanelCtl->ShowHideSaveDBButtons();
 				this->Invalidate(FALSE);
@@ -1997,7 +2022,10 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_CROP_SEL:
 			if (m_pCurrentImage != NULL) {
-				m_pCurrentImage->Crop(m_pCropCtl->GetImageCropRect(false));
+				if (!m_pCurrentImage->Crop(m_pCropCtl->GetImageCropRect(false))) {
+					ShowEditFailedMessage();
+					break;
+				}
 				ResetOcrResult();
 				m_pImageProcPanelCtl->ShowHideSaveDBButtons();
 				this->Invalidate(FALSE);
@@ -2200,6 +2228,12 @@ bool CMainDlg::OpenFileWithDialog(bool bFullScreen, bool bAfterStartup) {
 
 void CMainDlg::ResetOcrResult() {
 	if (m_pOcrController) m_pOcrController->Reset();
+}
+
+void CMainDlg::ShowEditFailedMessage() {
+	::MessageBox(m_hWnd,
+		CNLS::GetString(_T("The operation failed because not enough memory is available!")),
+		_T(JPEGVIEW_TITLE), MB_OK | MB_ICONSTOP);
 }
 
 void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {

@@ -205,6 +205,9 @@ public:
 	// 透视、锐化等任何就地改变图像内容的操作之后都要调用，否则旧词的包围盒会
 	// 错位到新图像上，Ctrl+C 还会复制到已经过时的文字。
 	void ResetOcrResult();
+	// 就地编辑失败（通常是 OOM）时的统一提示。调用方负责在返回 false 分支里
+	// 不要更新旋转角、缩放、窗口适配等状态，否则像素没变、界面却已经改了。
+	void ShowEditFailedMessage();
 	void ResetZoomTo100Percents(bool bZoomToMouse);
 	void ResetZoomToFitScreen(bool bFillWithCrop, bool bAllowEnlarge, bool bAdjustWindowSize);
 	bool PerformPan(int dx, int dy, bool bAbsolute);

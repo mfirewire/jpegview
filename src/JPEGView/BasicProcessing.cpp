@@ -872,7 +872,7 @@ void* CBasicProcessing::PointSample(CSize fullTargetSize, CPoint fullTargetOffse
 	CSize sourceSize, const void* pPixels, int nChannels) {
 	if (fullTargetSize.cx < 1 || fullTargetSize.cy < 1 ||
 		clippedTargetSize.cx < 1 || clippedTargetSize.cy < 1 ||
-		fullTargetOffset.x < 0 || fullTargetOffset.x < 0 ||
+		fullTargetOffset.x < 0 || fullTargetOffset.y < 0 ||
 		clippedTargetSize.cx + fullTargetOffset.x > fullTargetSize.cx ||
 		clippedTargetSize.cy + fullTargetOffset.y > fullTargetSize.cy ||
 		pPixels == NULL || (nChannels != 3 && nChannels != 4)) {
@@ -936,7 +936,7 @@ void* CBasicProcessing::PointSampleWithRotation(CSize fullTargetSize, CPoint ful
 	CSize sourceSize, double dRotation, const void* pPixels, int nChannels, COLORREF backColor) {
 	if (fullTargetSize.cx < 1 || fullTargetSize.cy < 1 ||
 		clippedTargetSize.cx < 1 || clippedTargetSize.cy < 1 ||
-		fullTargetOffset.x < 0 || fullTargetOffset.x < 0 ||
+		fullTargetOffset.x < 0 || fullTargetOffset.y < 0 ||
 		clippedTargetSize.cx + fullTargetOffset.x > fullTargetSize.cx ||
 		clippedTargetSize.cy + fullTargetOffset.y > fullTargetSize.cy ||
 		pPixels == NULL || (nChannels != 3 && nChannels != 4)) {
@@ -1087,7 +1087,7 @@ void* CBasicProcessing::PointSampleTrapezoid(CSize fullTargetSize, const CTrapez
 		(fullTargetTrapezoid.x1e - fullTargetTrapezoid.x1s) <= 0  ||
 		(fullTargetTrapezoid.x2e - fullTargetTrapezoid.x2s) <= 0  ||
 		clippedTargetSize.cx < 1 || clippedTargetSize.cy < 1 ||
-		fullTargetOffset.x < 0 || fullTargetOffset.x < 0 ||
+		fullTargetOffset.x < 0 || fullTargetOffset.y < 0 ||
 		clippedTargetSize.cx + fullTargetOffset.x > fullTargetSize.cx ||
 		clippedTargetSize.cy + fullTargetOffset.y > fullTargetSize.cy ||
 		pPixels == NULL || (nChannels != 3 && nChannels != 4)) {
