@@ -2,6 +2,7 @@
 #include "StdAfx.h"
 #include "ImageLoadThread.h"
 #include <gdiplus.h>
+#include <vector>
 #include "JPEGImage.h"
 #include "MessageDef.h"
 #include "Helpers.h"
@@ -1067,9 +1068,164 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 	delete[] pBuffer;
 }
 
+// Decoder-independent RAW gate. Both libraw and dcraw_mod allocate and read the
+// image according to the dimensions the file declares, and neither checks those
+// dimensions against the file's real size. A DNG that declares 65535x21846 but
+// carries only a few KB reads past its buffer inside them and crashes
+// intermittently (observed: 2 crashes in 4 opens). Parse the TIFF IFD0 here,
+// before either decoder runs, and compare the declared data size with the file
+// size using 64-bit arithmetic. Files that are not TIFF-shaped are let through
+// to the decoders rather than being mis-classified.
+static bool IsPlausibleRawFile(LPCTSTR fileName) {
+	HANDLE hFile = ::CreateFile(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	LARGE_INTEGER liSize;
+	if (!::GetFileSizeEx(hFile, &liSize) || liSize.QuadPart <= 0) {
+		::CloseHandle(hFile);
+		return false;
+	}
+	const unsigned long long fileSize = (unsigned long long)liSize.QuadPart;
+
+	// TIFF metadata sits at the front of the file; the first 1 MB covers the
+	// IFD and virtually every tag's external value. If it cannot be read, let
+	// the decoder report its own error rather than guessing.
+	const unsigned long long metaBytes = (fileSize < 1048576ULL) ? fileSize : 1048576ULL;
+	std::vector<unsigned char> buf((size_t)metaBytes);
+	DWORD got = 0;
+	if (!::ReadFile(hFile, &buf[0], (DWORD)metaBytes, &got, NULL) || got < 8) {
+		::CloseHandle(hFile);
+		return false;
+	}
+	::CloseHandle(hFile);
+
+	bool little;
+	if (buf[0] == 'I' && buf[1] == 'I') {
+		little = true;
+	} else if (buf[0] == 'M' && buf[1] == 'M') {
+		little = false;
+	} else {
+		return true; // not TIFF, leave it to the decoders
+	}
+
+	const unsigned long long kInvalid = (unsigned long long)-1;
+	auto u16 = [&](unsigned long long off) -> unsigned long long {
+		if (off + 2 > (unsigned long long)buf.size()) return kInvalid;
+		if (little) return buf[(size_t)off] | ((unsigned long long)buf[(size_t)off + 1] << 8);
+		return ((unsigned long long)buf[(size_t)off] << 8) | buf[(size_t)off + 1];
+	};
+	auto u32 = [&](unsigned long long off) -> unsigned long long {
+		if (off + 4 > (unsigned long long)buf.size()) return kInvalid;
+		if (little)
+			return buf[(size_t)off] | ((unsigned long long)buf[(size_t)off + 1] << 8) |
+				((unsigned long long)buf[(size_t)off + 2] << 16) | ((unsigned long long)buf[(size_t)off + 3] << 24);
+		return ((unsigned long long)buf[(size_t)off] << 24) | ((unsigned long long)buf[(size_t)off + 1] << 16) |
+			((unsigned long long)buf[(size_t)off + 2] << 8) | buf[(size_t)off + 3];
+	};
+
+	if (u16(2) != 42) return true; // not a standard TIFF
+
+	const unsigned long long ifdOff = u32(4);
+	if (ifdOff == kInvalid || ifdOff + 2 > (unsigned long long)buf.size()) {
+		return false; // claims to be TIFF but the IFD is unreadable
+	}
+	const unsigned long long n = u16(ifdOff);
+	if (n == kInvalid || n == 0 || n > 512) {
+		return false;
+	}
+
+	unsigned long long width = 0, height = 0, compression = 1, samples = 0, bits = 0;
+	unsigned long long stripOffsets[512];
+	unsigned long long stripByteCounts[512];
+	int nStripOff = 0, nStripCnt = 0;
+
+	for (unsigned long long k = 0; k < n; ++k) {
+		const unsigned long long e = ifdOff + 2 + k * 12;
+		if (e + 12 > (unsigned long long)buf.size()) break;
+		const unsigned long long tag = u16(e);
+		const unsigned long long type = u16(e + 2);
+		const unsigned long long count = u32(e + 4);
+		if (count == kInvalid || count == 0 || count > 512) continue;
+
+		unsigned long long typeSize = 0;
+		switch (type) {
+			case 1: case 2: case 6: case 7: typeSize = 1; break;
+			case 3: typeSize = 2; break;
+			case 4: case 9: case 11: typeSize = 4; break;
+			case 5: case 10: typeSize = 8; break;
+			default: continue;
+		}
+		const unsigned long long byteCount = typeSize * count;
+
+		// Inline value (<= 4 bytes) or offset to the external value.
+		unsigned long long valOff = e + 8;
+		if (byteCount > 4) {
+			valOff = u32(e + 8);
+			if (valOff == kInvalid || valOff + byteCount > (unsigned long long)buf.size()) continue;
+		}
+
+		// Read the first value in its own width. A SHORT is left-justified in the
+		// 4-byte value field, so reading it as a LONG would shift it by 16 bits
+		// on big-endian files.
+		unsigned long long val = 0;
+		switch (type) {
+			case 3: val = u16(valOff); break; // SHORT
+			case 1: case 2: case 6: case 7: val = buf[(size_t)valOff]; break; // BYTE/ASCII
+			default: val = u32(valOff); break; // LONG/SLONG/FLOAT/RATIONAL numerator
+		}
+
+		switch (tag) {
+			case 256: width = val; break;
+			case 257: height = val; break;
+			case 259: compression = val; break;
+			case 277: samples = val; break;
+			case 258: bits = val; break;
+			case 273:
+				for (unsigned long long j = 0; j < count && nStripOff < 512; ++j)
+					stripOffsets[nStripOff++] = u32(valOff + j * 4);
+				break;
+			case 279:
+				for (unsigned long long j = 0; j < count && nStripCnt < 512; ++j)
+					stripByteCounts[nStripCnt++] = u32(valOff + j * 4);
+				break;
+		}
+	}
+
+	// No sane declared size, or a size beyond any real sensor, is itself
+	// suspicious. Keeping width/height <= 65535 also keeps the products below
+	// from overflowing.
+	if (width == 0 || height == 0 || width > 65535 || height > 65535) {
+		return false;
+	}
+
+	const unsigned long long declaredPixels = width * height;
+
+	if (compression == 1 || compression == 0) {
+		// Uncompressed (0 is a missing/invalid value, treated conservatively as
+		// uncompressed): the file must actually hold every declared pixel.
+		const unsigned long long samplesPerPixel = samples ? samples : 1;
+		const unsigned long long bitsPerSample = bits ? bits : 1;
+		const unsigned long long declaredBytes = declaredPixels * samplesPerPixel * bitsPerSample / 8;
+		if (declaredBytes > fileSize) return false;
+	} else {
+		// Compressed: at least one bit per pixel must fit, and every strip's
+		// data range must lie inside the file.
+		if (fileSize < declaredPixels / 8) return false;
+		int nStrip = nStripOff < nStripCnt ? nStripOff : nStripCnt;
+		for (int i = 0; i < nStrip; ++i) {
+			if (stripOffsets[i] + stripByteCounts[i] > fileSize) return false;
+		}
+	}
+	return true;
+}
+
 void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	bool bOutOfMemory = false;
 	try {
+		if (!IsPlausibleRawFile(request->FileName)) {
+			return;
+		}
 		int fullsize = CSettingsProvider::This().DisplayFullSizeRAW();
 
 #ifndef WINXP
