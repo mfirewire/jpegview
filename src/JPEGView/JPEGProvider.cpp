@@ -21,7 +21,18 @@ CJPEGProvider::CJPEGProvider(HWND handlerWnd, int nNumThreads, int nNumBuffers) 
 
 CJPEGProvider::~CJPEGProvider(void) {
 	for (int i = 0; i < m_nNumThread; i++) {
-		delete m_pWorkThreads[i];
+		// R-21: Terminate() returns false when the worker outlives its 10 s
+		// window. Deleting the thread object on that path frees memory the
+		// still-running ThreadFunc reads (m_bTerminate / m_bCoInitialize
+		// after its current decode), so leak the object instead and only
+		// NULL the slot - the same rule StopAllThreads already uses.
+		// (The CWorkThread destructor alone cannot fix this: it runs too
+		// late, after the caller has already decided to delete.)
+		if (m_pWorkThreads[i]->Terminate()) {
+			delete m_pWorkThreads[i];
+		} else {
+			m_pWorkThreads[i] = NULL;
+		}
 	}
 	delete[] m_pWorkThreads;
 	std::list<CImageRequest*>::iterator iter;

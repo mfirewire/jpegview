@@ -26,6 +26,14 @@ CTiltCorrectionPanelCtl::CTiltCorrectionPanelCtl(CMainDlg* pMainDlg, CPanel* pIm
 }
 
 CTrapezoid CTiltCorrectionPanelCtl::GetCurrentTrapezoid(CSize targetSize) {
+	// R-19: GetNavigatorRect already returns an empty rect for a NULL image,
+	// but this function used to dereference CurrentImage() unconditionally,
+	// so the crash only moved one step down from GetNavigatorRect. A panel
+	// that is visible while the image is gone (reload failed, file deleted)
+	// now gets an empty trapezoid instead of a null dereference.
+	if (CurrentImage() == NULL) {
+		return CTrapezoid();
+	}
 	CSize fullImageSize = targetSize;
 	CSize origImageSize = CurrentImage()->OrigSize();
 	float fFactorX = ((float)(fullImageSize.cx - 1))/(origImageSize.cx - 1);

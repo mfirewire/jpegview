@@ -64,6 +64,10 @@ void CProcessingThreadPool::CreateThreadPoolThreads() {
 }
 
 void CProcessingThreadPool::StopAllThreads() {
+	// R-21 note: this leak-on-timeout rule is the model CJPEGProvider's
+	// destructor now follows too. Be aware this function currently has NO
+	// callers anywhere in the code base (the pool is a process-lifetime
+	// singleton), so it is dead-code hardening, not the live shutdown path.
 	for (int i = 0; i < m_nNumThreads; i++) {
 		// Terminate() returns false when the thread outlives its wait window; in
 		// that case deleting it would free an object the thread is still using, so

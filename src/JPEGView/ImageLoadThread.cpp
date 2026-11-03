@@ -12,6 +12,7 @@
 #include "BasicProcessing.h"
 #include "dcraw_mod.h"
 #include "TJPEGWrapper.h"
+#include "libjpeg-turbo\include\turbojpeg.h"
 #include "ICCProfileTransform.h"
 #include "PNGWrapper.h"
 #ifndef WINXP
@@ -655,6 +656,16 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 							Helpers::FindEXIFBlock(pBuffer, nFileSize), 3, 
 							Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
 						request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
+						// R-06: TurboJpeg lets TJSAMP_UNKNOWN (-1) through for CMYK,
+						// but CanUseLosslessJPEGTransformations /
+						// TrimRectToMCUBlockSize index tjMCUWidth/tjMCUHeight
+						// with it: an out-of-bounds read, and a divide by zero
+						// if the slot happens to read 0. Normalize to 444 here.
+						// This only keeps the MCU indexing safe; it does NOT
+						// claim the source image actually is 4:4:4.
+						if (eChromoSubSampling == TJSAMP_UNKNOWN) {
+							eChromoSubSampling = TJSAMP_444;
+						}
 						request->Image->SetJPEGChromoSampling(eChromoSubSampling);
 					} else {
 						// No CMYK transform available (lcms2 or cmyk.icm missing, e.g. XP build).
@@ -1204,6 +1215,14 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 	unsigned long long stripOffsets[512];
 	unsigned long long stripByteCounts[512];
 	int nStripOff = 0, nStripCnt = 0;
+	// R-10: whether a usable 273/279 array was seen at all. A strip array
+	// present without its partner (or with a different count) is itself
+	// malformed and must not silently check zero strips.
+	bool hasStripOff = false, hasStripCnt = false;
+	// R-01: a strip value that cannot be read at all (see below) fails the
+	// array closed instead of storing garbage or kInvalid, which would wrap
+	// on the offset+count add in the compressed branch.
+	bool stripOffBad = false, stripCntBad = false;
 
 	for (unsigned long long k = 0; k < n; ++k) {
 		const unsigned long long e = ifdOff + 2 + k * 12;
@@ -1247,20 +1266,45 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 			case 277: samples = val; break;
 			case 258: bits = val; break;
 			case 273:
-				for (unsigned long long j = 0; j < count && nStripOff < 512; ++j)
-					stripOffsets[nStripOff++] = u32(valOff + j * 4);
+				// R-01: strip arrays step by their own type. SHORT strips are
+				// 2 bytes apart (inline or external), LONG strips 4 bytes.
+				// Reading SHORT arrays with a 4-byte stride used to return
+				// garbage and falsely reject valid files; other types are
+				// not valid strip arrays and are ignored.
+				if (type == 3 || type == 4) {
+					hasStripOff = true;
+					for (unsigned long long j = 0; j < count && nStripOff < 512; ++j) {
+						unsigned long long v = (type == 3) ? u16(valOff + j * 2) : u32(valOff + j * 4);
+						if (v == kInvalid) { stripOffBad = true; break; }
+						stripOffsets[nStripOff++] = v;
+					}
+				}
 				break;
 			case 279:
-				for (unsigned long long j = 0; j < count && nStripCnt < 512; ++j)
-					stripByteCounts[nStripCnt++] = u32(valOff + j * 4);
+				if (type == 3 || type == 4) {
+					hasStripCnt = true;
+					for (unsigned long long j = 0; j < count && nStripCnt < 512; ++j) {
+						unsigned long long v = (type == 3) ? u16(valOff + j * 2) : u32(valOff + j * 4);
+						if (v == kInvalid) { stripCntBad = true; break; }
+						stripByteCounts[nStripCnt++] = v;
+					}
+				}
 				break;
 		}
 	}
 
 	// No sane declared size, or a size beyond any real sensor, is itself
-	// suspicious. Keeping width/height <= 65535 also keeps the products below
-	// from overflowing.
+	// suspicious.
 	if (width == 0 || height == 0 || width > 65535 || height > 65535) {
+		return false;
+	}
+
+	// R-02: width/height <= 65535 alone does NOT keep the product below from
+	// overflowing: samples (277) and bits (258) are read as LONG u32 values
+	// with no cap, so a hostile file could wrap declaredBytes to a small
+	// value and defeat the check. TIFF semantics need no more than 8
+	// samples or 64 bits per sample; anything above that is malformed.
+	if (samples > 8 || bits > 64) {
 		return false;
 	}
 
@@ -1277,6 +1321,11 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 		// Compressed: at least one bit per pixel must fit, and every strip's
 		// data range must lie inside the file.
 		if (fileSize < declaredPixels / 8) return false;
+		// R-10: the two strip arrays must either both be absent (then only
+		// the pixels/8 bound applies) or both be present with equal counts.
+		// One array without the other, unequal counts, or an unreadable
+		// value used to check zero strips and let the file through.
+		if (hasStripOff != hasStripCnt || nStripOff != nStripCnt || stripOffBad || stripCntBad) return false;
 		int nStrip = nStripOff < nStripCnt ? nStripOff : nStripCnt;
 		for (int i = 0; i < nStrip; ++i) {
 			if (stripOffsets[i] + stripByteCounts[i] > fileSize) return false;

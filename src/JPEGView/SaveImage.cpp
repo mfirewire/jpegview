@@ -33,13 +33,18 @@ static uint8* RemoveExistingCommentSegment(void* pJPEGStream, int& nStreamLength
 		return NULL;
 	}
 	const int nLenSegment = pCommentSeg[2] * 256 + pCommentSeg[3];
-	if (nLenSegment < 2 || nHeader + nLenSegment > nStreamLength) {
+	// R-18: the length field counts itself (2 bytes) but not the marker, so
+	// the whole segment is 2 (marker FF FE) + nLenSegment bytes. Deleting
+	// only nLenSegment used to leave the last 2 bytes of the comment behind
+	// and shift the following segment out of alignment, corrupting the file
+	// on save. All four places below must use the full segment length.
+	if (nLenSegment < 2 || nHeader + 2 + nLenSegment > nStreamLength) {
 		return NULL;
 	}
-	uint8* pNewBuffer = new uint8[nStreamLength - nLenSegment];
+	uint8* pNewBuffer = new uint8[nStreamLength - (2 + nLenSegment)];
 	memcpy(pNewBuffer, pJPEGStream, nHeader);
-	memcpy(&(pNewBuffer[nHeader]), pCommentSeg + nLenSegment, nStreamLength - nHeader - nLenSegment);
-	nStreamLength = nStreamLength - nLenSegment;
+	memcpy(&(pNewBuffer[nHeader]), pCommentSeg + 2 + nLenSegment, nStreamLength - nHeader - (2 + nLenSegment));
+	nStreamLength = nStreamLength - (2 + nLenSegment);
 	return pNewBuffer;
 }
 
