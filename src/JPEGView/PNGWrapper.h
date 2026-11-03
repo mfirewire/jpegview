@@ -30,6 +30,7 @@ private:
 	struct png_cache;
 	static png_cache cache;
 	static bool BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory);
+	static bool ReadFrameData();
 	static void* ReadNextFrame(void** exif_chunk, unsigned int* exif_size);
 	static void DeleteCacheInternal(bool free_buffer);
 #endif

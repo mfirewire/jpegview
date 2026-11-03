@@ -3,6 +3,7 @@
 #include "ICCProfileTransform.h"
 #include "SettingsProvider.h"
 #include <string.h>
+#include <math.h>
 
 
 #ifndef WINXP
@@ -153,13 +154,27 @@ bool ICCProfileTransform::IsNoTransformNeeded(const void* profile, unsigned int 
 		// lcms2 would refuse the transform, and refusing here is cheaper.
 		bSkip = true;
 	} else {
-		// sRGB profiles name themselves, and the names in the wild are
-		// "sRGB IEC61966-2.1" and its translations. Reading the colorant matrix
-		// would be exact, but it would also have to special-case every wider
-		// gamut profile that we do want to convert.
+		// Only skip when the profile really is sRGB. The description alone was not
+		// enough: a wide gamut profile whose description happens to contain "sRGB"
+		// was skipped and its colors went unconverted (wrong colors). Verify the
+		// colorant matrix as well. A genuinely sRGB profile with unusual numbers
+		// merely gets a harmless identity transform, which is the safe direction.
 		char text[128] = { 0 };
 		cmsGetProfileInfoASCII(hProfile, cmsInfoDescription, "en", "US", text, (cmsUInt32Number) sizeof(text) - 1);
-		bSkip = (strstr(text, "sRGB") != NULL) || (strstr(text, "srgb") != NULL);
+		bSkip = false;
+		if ((strstr(text, "sRGB") != NULL) || (strstr(text, "srgb") != NULL)) {
+			const cmsCIEXYZ* pRed = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigRedColorantTag);
+			const cmsCIEXYZ* pGreen = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigGreenColorantTag);
+			const cmsCIEXYZ* pBlue = (const cmsCIEXYZ*)cmsReadTag(hProfile, cmsSigBlueColorantTag);
+			// sRGB colorants in the D50-adapted ICC PCS. The tolerance accepts vendor
+			// variants but stays far from Adobe RGB and Display P3, whose red
+			// primaries differ by more than 0.1.
+			const double dTolerance = 0.05;
+			bSkip = pRed != NULL && pGreen != NULL && pBlue != NULL
+				&& fabs(pRed->X - 0.4361) < dTolerance && fabs(pRed->Y - 0.2225) < dTolerance && fabs(pRed->Z - 0.0139) < dTolerance
+				&& fabs(pGreen->X - 0.3851) < dTolerance && fabs(pGreen->Y - 0.7169) < dTolerance && fabs(pGreen->Z - 0.0971) < dTolerance
+				&& fabs(pBlue->X - 0.1431) < dTolerance && fabs(pBlue->Y - 0.0606) < dTolerance && fabs(pBlue->Z - 0.7141) < dTolerance;
+		}
 	}
 	cmsCloseProfile(hProfile);
 	return bSkip;

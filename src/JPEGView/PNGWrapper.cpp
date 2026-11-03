@@ -114,11 +114,15 @@ void BlendOver(unsigned char** rows_dst, unsigned char** rows_src, unsigned int 
 }
 #endif
 
-void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
+// The libpng calls that can raise a png_error live here so that setjmp and the
+// call that longjmps are in the same stack frame. Before this the setjmp sat in
+// BeginReading, which had already returned by the time png_read_image ran, so a
+// corrupt frame jumped back into a dead stack frame (undefined behaviour).
+bool PngReader::ReadFrameData()
 {
-	unsigned int j;
-	if (exif_chunk != NULL && exif_size != NULL) {
-		png_get_eXIf_1(cache.png_ptr, cache.info_ptr, exif_size, (png_bytep*)exif_chunk);
+	if (setjmp(png_jmpbuf(cache.png_ptr)))
+	{
+		return false;
 	}
 #ifdef PNG_APNG_SUPPORTED
 	if (png_get_valid(cache.png_ptr, cache.info_ptr, PNG_INFO_acTL))
@@ -134,6 +138,21 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 	}
 #endif
 	png_read_image(cache.png_ptr, cache.rows_frame);
+	return true;
+}
+
+void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
+{
+	unsigned int j;
+	if (exif_chunk != NULL && exif_size != NULL) {
+		png_get_eXIf_1(cache.png_ptr, cache.info_ptr, exif_size, (png_bytep*)exif_chunk);
+	}
+	if (!ReadFrameData())
+	{
+		// A corrupt or truncated frame. The cache stays consistent enough for the
+		// caller to close the file; the next BeginReading resets it.
+		return NULL;
+	}
 
 #ifdef PNG_APNG_SUPPORTED
 	if (cache.dop == PNG_DISPOSE_OP_PREVIOUS)
@@ -199,7 +218,10 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 
 		if (setjmp(png_jmpbuf(png_ptr)))
 		{
-			PngReader::DeleteCache();
+			// This frame's png_ptr/info_ptr are not stored into cache until much
+			// further down, so DeleteCache would free the previous file's
+			// structures and leak the pair created for this one.
+			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 			throw std::runtime_error("Image contains errors.");
 		}
 		// skip png signature since we already checked it
@@ -225,6 +247,26 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 		png_set_gray_to_rgb(png_ptr);
 		png_set_add_alpha(png_ptr, 0xff, PNG_FILLER_AFTER);
 		png_set_bgr(png_ptr);
+
+		// gAMA / sRGB chunks used to be ignored here: the libpng path displayed the
+		// raw values as sRGB while the GDI+ path applied the gamma, so the same file
+		// looked different depending on the route. Apply the file gamma unless an
+		// iCCP profile is present, in which case lcms2 handles the conversion.
+		{
+			double dFileGamma = 0.0;
+			const bool bHasSRGB = png_get_valid(png_ptr, info_ptr, PNG_INFO_sRGB) != 0;
+			const bool bHasICCP = png_get_valid(png_ptr, info_ptr, PNG_INFO_iCCP) != 0;
+			const bool bHasGAMA = png_get_valid(png_ptr, info_ptr, PNG_INFO_gAMA) != 0;
+			if (bHasGAMA) {
+				png_get_gAMA(png_ptr, info_ptr, &dFileGamma);
+			}
+			if (!bHasICCP && (bHasSRGB || (bHasGAMA && dFileGamma > 0.0))) {
+				// Screen gamma 2.2 approximates sRGB; an sRGB chunk means the file
+				// gamma is 1/2.2 regardless of what gAMA says.
+				png_set_gamma(png_ptr, 2.2, bHasSRGB ? 0.45455 : dFileGamma);
+			}
+		}
+
 		(void)png_set_interlace_handling(png_ptr);
 		png_read_update_info(png_ptr, info_ptr);
 		width = png_get_image_width(png_ptr, info_ptr);

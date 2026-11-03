@@ -376,36 +376,59 @@ void* FindJPEGMarker(void* pJPEGStream, int nStreamLength, unsigned char nMarker
 		return NULL; // not a JPEG
 	}
 	int nIndex = 2;
-	do {
-		if (pStream[nIndex] == 0xFF) {
-			// block header found, skip padding bytes
-			while (pStream[nIndex] == 0xFF && nIndex < nStreamLength) nIndex++;
-			if (pStream[nIndex] == 0 || pStream[nIndex] == nMarker) {
-				break; // 0xFF 0x00 is part of pixel block, break
-			} else {
-				// it's a block marker, read length of block and skip the block
-				nIndex++;
-				if (nIndex+1 < nStreamLength) {
-					nIndex += pStream[nIndex]*256 + pStream[nIndex+1];
-				} else {
-					nIndex = nStreamLength;
-				}
-			}
-		} else {
+	while (nIndex < nStreamLength) {
+		if (pStream[nIndex] != 0xFF) {
 			break; // block with pixel data found, start hashing from here
 		}
-	} while (nIndex < nStreamLength);
+		// block header found, skip padding bytes. Test the bound before reading:
+		// the old loop read pStream[nIndex] first, so a stream ending in 0xFF read
+		// one byte past the end.
+		while (nIndex < nStreamLength && pStream[nIndex] == 0xFF) nIndex++;
+		if (nIndex >= nStreamLength) {
+			break;
+		}
+		if (pStream[nIndex] == 0 || pStream[nIndex] == nMarker) {
+			break; // 0xFF 0x00 is part of pixel block, break
+		}
+		// it's a block marker, read length of block and skip the block
+		nIndex++;
+		if (nIndex + 1 >= nStreamLength) {
+			nIndex = nStreamLength;
+			break;
+		}
+		int nBlockLength = pStream[nIndex] * 256 + pStream[nIndex + 1];
+		if (nBlockLength < 2) {
+			break; // malformed: a length below 2 would not advance the index
+		}
+		nIndex += nBlockLength;
+	}
 
-	if (nMarker == 0 || (pStream[nIndex] == nMarker && pStream[nIndex-1] == 0xFF)) {
-		return &(pStream[nIndex-1]); // place on marker start
-	} else {
+	if (nIndex < 1 || nIndex >= nStreamLength) {
 		return NULL;
 	}
+	if (nMarker == 0 || (pStream[nIndex] == nMarker && pStream[nIndex - 1] == 0xFF)) {
+		return &(pStream[nIndex - 1]); // place on marker start
+	}
+	return NULL;
 }
 
 void* FindEXIFBlock(void* pJPEGStream, int nStreamLength) {
 	uint8* pEXIFBlock = (uint8*)Helpers::FindJPEGMarker(pJPEGStream, nStreamLength, 0xE1);
-	if (pEXIFBlock != NULL && strncmp((const char*)(pEXIFBlock + 4), "Exif", 4) != 0) {
+	if (pEXIFBlock == NULL) {
+		return NULL;
+	}
+	// The marker starts at FF E1; bytes 2..3 hold the segment length, which counts
+	// itself, and the "Exif" identifier follows at +4. A truncated file that ends
+	// right after the length field used to reach past the buffer here.
+	int nOffset = (int)(pEXIFBlock - (uint8*)pJPEGStream);
+	if (nOffset + 4 > nStreamLength) {
+		return NULL;
+	}
+	int nBlockLength = pEXIFBlock[2] * 256 + pEXIFBlock[3];
+	if (nBlockLength < 6 || nOffset + 2 + nBlockLength > nStreamLength) {
+		return NULL;
+	}
+	if (strncmp((const char*)(pEXIFBlock + 4), "Exif", 4) != 0) {
 		return NULL;
 	}
 	return pEXIFBlock;
@@ -435,6 +458,7 @@ void* ExtractICCProfile(void* pJPEGStream, int nStreamLength, unsigned int* pPro
 	int nChunks = 0;
 	int nExpectedCount = 0;
 	int nTotalSize = 0;
+	bool bCountMismatch = false;
 
 	int nIndex = 2;
 	while (nIndex + 4 <= nStreamLength) {
@@ -464,11 +488,19 @@ void* ExtractICCProfile(void* pJPEGStream, int nStreamLength, unsigned int* pPro
 			int nSequence = pStream[nIndex + 14];
 			int nCount = pStream[nIndex + 15];
 			if (nSequence >= 1 && nCount >= 1 && nChunks < 256) {
+				if (nChunks == 0) {
+					nExpectedCount = nCount;
+				} else if (nCount != nExpectedCount) {
+					// Every part must agree on the total. Taking the last segment's
+					// count let a truncated profile (seq1/count=3 + seq2/count=2) pass
+					// as if it were complete.
+					bCountMismatch = true;
+					break;
+				}
 				chunks[nChunks].nSequence = nSequence;
 				chunks[nChunks].pData = pStream + nIndex + 16;
 				chunks[nChunks].nSize = nSegmentLength - 16;
 				nChunks++;
-				nExpectedCount = nCount;
 				nTotalSize += nSegmentLength - 16;
 			}
 		}
@@ -476,7 +508,7 @@ void* ExtractICCProfile(void* pJPEGStream, int nStreamLength, unsigned int* pPro
 	}
 
 	// All parts have to be there, otherwise the profile would be corrupted.
-	if (nChunks == 0 || nChunks != nExpectedCount || nTotalSize > MAX_ICC_PROFILE_SIZE) {
+	if (bCountMismatch || nChunks == 0 || nChunks != nExpectedCount || nTotalSize > MAX_ICC_PROFILE_SIZE) {
 		return NULL;
 	}
 
@@ -568,13 +600,20 @@ CString GetJPEGComment(void* pJPEGStream, int nStreamLength) {
 	if (pCommentSeg == NULL) {
 		return CString("");
 	}
-	pCommentSeg += 2;
-	int nCommentLen = pCommentSeg[0]*256 + pCommentSeg[1] - 2;
-	if (nCommentLen <= 0) {
+	// The marker is FF FE; the length field at +2 counts itself and the payload.
+	// Verify the declared payload stays inside the stream before reading it —
+	// the old code trusted the length field and could read past the buffer.
+	int nOffset = (int)(pCommentSeg - (uint8*)pJPEGStream);
+	if (nOffset + 4 > nStreamLength) {
+		return CString("");
+	}
+	int nBlockLength = pCommentSeg[2] * 256 + pCommentSeg[3];
+	int nCommentLen = nBlockLength - 2;
+	if (nCommentLen <= 0 || nOffset + 2 + nBlockLength > nStreamLength) {
 		return CString("");
 	}
 
-	uint8* pComment = &(pCommentSeg[2]);
+	uint8* pComment = pCommentSeg + 4;
 	if (nCommentLen > 2 && (nCommentLen & 1) == 0) {
 		if (pComment[0] == 0xFF && pComment[1] == 0xFE) {
 			// UTF16 little endian
@@ -602,8 +641,15 @@ CString GetJPEGComment(void* pJPEGStream, int nStreamLength) {
 		}
 	}
 	// The Intel lib puts this useless comment into each JPEG it writes - filter this out as nobody is interested in that...
-	if (nCommentLen > 20 && strstr((char*)pComment, "Intel(R) JPEG Library") != NULL) {
-		return CString("");
+	// The buffer is not NUL terminated, so search within nCommentLen instead of strstr.
+	if (nCommentLen > 20) {
+		static const char szIntel[] = "Intel(R) JPEG Library";
+		const int nNeedleLen = (int)sizeof(szIntel) - 1;
+		for (int i = 0; i + nNeedleLen <= nCommentLen; i++) {
+			if (memcmp(pComment + i, szIntel, nNeedleLen) == 0) {
+				return CString("");
+			}
+		}
 	}
 
 	return (nGoodChars > nCommentLen * 8 / 10) ? CString((LPCSTR)pComment, nCommentLen) : CString("");
@@ -614,14 +660,18 @@ void ClearJPEGComment(void* pJPEGStream, int nStreamLength) {
 	if (pCommentSeg == NULL) {
 		return;
 	}
-	pCommentSeg += 2;
-	int nCommentLen = pCommentSeg[0]*256 + pCommentSeg[1] - 2;
+	int nOffset = (int)(pCommentSeg - (uint8*)pJPEGStream);
+	if (nOffset + 4 > nStreamLength) {
+		return;
+	}
+	int nBlockLength = pCommentSeg[2] * 256 + pCommentSeg[3];
+	int nCommentLen = nBlockLength - 2;
 	if (nCommentLen <= 0) {
 		return;
 	}
-	pCommentSeg += 2;
-	if ((uint8*)pJPEGStream + nStreamLength > pCommentSeg + nCommentLen) {
-		memset(pCommentSeg, 0, nCommentLen);
+	uint8* pComment = pCommentSeg + 4;
+	if (pComment + nCommentLen <= (uint8*)pJPEGStream + nStreamLength) {
+		memset(pComment, 0, nCommentLen);
 	}
 }
 
