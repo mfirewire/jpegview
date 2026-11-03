@@ -16,6 +16,27 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool b
 	if (RawProcessor.open_file(strFileName) != LIBRAW_SUCCESS) {
 		return NULL;
 	}
+
+	// A RAW whose declared pixel count far exceeds the file size is corrupt.
+	// libraw's unpack reads the image data without checking it against the file
+	// size, so a truncated DNG declaring 65535x21846 while carrying only a few KB
+	// reads past the buffer and crashes intermittently. Reject it before unpack:
+	// every real RAW stores at least one bit per pixel, so a file smaller than
+	// pixels/8 bytes cannot possibly hold the declared image.
+	{
+		const unsigned long long declaredPixels =
+			(unsigned long long)RawProcessor.imgdata.sizes.width * RawProcessor.imgdata.sizes.height;
+		HANDLE hFile = ::CreateFile(strFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			LARGE_INTEGER fileSize;
+			if (::GetFileSizeEx(hFile, &fileSize) && fileSize.QuadPart < (LONGLONG)(declaredPixels / 8)) {
+				::CloseHandle(hFile);
+				return NULL;
+			}
+			::CloseHandle(hFile);
+		}
+	}
+
 	int width, height, colors, bps;
 	
 	CJPEGImage* Image = NULL;
