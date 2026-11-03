@@ -312,10 +312,13 @@ ForceGDIPlus=false
 ; If true, embedded ICC color profiles are applied to JPEG and PNG. A photo in
 ; Adobe RGB or Display P3 is then converted to sRGB instead of being displayed as
 ; if it were sRGB, which is what makes such pictures look washed out and gray.
-; JPEG and PNG are converted by lcms2 right after decoding, so loading stays as
-; fast as before; profiles that already are sRGB (most cameras) are left alone.
-; TIFF still gets its color management from GDI+.
-UseEmbeddedColorProfiles=false
+; Profiles that already are sRGB (most cameras, screenshots) are detected and
+; skipped, so they cost nothing. A file that does need the conversion pays one
+; lcms2 pass over its full-resolution pixels on the loading thread - roughly
+; 0.1-0.3 s for a 12 MP photo, more for larger ones. The image is still loaded
+; asynchronously, it just appears that much later.
+; TIFF is color-managed by GDI+ and is not affected by this setting.
+UseEmbeddedColorProfiles=true
 
 ; -----------------------------------------------
 ; - TRANSPARENCY OPTIONS

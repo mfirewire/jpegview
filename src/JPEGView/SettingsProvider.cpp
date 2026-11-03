@@ -202,7 +202,12 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_bAllowFileDeletion = GetBool(_T("AllowFileDeletion"), true);
 	m_bExchangeXButtons = GetBool(_T("ExchangeXButtons"), true);
 	m_bAutoRotateEXIF = GetBool(_T("AutoRotateEXIF"), true);
-	m_bUseEmbeddedColorProfiles = GetBool(_T("UseEmbeddedColorProfiles"), false);
+	// Default on: phones and most cameras that do not shoot sRGB write Display P3
+	// or Adobe RGB, and without the conversion those pictures display washed out.
+	// Files that already carry an sRGB profile are detected and skipped, so the
+	// common case costs one profile parse; only wide gamut files pay the
+	// full-resolution lcms2 pass.
+	m_bUseEmbeddedColorProfiles = GetBool(_T("UseEmbeddedColorProfiles"), true);
 	m_nDisplayMonitor = GetInt(_T("DisplayMonitor"), -1, -1, 16);
 	m_dAutoContrastAmount = GetDouble(_T("AutoContrastCorrectionAmount"), 0.5, 0.0, 1.0);
 	m_dAutoBrightnessAmount = GetDouble(_T("AutoBrightnessCorrectionAmount"), 0.2, 0.0, 1.0);
