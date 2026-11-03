@@ -987,7 +987,8 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 			Invalidate(FALSE);
 			return 1;
 		}
-		// Copy 在没有选区时返回 false，此时不拦截，继续走原来的复制图像逻辑
+		// OCR 激活时 Copy 总能给出文本：没有选中就复制全部识别结果。
+		// 只有连一个词都没有时它才返回 false，这时继续走复制图像。
 		if (bCtrl && !bAlt && !bShift && wParam == 'C' && m_pOcrController->Copy(m_hWnd)) {
 			Invalidate(FALSE);
 			return 1;

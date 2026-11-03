@@ -197,7 +197,16 @@ bool COcrController::SelectAll() {
 }
 
 bool COcrController::Copy(HWND window) {
-    const auto text = Ocr::SelectedText(m_result.words, m_selected);
+    // OCR 处于激活状态本身就表示"我想拿文本"，所以没有选中任何词时复制全部
+    // 结果：打开图片 -> Ctrl+Q -> Ctrl+C 直接拿到整段文字，不用先划选。
+    // 只有 OCR 未激活（再按 Ctrl+Q 或 Esc 退出）时，Ctrl+C 才会落到复制图像。
+    bool anySelected = false;
+    for (size_t i = 0; i < m_selected.size(); ++i) {
+        if (m_selected[i]) { anySelected = true; break; }
+    }
+    const auto text = anySelected
+        ? Ocr::SelectedText(m_result.words, m_selected)
+        : Ocr::SelectedText(m_result.words, 0, int(m_result.words.size()) - 1);
     if (text.empty()) return false;
     const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
     HGLOBAL memory = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
