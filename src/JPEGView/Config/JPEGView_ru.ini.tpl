@@ -40,7 +40,7 @@ FilesProcessedByWIC=*.wdp;*.mdp;*.hdp;*.jxr;*.dds
 ; RAW-файлы цифровых камер, в которых следует искать предназначенные для
 ; предпросмотра встроенные JPEG-изображения. Считывание таких встроенных JPEG
 ; выполняется гораздо быстрее, чем декодирование RAW-данных с помощью WIC.
-FileEndingsRAW=*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3
+FileEndingsRAW=*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw
 
 ; Поведение для открытия RAW-файлов из списка FileEndingsRAW
 ; 0: открывать встроенные миниатюры

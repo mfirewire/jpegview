@@ -1275,8 +1275,8 @@ struct TiffGateIFD {
 
 class TiffGateReader {
 public:
-	TiffGateReader(HANDLE hFile, unsigned long long fileSize, bool little)
-		: m_hFile(hFile), m_fileSize(fileSize), m_little(little) {}
+	TiffGateReader(HANDLE hFile, unsigned long long fileSize, bool little, bool isKdc = false)
+		: m_hFile(hFile), m_fileSize(fileSize), m_little(little), m_isKdc(isKdc) {}
 
 	// Seek-read exactly n bytes. Fails closed on any short read, so a
 	// truncated file can never yield a half-read value that looks valid.
@@ -1516,19 +1516,34 @@ public:
 			if (!info.samplesPresent || !info.bitsPresent) {
 				return false;
 			}
+			// KDC exemption: Kodak DCS wrapper files declare full-frame
+			// dimensions but store a smaller wrapped payload (DC120: 1280x960
+			// declares 1,228,800 bytes in an 843,328-byte file, while its
+			// actual strip fits exactly to EOF), so the declared-bytes bound
+			// false-rejects them. Only that bound is skipped for .kdc; the
+			// dimension/sample/bits caps still apply, and LibRaw's own
+			// pixels/8 check in RAWWrapper remains as a backstop, so a
+			// truncated KDC fails at decode rather than at the gate.
 			unsigned long long declaredBytes = declaredPixels * info.samples * info.bits / 8;
-			if (declaredBytes > m_fileSize) {
+			if (!m_isKdc && declaredBytes > m_fileSize) {
 				return false;
 			}
 		} else {
 			if (m_fileSize < declaredPixels / 8) {
 				return false;
 			}
-			if (!CheckArrayPair(info.stripOff, info.stripCnt)) {
-				return false;
-			}
-			if (!CheckArrayPair(info.tileOff, info.tileCnt)) {
-				return false;
+			// JPEG-7 exemption: Hasselblad 3FR JPEG strips carry the nominal
+			// uncompressed byte count (CFV: 33,554,432), not the actual JPEG
+			// stream size, so the strip-range check false-rejects every
+			// JPEG-compressed RAW. The pixels/8 floor above still rejects
+			// absurdly small files.
+			if (info.compression != 7) {
+				if (!CheckArrayPair(info.stripOff, info.stripCnt)) {
+					return false;
+				}
+				if (!CheckArrayPair(info.tileOff, info.tileCnt)) {
+					return false;
+				}
 			}
 		}
 		return true;
@@ -1577,28 +1592,25 @@ public:
 		return true;
 	}
 
-	// R-04: IFD0 plus SubIFDs, depth <= 2 (IFD0 is depth 0; SubIFDs found
-	// at depth 2 are not followed). An IFD that declares a dimension
-	// must pass the same verdict: a malformed dimension hidden in a
-	// SubIFD is exactly what this gate is for, and a
-	// plausible-looking IFD0 preview does not excuse it. An IFD that
-	// declares neither dimension is a preview or metadata pointer
-	// block, not an image: the NEF JpgFromRaw SubIFD has 513/514 but
-	// no 256/257, and an NRW IFD0 carries no dimensions at all, while
-	// the real RAW SubIFD sits behind tag 330. Such an IFD skips
-	// the verdict but its SubIFDs are still walked, so the real
-	// image is always judged. A declared-but-zero dimension is
-	// malformed, not a pointer block, and still fails.
-	bool CheckIFDTree(unsigned long long ifdOff, int depth) const {
+	// Largest-IFD verdict: the tree is collected first, then only the
+	// largest IFD that declares dimensions gets the full CheckIFD verdict.
+	// A thumbnail/preview IFD must not veto the full image: the Ricoh GR2
+	// DNG's 160x120 thumbnail IFD has a BitsPerSample offset pointing at
+	// "Canon " text, so its bits read as 28271, while the 3656x2744 full
+	// IFD is perfectly plausible and LibRaw decodes it. Dimension bounds
+	// and dimension pairing are still checked for EVERY IFD, so a
+	// malformed dimension hidden in any SubIFD still fails closed; only
+	// the per-channel/strip detail verdict is limited to the largest IFD,
+	// whose declarations govern the full decode. An IFD declaring neither
+	// dimension is a pointer block (NEF JpgFromRaw, NRW IFD0) and skips
+	// the verdict, as before, but its SubIFDs are still walked. Depth
+	// <= 2, as before.
+	bool CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out) const {
 		TiffGateIFD info;
 		if (!ReadIFD(ifdOff, info)) {
 			return false;
 		}
-		if (info.widthPresent || info.heightPresent) {
-			if (!CheckIFD(info)) {
-				return false;
-			}
-		}
+		out.push_back(info);
 		if (depth >= 2) {
 			return true;
 		}
@@ -1607,17 +1619,55 @@ public:
 			if (sub == 0) {
 				continue; // 0 means "no SubIFD" for this entry
 			}
-			if (!CheckIFDTree(sub, depth + 1)) {
+			if (!CollectIFDTree(sub, depth + 1, out)) {
 				return false;
 			}
 		}
 		return true;
 	}
 
+	bool CheckIFDTree(unsigned long long ifdOff, int depth) const {
+		std::vector<TiffGateIFD> all;
+		if (!CollectIFDTree(ifdOff, depth, all)) {
+			return false;
+		}
+		const TiffGateIFD* largest = NULL;
+		unsigned long long largestPixels = 0;
+		for (size_t i = 0; i < all.size(); ++i) {
+			const TiffGateIFD& info = all[i];
+			// Dimensions must come in pairs, and a declared dimension must
+			// be sane. A present-but-unreadable dimension reads as 0 and
+			// therefore fails here, as before.
+			if (info.widthPresent != info.heightPresent) {
+				return false;
+			}
+			if (info.widthPresent && (info.width == 0 || info.width > 65535)) {
+				return false;
+			}
+			if (info.heightPresent && (info.height == 0 || info.height > 65535)) {
+				return false;
+			}
+			if (info.widthPresent) {
+				// Both dimensions are present and bounded (see above), so
+				// this product cannot overflow 64 bit (65535^2 < 2^32).
+				unsigned long long pixels = info.width * info.height;
+				if (largest == NULL || pixels > largestPixels) {
+					largest = &all[i];
+					largestPixels = pixels;
+				}
+			}
+		}
+		if (largest == NULL) {
+			return true; // no IFD declares dimensions: pointer blocks only
+		}
+		return CheckIFD(*largest);
+	}
+
 private:
 	HANDLE m_hFile;
 	unsigned long long m_fileSize;
 	bool m_little;
+	bool m_isKdc;
 };
 
 static bool IsPlausibleRawFile(LPCTSTR fileName) {
@@ -1665,7 +1715,19 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 		return false; // claims to be TIFF but has no IFD
 	}
 
-	TiffGateReader reader(hFile, fileSize, little);
+	// KDC signal: Kodak DCS files are plain MM TIFFs, so the extension
+	// (basename dot only, as in Helpers::GetImageFormat) is the only
+	// reliable marker for the wrapper exemption in CheckIFD.
+	bool isKdc = false;
+	{
+		LPCTSTR base = _tcsrchr(fileName, _T('\\'));
+		LPCTSTR baseAlt = _tcsrchr(fileName, _T('/'));
+		if (baseAlt != NULL && (base == NULL || baseAlt > base)) base = baseAlt;
+		base = (base == NULL) ? fileName : (base + 1);
+		LPCTSTR dot = _tcsrchr(base, _T('.'));
+		isKdc = (dot != NULL && _tcsicmp(dot + 1, _T("kdc")) == 0);
+	}
+	TiffGateReader reader(hFile, fileSize, little, isKdc);
 	bool ok = reader.CheckIFDTree(ifdOff, 0);
 	::CloseHandle(hFile);
 	return ok;
@@ -1734,10 +1796,22 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 	if (request->OutOfMemory && GetBitmapFormat(pBitmap) == IF_TIFF) {
 		request->OutOfMemory = false; // reset before WIC retry
 		DeleteCachedGDIBitmap();
-		return ProcessReadWICRequest(request);
+		ProcessReadWICRequest(request);
+		// fall through to the RAW fallback below if WIC also failed
 	}
 	if (!isAnimatedGIF) {
 		DeleteCachedGDIBitmap();
+	}
+	// TIFF RAW fallback: a CFA TIFF (Canon/Kodak DCS) is a valid TIFF
+	// container that neither GDI+ nor WIC demosaics, so both fail while
+	// LibRaw decodes the full frame. Only .tif/.tiff files that GDI+
+	// (and WIC, on the OOM path) already failed reach here, so normal
+	// RGB TIFFs keep their exact GDI+ behaviour; this runs only on
+	// failure. It goes through ProcessReadRAWRequest, so the gate and
+	// DisplayFullSizeRAW still apply, and a file LibRaw also rejects
+	// stays unreadable exactly as before.
+	if (request->Image == NULL && Helpers::GetImageFormat(request->FileName) == IF_TIFF) {
+		ProcessReadRAWRequest(request);
 	}
 }
 

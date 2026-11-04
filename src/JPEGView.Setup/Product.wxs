@@ -458,6 +458,7 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".dcr" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".sr2" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".raf" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".srw" Value="" Type="string" />
 
 						<!-- MyApp.Document ProgID -->
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\JPEGView.Document" Name="FriendlyTypeName" Value="!(loc.DescREG)" Type="string" />
