@@ -131,10 +131,10 @@ jobs:
     # Zip each architecture under a distinct name instead.
     - name: Package Win32
       shell: pwsh
-      run: Compress-Archive -Path release-artifacts/win32/* -DestinationPath release-artifacts/JPEGView-win32.zip
+      run: Compress-Archive -Path release-artifacts/win32/* -DestinationPath release-artifacts/JPEGView-win32-${{ github.ref_name }}.zip
     - name: Package x64
       shell: pwsh
-      run: Compress-Archive -Path release-artifacts/x64/* -DestinationPath release-artifacts/JPEGView-x64.zip
+      run: Compress-Archive -Path release-artifacts/x64/* -DestinationPath release-artifacts/JPEGView-x64-${{ github.ref_name }}.zip
     - name: Create Release and upload assets
       uses: softprops/action-gh-release@v1
       with:
@@ -143,5 +143,5 @@ jobs:
         draft: false
         prerelease: false
         files: |
-          release-artifacts/JPEGView-win32.zip
-          release-artifacts/JPEGView-x64.zip
+          release-artifacts/JPEGView-win32-${{ github.ref_name }}.zip
+          release-artifacts/JPEGView-x64-${{ github.ref_name }}.zip
