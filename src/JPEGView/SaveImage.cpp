@@ -157,13 +157,11 @@ static int GetJFIFBlockLength(unsigned char* pJPEGStream) {
 // as the target (same volume, so ReplaceFile works), and only on full
 // success swaps the temp file into place. On any failure the temp file
 // is deleted and the target is left byte-identical and untouched.
-// This follows the lossless-transform pattern (_WriteFile in
-// JPEGLosslessTransform.cpp: temp + ReplaceFile), except for the temp
-// name: _WriteFile uses target + ".tmp" with CREATE_ALWAYS, which
-// truncates a pre-existing file of that name. Here the name is unique
-// (process id + tick + counter) and the file is created with
-// CREATE_NEW, so an existing file can never be truncated by a save.
-static bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
+// The lossless JPEG transform (_WriteFile in JPEGLosslessTransform.cpp)
+// uses these same helpers, so both save paths share the unique temp
+// name (process id + counter) created with CREATE_NEW: an existing file
+// can never be truncated by a save.
+bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
 	CString sTargetStr(sTarget);
 	int nSlashBack = sTargetStr.ReverseFind(_T('\\'));
 	int nSlashFwd = sTargetStr.ReverseFind(_T('/'));
@@ -172,7 +170,18 @@ static bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
 	DWORD dwPid = ::GetCurrentProcessId();
 	for (int i = 0; i < 100; i++) {
 		CString sCandidate;
-		sCandidate.Format(_T("%sJPEGViewSave_%lu_%lu_%d.tmp"), (LPCTSTR)sDir, (unsigned long)dwPid, (unsigned long)::GetTickCount(), i);
+		// Short prefix: the temp name must stay well below MAX_PATH even
+		// when the target directory is already long. The process id plus
+		// the counter keep the name unique within a process; a collision
+		// only advances the counter, so the loop still terminates.
+		sCandidate.Format(_T("%s~jv%lu_%d.tmp"), (LPCTSTR)sDir, (unsigned long)dwPid, i);
+		if (sCandidate.GetLength() >= MAX_PATH) {
+			// The temp path itself would exceed MAX_PATH: creating it
+			// cannot succeed, so fail fast with a clear log instead of
+			// retrying a name that can only get longer.
+			::OutputDebugString(CString(_T("JPEGView: atomic save temp path exceeds MAX_PATH, save aborted: ")) + sCandidate + _T("\n"));
+			return false;
+		}
 		HANDLE hFile = ::CreateFile(sCandidate, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (hFile != INVALID_HANDLE_VALUE) {
 			::CloseHandle(hFile);
@@ -186,12 +195,12 @@ static bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
 	}
 	return false;
 }
-static void DeleteAtomicTempFile(LPCTSTR sTemp) {
+void DeleteAtomicTempFile(LPCTSTR sTemp) {
 	if (sTemp != NULL && sTemp[0] != 0) {
 		::DeleteFile(sTemp);
 	}
 }
-static bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp) {
+bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp) {
 	// ReplaceFile requires an existing target and leaves it untouched on
 	// failure; for a brand-new target it would fail, so move instead.
 	// On success the temp file no longer exists as a separate file (it

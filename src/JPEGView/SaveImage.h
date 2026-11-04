@@ -4,6 +4,16 @@
 
 class CJPEGImage;
 
+// Atomic-save helpers shared with the lossless JPEG transform
+// (JPEGLosslessTransform.cpp). Defined in SaveImage.cpp: the temp file
+// is created in the target's directory (same volume, so ReplaceFile
+// works) with a unique name, and only on full success swapped into
+// place; on any failure the caller deletes the temp file and the
+// target is left untouched.
+bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut);
+void DeleteAtomicTempFile(LPCTSTR sTemp);
+bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp);
+
 // Class that enables to save a processed image to a one of the supported file formats
 class CSaveImage
 {

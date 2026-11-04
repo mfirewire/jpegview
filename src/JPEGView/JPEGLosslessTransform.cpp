@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "JPEGLosslessTransform.h"
 #include "Helpers.h"
+#include "SaveImage.h"
 #include "libjpeg-turbo\include\turbojpeg.h"
 
 CJPEGLosslessTransform::EResult _DoTransformation(LPCTSTR sInputFile, LPCTSTR sOutputFile, tjtransform &transform);
@@ -98,48 +99,49 @@ static unsigned char* _ReadFile(LPCTSTR sFileName, unsigned int & nLengthBytes) 
 }
 
 static bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int nLengthBytes) {
-	LPCTSTR sTempEnding = _T("");
-	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-	if (hFile != INVALID_HANDLE_VALUE) {
-		::CloseHandle(hFile);
-		sTempEnding = _T(".tmp");
+	// Always write through a unique temp file in the target's directory
+	// and swap it into place only on full success. The old code used the
+	// fixed name "<target>.tmp" with CREATE_ALWAYS, so two JPEGView
+	// instances transforming the same file truncated and interleaved into
+	// one shared temp file, and the first one to finish ReplaceFile'd the
+	// mixture over the original. The input file was already read into
+	// memory by _DoTransformation, so input and output may be the same
+	// file; CommitAtomicTempFile handles both cases (ReplaceFile for an
+	// existing target, MoveFile for a brand-new one).
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+		return false;
 	}
-
-	// For security reasons, we never write to an existing file. So generate a tmp file if the file already exists.
-	// If all writing succeeds, the existing file is finally replaced by the temporary one.
-	CString sNewFileName = CString(sFileName) + sTempEnding;
-	hFile = ::CreateFile(sNewFileName, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile = ::CreateFile(sTempFile, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
 	unsigned int nNumBytesWritten;
 	bool bOk = ::WriteFile(hFile, pBuffer, nLengthBytes, (LPDWORD) &nNumBytesWritten, NULL) && nNumBytesWritten == nLengthBytes;
 
-	// M-U2: the old code restored the original file's mtime onto the .tmp
-	// before ReplaceFile swapped it in, so the content changed while the
-	// mtime did not. A second instance's watcher and date-based sorting
-	// then never noticed the save. The mtime is deliberately left at the
-	// write time now. (This is not the UserCommand "keep modification
-	// date" option, which is an explicit user opt-in and is untouched.)
+	// M-U2: the mtime is deliberately left at the write time, not restored
+	// to the original file's mtime: restoring it made a second instance's
+	// watcher and date-based sorting miss the change. (This is not the
+	// UserCommand "keep modification date" option, which is an explicit
+	// user opt-in and is untouched.)
 	::CloseHandle(hFile);
 
-	// If the file was written to a temporary file and it succeeded, swap it in.
-	// This must not be delete-then-rename: if the delete succeeds and the rename
-	// fails the original is gone and only a .tmp is left. ReplaceFile leaves the
-	// target untouched when it fails. It needs the target to exist, which is
-	// exactly the case in which the temporary file was used.
-	if (bOk && sTempEnding[0] != 0) {
-		bOk = ::ReplaceFile(sFileName, sNewFileName, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL) != 0;
-		if (!bOk) {
-			::DeleteFile(sNewFileName);
-		}
-	} else if (!bOk) {
-		// new file is only partly written or not at all, make sure it is deleted
-		::DeleteFile(sNewFileName);
+	if (!bOk) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+	// On commit failure the target is untouched (ReplaceFile leaves it
+	// alone, MoveFile either succeeds or leaves both files); the temp
+	// file is removed. This must not be delete-then-rename: if the delete
+	// succeeds and the rename fails the original is gone.
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
 	}
 
-	return bOk;
+	return true;
 }
 
 static int _TransformationEnumToOpCode(CJPEGLosslessTransform::ETransformation transformation) {

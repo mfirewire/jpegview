@@ -143,6 +143,9 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 
 		// Read number of channels
 		unsigned short nRealChannels = ReadUShortFromFile(hFile);
+		// PSD/PSB carry at most 56 channels; a larger value can only come
+		// from a malformed header, and it feeds the RLE table skip below.
+		ThrowIf(nRealChannels > 56);
 
 		// Read width and height
 		unsigned int nHeight = ReadUIntFromFile(hFile);
@@ -331,8 +334,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 		// TODO: continue next row at end of row bytes (to support corrupt images)
 		unsigned char* p = (unsigned char*)pBuffer;
 		if (nCompressionMethod == COMPRESSION_RLE) {
-			// Skip byte counts for scanlines
-			p += nHeight * nRealChannels * 2 * nVersion;
+			// Skip byte counts for scanlines. The table size is computed in
+			// 64 bit: nHeight * nRealChannels * 2 * nVersion overflows 32 bit
+			// for large headers (65535 x 65535 x 2 x 2 wraps), and the table
+			// must fit inside the image data actually read.
+			unsigned __int64 nTableSize = (unsigned __int64)nHeight * nRealChannels * (nVersion == 2 ? 4 : 2);
+			ThrowIf(nTableSize > nImageDataSize);
+			p += (size_t)nTableSize;
 			unsigned char* pOffset = p;
 			for (unsigned channel = 0; channel < nChannels; channel++) {
 				unsigned rchannel;
@@ -381,6 +389,11 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 						count += c;
 					}
 
+					// The row byte-count entry itself must lie inside the image
+					// data; the loop's p checks do not cover this read (pOffset
+					// advances from the table, not from p).
+					unsigned int nElemSize = (nVersion == 2) ? 4 : 2;
+					ThrowIf(((unsigned __int64)channel * nHeight + row) * nElemSize + nElemSize > nImageDataSize);
 					if (nVersion == 2) {
 						pOffset += _byteswap_ulong(*(unsigned int*)(pBuffer + (channel * nHeight + row) * 4));
 					} else {

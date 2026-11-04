@@ -383,6 +383,86 @@ void CKeyMap::RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason, bool 
 	m_rejectedShortcutsIsConflict.push_back(bConflict ? 1 : 0);
 }
 
+// FNV-1a 64-bit hash of the rejected-shortcut set, in order. Every entry
+// is hashed (not just the 20 the dialog shows), each terminated by a
+// separator byte, so any change to the set yields a different value.
+// The hash is only a dedup marker, not a security digest.
+static CString HashRejectedShortcuts(const std::vector<CString>& rejected) {
+	unsigned __int64 nHash = 1469598103934665603ULL; // FNV offset basis
+	for (size_t i = 0; i < rejected.size(); i++) {
+		LPCTSTR sEntry = rejected[i];
+		for (int j = 0; sEntry[j] != 0; j++) {
+			// Hash every byte of the character. The value is stable
+			// within a build flavor; switching flavors only re-shows
+			// the dialog once, which is the fail-safe direction.
+			TCHAR c = sEntry[j];
+			for (size_t k = 0; k < sizeof(TCHAR); k++) {
+				nHash ^= (unsigned __int64)((unsigned char*)&c)[k];
+				nHash *= 1099511628211ULL; // FNV prime
+			}
+		}
+		nHash ^= 0x1F; // entry separator
+		nHash *= 1099511628211ULL;
+	}
+	// Fixed 16 hex digits, no printf format dependency.
+	static const TCHAR szDigits[] = _T("0123456789abcdef");
+	TCHAR szHash[17];
+	for (int i = 0; i < 16; i++) {
+		szHash[15 - i] = szDigits[(size_t)(nHash & 0xF)];
+		nHash >>= 4;
+	}
+	szHash[16] = 0;
+	return CString(szHash);
+}
+
+// Section/key of the "already shown" marker in the user INI file. It lives
+// in the JPEGView section so UpdateUserSettings (which copies that
+// section's keys over a template rewrite) preserves it; the key name does
+// not collide with a real setting.
+static const TCHAR* SHOWN_REJECTED_SECTION = _T("JPEGView");
+static const TCHAR* SHOWN_REJECTED_KEY = _T("ShownRejectedShortcuts");
+// Fallback file in the app-data directory, used only when no user INI
+// path is available at load time.
+static const TCHAR* SHOWN_REJECTED_FILE = _T("RejectedShortcutsShown.txt");
+
+static CString ReadShownRejectedShortcuts() {
+	CString sIni(CSettingsProvider::This().GetUserINIFileName());
+	if (sIni.IsEmpty()) {
+		CString sFile = CString(Helpers::JPEGViewAppDataPath()) + SHOWN_REJECTED_FILE;
+		FILE* f = _tfopen(sFile, _T("r"));
+		if (f == NULL) {
+			return CString();
+		}
+		TCHAR szBuffer[64];
+		CString sValue;
+		if (_fgetts(szBuffer, 64, f) != NULL) {
+			sValue = szBuffer;
+			sValue.Trim();
+		}
+		fclose(f);
+		return sValue;
+	}
+	TCHAR szBuffer[64];
+	::GetPrivateProfileString(SHOWN_REJECTED_SECTION, SHOWN_REJECTED_KEY, _T(""), szBuffer, 64, sIni);
+	return CString(szBuffer);
+}
+
+static void StoreShownRejectedShortcuts(const CString& sValue) {
+	CString sIni(CSettingsProvider::This().GetUserINIFileName());
+	if (sIni.IsEmpty()) {
+		CString sFile = CString(Helpers::JPEGViewAppDataPath()) + SHOWN_REJECTED_FILE;
+		FILE* f = _tfopen(sFile, _T("w"));
+		if (f != NULL) {
+			_fputts(sValue, f);
+			fclose(f);
+		}
+		return;
+	}
+	// An empty value deletes the key, so a resolved conflict leaves no
+	// stale marker behind.
+	::WritePrivateProfileString(SHOWN_REJECTED_SECTION, SHOWN_REJECTED_KEY, sValue.IsEmpty() ? NULL : (LPCTSTR)sValue, sIni);
+}
+
 // Show the collected rejections once, and only when at least one of them
 // is a real conflict (see above). An empty list shows nothing, and so does a
 // list of purely malformed or dead definitions, so a KeyMap.txt whose bad lines
@@ -390,9 +470,15 @@ void CKeyMap::RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason, bool 
 // cannot flood the screen. The text is English on purpose: no
 // strings-file entry, no translations.
 void CKeyMap::ShowRejectedShortcuts() {
-	if (m_rejectedShortcuts.empty()) {
-		return;
-	}
+	// Dedup: the same rejected-definition set pops only once per
+	// introduction. The stored marker is the hash of the full set (not
+	// just the 20 shown), so any change to the set pops again, while an
+	// unchanged set stays silent. When nothing conflicts now, the marker
+	// is refreshed to the current set, so a conflict reintroduced later
+	// pops again instead of staying suppressed forever. The dialog text
+	// and the "real conflict" trigger below are unchanged.
+	CString sCurrentSet = HashRejectedShortcuts(m_rejectedShortcuts);
+	CString sShownSet = ReadShownRejectedShortcuts();
 	// No conflict, no popup: malformed or dead definitions are already handled
 	// (commented out in KeyMap.txt, or logged) and must not interrupt startup.
 	// The dialog appears only when a key is actually taken: a duplicate binding,
@@ -404,7 +490,13 @@ void CKeyMap::ShowRejectedShortcuts() {
 		if (m_rejectedShortcutsIsConflict[i] != 0) { bAnyConflict = true; break; }
 	}
 	if (!bAnyConflict) {
+		if (sShownSet != sCurrentSet) {
+			StoreShownRejectedShortcuts(sCurrentSet);
+		}
 		return;
+	}
+	if (sCurrentSet == sShownSet) {
+		return; // this exact set was already shown once
 	}
 	const size_t kMaxShown = 20;
 	CString sMessage = _T("JPEGView ignored the following shortcut definitions:");
@@ -424,6 +516,7 @@ void CKeyMap::ShowRejectedShortcuts() {
 		sMessage += _T("\nKeyMap.txt could not be updated; rejected lines were left unchanged.");
 	}
 	::MessageBox(NULL, sMessage, _T("JPEGView"), MB_OK | MB_ICONWARNING);
+	StoreShownRejectedShortcuts(sCurrentSet);
 }
 
 // Comment out the rejected KeyMap.txt lines in the user's file, in place.
