@@ -338,6 +338,7 @@
     <ClCompile Include="ProcessingThreadPool.cpp" />
     <ClCompile Include="PSDWrapper.cpp" />
     <ClCompile Include="QOIWrapper.cpp" />
+    <ClCompile Include="PPMWrapper.cpp" />
     <ClCompile Include="RAWWrapper.cpp" />
     <ClCompile Include="ReaderBMP.cpp" />
     <ClCompile Include="ReaderTGA.cpp" />
@@ -435,6 +436,7 @@
     <ClInclude Include="ProcessParams.h" />
     <ClInclude Include="PSDWrapper.h" />
     <ClInclude Include="QOIWrapper.h" />
+    <ClInclude Include="PPMWrapper.h" />
     <ClInclude Include="RawMetadata.h" />
     <ClInclude Include="RAWWrapper.h" />
     <ClInclude Include="ReaderBMP.h" />

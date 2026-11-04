@@ -445,6 +445,7 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".qoi" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".psd" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".psb" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".ppm" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".ico" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".wmf" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".emf" Value="" Type="string" />

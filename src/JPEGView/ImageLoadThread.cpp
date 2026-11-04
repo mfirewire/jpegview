@@ -23,6 +23,7 @@
 #endif
 #include "WEBPWrapper.h"
 #include "QOIWrapper.h"
+#include "PPMWrapper.h"
 #include "PSDWrapper.h"
 #include "MaxImageDef.h"
 
@@ -418,6 +419,14 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 			DeleteCachedJxlDecoder();
 			DeleteCachedAvifDecoder();
 			ProcessReadQOIRequest(&rq);
+			break;
+		case IF_PPM:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadPPMRequest(&rq);
 			break;
 		case IF_WIC:
 			DeleteCachedGDIBitmap();
@@ -1213,6 +1222,45 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 						*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
 				}
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, nBPP, 0, IF_QOI, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
+	delete[] pBuffer;
+}
+
+void CImageLoadThread::ProcessReadPPMRequest(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI: 300 MB Win64, 50 MB Win32,
+		// so CFV.PPM at 50,331,665 bytes still fits on Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		pBuffer = new(std::nothrow) char[nFileSize];
+		if (pBuffer == NULL) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = PPMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_PPM, false, 0, 1, 0);
 			}
 		}
 	} catch (...) {

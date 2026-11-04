@@ -40,6 +40,7 @@ enum EImageFormat {
 	IF_HEIF,
 	IF_AVIF,
 	IF_QOI,
+	IF_PPM,
 	IF_PSD,
 	IF_ICO,
 	IF_WMF,

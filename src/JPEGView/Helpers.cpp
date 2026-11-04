@@ -932,6 +932,8 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_TGA;
 		} else if (_tcsicmp(sEnding, _T("QOI")) == 0) {
 			return IF_QOI;
+		} else if (_tcsicmp(sEnding, _T("PPM")) == 0) {
+			return IF_PPM;
 		} else if (_tcsicmp(sEnding, _T("PSD")) == 0 || _tcsicmp(sEnding, _T("PSB")) == 0) {
 			return IF_PSD;
 		} else if (IsInFileEndingList(CSettingsProvider::This().FilesProcessedByWIC(), sEnding)) {
