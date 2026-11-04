@@ -98,10 +98,6 @@ bool IsCjkIdeograph(wchar_t c) {
         || (c >= 0xF900 && c <= 0xFAFF);
 }
 
-bool IsLatinLetter(wchar_t c) {
-    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z');
-}
-
 // Lowercased primary subtag: the part before the first '-'.
 std::wstring PrimarySubtag(const std::wstring& tag) {
     std::wstring out;
@@ -115,9 +111,11 @@ std::wstring PrimarySubtag(const std::wstring& tag) {
 // D2: merge zh and en engine lines into one reading order. Lines are
 // matched across engines by vertical overlap (overlap > half the shorter
 // line's height, best match wins, each en line used at most once). A
-// matched pair keeps the zh line when it carries real CJK ideographs
-// (ideograph share >= 0.2 of ideographs + Latin letters), otherwise the
-// en line. Unmatched lines are kept as-is, so a line only one engine saw
+// matched pair keeps the zh line when it carries any real CJK ideograph,
+// otherwise the en line. (An earlier 0.2 share bar lost Chinese on EN+CN
+// translation lines, where the English sentence is long and the Chinese
+// translation compact; and baseline zh output never puts a real ideograph
+// on a pure-English line, so any ideograph reliably signals real Chinese.) Unmatched lines are kept as-is, so a line only one engine saw
 // (pure Chinese, or the en-only "A - B") survives. The merged words come
 // back top-to-bottom with fresh line indices, and zhUsed/enUsed report
 // which engines contributed lines for the status line.
@@ -144,17 +142,17 @@ std::vector<Word> MergeEngineLines(const std::vector<OcrLine>& zh,
         }
         if (best >= 0) {
             enTaken[size_t(best)] = true;
-            int c = 0, l = 0;
+            int c = 0;
             for (const auto& w : zl.words) {
                 for (wchar_t ch : w.text) {
                     if (IsCjkIdeograph(ch)) ++c;
-                    else if (IsLatinLetter(ch)) ++l;
                 }
             }
             // Any real CJK content means the line has Chinese the en engine
-            // cannot show; the 0.2 bar only filters stray hallucinations.
-            // A pure-English zh line has c == 0, so it always loses to en.
-            const bool useZh = (c > 0) && (double(c) / double(c + l) >= 0.2);
+            // cannot show, so the zh line wins outright. A pure-English zh
+            // line has c == 0 (its garbling is 《, Latin letters and digits,
+            // never a real ideograph), so it always loses to en.
+            const bool useZh = (c > 0);
             picked.push_back({useZh ? &zl : &en[size_t(best)], useZh});
         } else {
             picked.push_back({&zl, true});
