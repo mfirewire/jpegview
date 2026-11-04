@@ -912,11 +912,11 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 	LPCTSTR sEnding = _tcsrchr(sBase, _T('.'));
 	if (sEnding != NULL) {
 		sEnding += 1;
-		if (_tcsicmp(sEnding, _T("JPG")) == 0 || _tcsicmp(sEnding, _T("JPEG")) == 0 || _tcsicmp(sEnding, _T("JPE")) == 0 || _tcsicmp(sEnding, _T("JFIF")) == 0 || _tcsicmp(sEnding, _T("JPS")) == 0) {
+		if (_tcsicmp(sEnding, _T("JPG")) == 0 || _tcsicmp(sEnding, _T("JPEG")) == 0 || _tcsicmp(sEnding, _T("JPE")) == 0 || _tcsicmp(sEnding, _T("JFIF")) == 0 || _tcsicmp(sEnding, _T("JPS")) == 0 || _tcsicmp(sEnding, _T("JFI")) == 0 || _tcsicmp(sEnding, _T("JIF")) == 0 || _tcsicmp(sEnding, _T("MPO")) == 0) {
 			return IF_JPEG;
 		} else if (_tcsicmp(sEnding, _T("BMP")) == 0) {
 			return IF_WindowsBMP;
-		} else if (_tcsicmp(sEnding, _T("PNG")) == 0) {
+		} else if (_tcsicmp(sEnding, _T("PNG")) == 0 || _tcsicmp(sEnding, _T("APNG")) == 0) {
 			return IF_PNG;
 		} else if (_tcsicmp(sEnding, _T("TIF")) == 0 || _tcsicmp(sEnding, _T("TIFF")) == 0) {
 			return IF_TIFF;

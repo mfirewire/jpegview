@@ -429,8 +429,12 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jpe" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jfif" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jps" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jfi" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jif" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".mpo" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".bmp" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".png" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".apng" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".tif" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".tiff" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".gif" Value="" Type="string" />
