@@ -90,7 +90,7 @@ bool CTransformPanelCtl::OnKeyDown(unsigned int nVirtualKey, bool bShift, bool b
 	} else if (nVirtualKey == VK_RETURN) {
 		OnApply(this, 0, *m_pTransformPanel->GetBtnApply());
 	} else {
-		if (!m_bTransforming && m_pMainDlg->GetKeyMap()->GetCommandIdForKey(nVirtualKey, bAlt, bCtrl, bShift) == IDM_EXCHANGE_PROC_PARAMS) {
+		if (CurrentImage() != NULL && !m_bTransforming && m_pMainDlg->GetKeyMap()->GetCommandIdForKey(nVirtualKey, bAlt, bCtrl, bShift) == IDM_EXCHANGE_PROC_PARAMS) {
 			ExchangeTransformationParams();
 		}
 	}
@@ -152,7 +152,9 @@ void CTransformPanelCtl::OnCancel(void* pContext, int nParameter, CButtonCtrl & 
 }
 
 void CTransformPanelCtl::OnReset(void* pContext, int nParameter, CButtonCtrl & sender) {
-	((CTransformPanelCtl*)pContext)->Reset();
+	if (((CTransformPanelCtl*)pContext)->CurrentImage() != NULL) {
+		((CTransformPanelCtl*)pContext)->Reset();
+	}
 }
 
 void CTransformPanelCtl::OnApply(void* pContext, int nParameter, CButtonCtrl & sender) {

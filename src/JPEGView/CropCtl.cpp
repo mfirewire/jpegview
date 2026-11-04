@@ -116,7 +116,9 @@ void CCropCtl::OnPaint(CPaintDC& dc) {
 		if (m_dLastZoom != dZoom)
 		{
 			m_dLastZoom = dZoom;
-			if (m_eCropMode == CM_FixedSize && CCropSizeDlg::UseScreenPixels()) {
+			// F-H01: skip the fixed-size branch when there is no image;
+			// UpdateCroppingRect already guards this the same way.
+			if (m_eCropMode == CM_FixedSize && CCropSizeDlg::UseScreenPixels() && m_pMainDlg->GetCurrentImage() != NULL) {
 				CSize cropSize = CCropSizeDlg::GetCropSize();
 				double dZoom = m_pMainDlg->GetZoom();
 				if (dZoom < 0.0) {

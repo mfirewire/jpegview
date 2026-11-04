@@ -1590,12 +1590,21 @@ public:
 			// dimensions but store a smaller wrapped payload (DC120: 1280x960
 			// declares 1,228,800 bytes in an 843,328-byte file, while its
 			// actual strip fits exactly to EOF), so the declared-bytes bound
-			// false-rejects them. Only that bound is skipped for .kdc; the
+			// false-rejects them. Only the declared-bytes bound is skipped for .kdc; the
 			// dimension/sample/bits caps still apply, and LibRaw's own
 			// pixels/8 check in RAWWrapper remains as a backstop, so a
 			// truncated KDC fails at decode rather than at the gate.
 			unsigned long long declaredBytes = declaredPixels * samples * info.bits / 8;
 			if (!m_isKdc && declaredBytes > m_fileSize) {
+				return false;
+			}
+			// F-H06: the pixels/8 floor applies even for .kdc. It is very
+			// loose for genuine uncompressed data (declaredBytes is
+			// pixels*samples*bits/8, far above pixels/8), so it cannot
+			// false-reject a real KDC, but it stops a renamed TIFF from
+			// using the .kdc exemption to smuggle an absurdly small file
+			// past the gate.
+			if (m_fileSize < declaredPixels / 8) {
 				return false;
 			}
 		} else {
@@ -1682,7 +1691,20 @@ public:
 	// dimension is a pointer block (NEF JpgFromRaw, NRW IFD0) and skips
 	// the verdict, as before, but its SubIFDs are still walked. Depth
 	// <= 2, as before.
-	bool CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out) const {
+	// F-H05: total-node cap + visited-offset set. Without them a tiny
+	// crafted TIFF can force ~1,049,601 nodes (1024 SubIFDs each pointing
+	// at an IFD with 1024 more). A shared offset is walked once; exceeding
+	// the cap fails the gate (fail closed), it never crashes.
+	bool CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out, std::vector<unsigned long long>& visited) const {
+		for (size_t i = 0; i < visited.size(); ++i) {
+			if (visited[i] == ifdOff) {
+				return true; // shared SubIFD: already walked, do not walk again
+			}
+		}
+		if (out.size() >= 4096) {
+			return false;
+		}
+		visited.push_back(ifdOff);
 		TiffGateIFD info;
 		if (!ReadIFD(ifdOff, info)) {
 			return false;
@@ -1696,7 +1718,7 @@ public:
 			if (sub == 0) {
 				continue; // 0 means "no SubIFD" for this entry
 			}
-			if (!CollectIFDTree(sub, depth + 1, out)) {
+			if (!CollectIFDTree(sub, depth + 1, out, visited)) {
 				return false;
 			}
 		}
@@ -1705,7 +1727,8 @@ public:
 
 	bool CheckIFDTree(unsigned long long ifdOff, int depth) const {
 		std::vector<TiffGateIFD> all;
-		if (!CollectIFDTree(ifdOff, depth, all)) {
+		std::vector<unsigned long long> visited;
+		if (!CollectIFDTree(ifdOff, depth, all, visited)) {
 			return false;
 		}
 		const TiffGateIFD* largest = NULL;

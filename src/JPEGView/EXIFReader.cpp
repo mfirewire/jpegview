@@ -335,7 +335,7 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 	m_bLittleEndian = bLittleEndian;
 
 	uint8* pIFD0 = pTIFFHeader + ReadUInt(pTIFFHeader + 4, bLittleEndian);
-	if (pIFD0 - m_pApp1 >= nApp1Size) {
+	if (pIFD0 - m_pApp1 >= nApp1Size - 1) {
 		return;
 	}
 	// Read IFD0
@@ -403,7 +403,7 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 		return;
 	}
 	uint8* pEXIFIFD = pTIFFHeader + nOffsetEXIF;
-	if (pEXIFIFD - m_pApp1 >= nApp1Size) {
+	if (pEXIFIFD - m_pApp1 >= nApp1Size - 1) {
 		return;
 	}
 	nNumTags = ReadUShort(pEXIFIFD, bLittleEndian);
@@ -454,7 +454,7 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 
 	if (nOffsetIFD1 != 0) {
 		m_pIFD1 = pTIFFHeader + nOffsetIFD1;
-		if (m_pIFD1 - m_pApp1 >= nApp1Size || m_pIFD1 - m_pApp1 < 0) {
+		if (m_pIFD1 - m_pApp1 >= nApp1Size - 1 || m_pIFD1 - m_pApp1 < 0) {
 			return;
 		}
 		nNumTags = ReadUShort(m_pIFD1, bLittleEndian);
@@ -529,13 +529,36 @@ void CEXIFReader::UpdateJPEGThumbnail(unsigned char* pJPEGStream, int nStreamLen
 	if (!m_bHasJPEGCompressedThumbnail) {
 		return;
 	}
+	// F-M13: the old code memcpy'd with no bound on nStreamLen, no
+	// NULL check on the stream, and no check that the SOI target lies
+	// inside the APP1 block. A missing SOI tag also made ReadLongTag
+	// return 0, pointing the write at the TIFF header itself.
+	if (pJPEGStream == NULL || nStreamLen < 0) {
+		return;
+	}
 	uint8* pTagOffsetSOI = FindTag(m_pIFD1, m_pLastIFD1, 0x0201, m_bLittleEndian);
+	uint8* pTagJPEGBytesEarly = FindTag(m_pIFD1, m_pLastIFD1, 0x0202, m_bLittleEndian);
+	if (pTagOffsetSOI == NULL || pTagJPEGBytesEarly == NULL || m_pApp1 == NULL || m_nApp1Size <= 10) {
+		return;
+	}
 	uint32 nOffsetSOI = ReadLongTag(pTagOffsetSOI, m_bLittleEndian);
 	uint8* pTIFFHeader = m_pApp1 + 10;
 	uint8* pSOI = pTIFFHeader + nOffsetSOI;
+	// The write spans pSOI + 2 .. pSOI + 2 + nStreamLen, i.e. offsets
+	// nOffsetSOI + 2 + nStreamLen inside the TIFF area. The caller
+	// deliberately over-allocates the block (see the header comment:
+	// SaveImage reserves 32000 extra bytes), and nEXIFBlockLenCorrection
+	// is exactly that growth, so the bound is the original TIFF area
+	// plus a positive correction. Computed in 64 bit so a huge
+	// nStreamLen cannot wrap around and pass.
+	unsigned __int64 nLimit = (unsigned __int64)(m_nApp1Size - 10) +
+		(nEXIFBlockLenCorrection > 0 ? (unsigned __int64)nEXIFBlockLenCorrection : 0);
+	if ((unsigned __int64)nOffsetSOI + 2 + (unsigned __int64)nStreamLen > nLimit) {
+		return;
+	}
 	memcpy(pSOI + 2, pJPEGStream, nStreamLen);
 
-	uint8* pTagJPEGBytes = FindTag(m_pIFD1, m_pLastIFD1, 0x0202, m_bLittleEndian);
+	uint8* pTagJPEGBytes = pTagJPEGBytesEarly; // already NULL-checked above
 	WriteLongTag(pTagJPEGBytes, nStreamLen + 2, m_bLittleEndian);
 	int nNewApp1Size = m_pApp1[2]*256 + m_pApp1[3] + nEXIFBlockLenCorrection;
 	m_pApp1[2] = nNewApp1Size >> 8;
@@ -552,7 +575,7 @@ void CEXIFReader::ReadGPSData(uint8* pTIFFHeader, uint8* pTagGPSIFD, int nApp1Si
 		return;
 	}
 	uint8* pGPSIFD = pTIFFHeader + nOffsetGPS;
-	if (pGPSIFD - m_pApp1 >= nApp1Size) {
+	if (pGPSIFD - m_pApp1 >= nApp1Size - 1) {
 		return;
 	}
 	int nNumTags = ReadUShort(pGPSIFD, bLittleEndian);

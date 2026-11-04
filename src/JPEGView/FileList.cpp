@@ -160,12 +160,19 @@ static bool WICPresentGuarded(void) {
 }
 
 // Parses a semicolon separated list of file endings of the form "*.nef;*.cr2;*.dng"
-static void ParseAndAddFileEndings(LPCTSTR sEndings) {
+// Returns true if at least one new ending was added. F-H03 (contained
+// part only, MAX_ENDINGS stays 64): duplicates are skipped case-
+// insensitively instead of consuming a slot, and an ending dropped
+// because the list is full is reported with OutputDebugString (no
+// MessageBox: this runs during list construction).
+static bool ParseAndAddFileEndings(LPCTSTR sEndings) {
+	bool bAdded = false;
+	bool bWarnedFull = false;
 	if (_tcslen(sEndings) > 2) {
 		LPTSTR buffer = new TCHAR[_tcslen(sEndings) + 1]; // this buffer will not be freed deliberately!
 		_tcscpy(buffer, sEndings);
 		LPTSTR sStart = buffer, sCurrent = buffer;
-		while (*sCurrent != 0 && nNumEndings < MAX_ENDINGS) {
+		while (*sCurrent != 0) {
 			while (*sCurrent != 0 && *sCurrent != _T(';')) {
 				sCurrent++;
 			}
@@ -174,11 +181,30 @@ static void ParseAndAddFileEndings(LPCTSTR sEndings) {
 				sCurrent++;
 			}
 			if (_tcslen(sStart) > 2) {
-				sFileEndings[nNumEndings++] = sStart + 2;
+				LPCTSTR sEnding = sStart + 2;
+				bool bDuplicate = false;
+				for (int i = 0; i < nNumEndings; i++) {
+					if (_tcsicmp(sFileEndings[i], sEnding) == 0) {
+						bDuplicate = true;
+						break;
+					}
+				}
+				if (bDuplicate) {
+					// already in the list: do not consume a slot
+				} else if (nNumEndings < MAX_ENDINGS) {
+					sFileEndings[nNumEndings++] = sEnding;
+					bAdded = true;
+				} else if (!bWarnedFull) {
+					CString sMsg;
+					sMsg.Format(_T("JPEGView: file ending list full (%d), dropping '%s'\n"), MAX_ENDINGS, sEnding);
+					::OutputDebugString(sMsg);
+					bWarnedFull = true;
+				}
 			}
 			sStart = sCurrent;
 		}
 	}
+	return bAdded;
 }
 
 // Gets all supported file endings, including the ones from WIC.
@@ -222,9 +248,14 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 	bool bImageFile = !bIsDirectory && IsImageFile(sExtensionInitialFile);
 	if (!bIsDirectory && !bImageFile && !sExtensionInitialFile.IsEmpty() && _tcsstr(csFileEndingsRAW, _T("*.") + sExtensionInitialFile) != NULL) {
 		// initial file is a supported camera raw file but was excluded in INI file - add temporarily to file ending list
-		ParseAndAddFileEndings(_T("*.") + sExtensionInitialFile);
-		CSettingsProvider::This().AddTemporaryRAWFileEnding(sExtensionInitialFile);
-		bImageFile = true;
+		// F-H03: only claim the file is an image file when the extension
+		// was actually added. If the list is full the file must fall
+		// through to the single-file branch instead of FindFiles plus
+		// the first-image fallback.
+		if (ParseAndAddFileEndings(_T("*.") + sExtensionInitialFile)) {
+			CSettingsProvider::This().AddTemporaryRAWFileEnding(sExtensionInitialFile);
+			bImageFile = true;
+		}
 	}
 	m_bIsSlideShowList = !bIsDirectory && !bImageFile && TryReadingSlideShowList(sInitialFile);
 	m_nMarkedIndexShow = -1;

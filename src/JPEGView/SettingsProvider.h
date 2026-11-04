@@ -308,7 +308,7 @@ private:
 	CString m_sGPSMapProvider;
 	bool m_bFlashWindowAlert;
 	bool m_bBeepSoundAlert;
-	int m_zoomPauseFactor;
+	double m_zoomPauseFactor; // F-M33: was int, so 150% truncated to 1 and 50% to 0
 	bool m_bWindowBorderlessOnStartup;
 	bool m_bWindowAlwaysOnTopOnStartup;
 

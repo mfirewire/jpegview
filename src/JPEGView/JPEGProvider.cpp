@@ -20,6 +20,11 @@ CJPEGProvider::CJPEGProvider(HWND handlerWnd, int nNumThreads, int nNumBuffers) 
 }
 
 CJPEGProvider::~CJPEGProvider(void) {
+	// F-M30: same rule as R-21, extended to the requests. If any worker
+	// outlives Terminate(), it may still SetEvent() a request's
+	// EventFinished and PostMessage to the handler window, so the
+	// requests are leaked like the thread objects instead of deleted.
+	bool bAllThreadsTerminated = true;
 	for (int i = 0; i < m_nNumThread; i++) {
 		// R-21: Terminate() returns false when the worker outlives its 10 s
 		// window. Deleting the thread object on that path frees memory the
@@ -32,9 +37,14 @@ CJPEGProvider::~CJPEGProvider(void) {
 			delete m_pWorkThreads[i];
 		} else {
 			m_pWorkThreads[i] = NULL;
+			bAllThreadsTerminated = false;
 		}
 	}
 	delete[] m_pWorkThreads;
+	if (!bAllThreadsTerminated) {
+		// A worker may still be alive: do not touch the requests.
+		return;
+	}
 	std::list<CImageRequest*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
 		delete (*iter)->Image;

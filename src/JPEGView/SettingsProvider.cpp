@@ -9,7 +9,7 @@
 static const TCHAR* DEFAULT_INI_FILE_NAME = _T("JPEGView.ini");
 static const TCHAR* SECTION_NAME = _T("JPEGView");
 
-static float COLOR_CORR_DEFAULT_FACTORS[6] = {0.2f, 0.1f, 0.3f, 0.3f, 0.3f, 0.15f};
+static float COLOR_CORR_DEFAULT_FACTORS[6] = {0.2f, 0.1f, 0.35f, 0.1f, 0.3f, 0.15f}; // F-M34: aligned to the shipped ini files (R: 0.2 G: 0.1 B: 0.35 C: 0.1 M: 0.3 Y: 0.15); the old fallback was the outlier
 
 CSettingsProvider* CSettingsProvider::sm_instance;
 
@@ -716,11 +716,10 @@ void CSettingsProvider::MakeSureUserINIExists() {
 }
 
 CString CSettingsProvider::GetINITemplateName() {
+	// Russian ini/tpl files were removed: one ini/tpl for all languages,
+	// so the template is always the plain JPEGView.ini.tpl. (The UI
+	// strings-table lookup in GetStringTableFileName is untouched.)
 	CString defaultGlobalIniName = m_sEXEPath + DEFAULT_INI_FILE_NAME;
-	CString localizedTemplate = CNLS::GetLocalizedFileName(defaultGlobalIniName, _T(""), _T("tpl"), Language());
-	if (::GetFileAttributes(localizedTemplate) != INVALID_FILE_ATTRIBUTES) {
-		return localizedTemplate;
-	}
 	return defaultGlobalIniName + _T(".tpl");
 }
 

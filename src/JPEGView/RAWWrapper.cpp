@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <limits.h> // F-M12: INT_MAX
 
 #include "RAWWrapper.h"
 #include "libraw/libraw.h"
@@ -74,7 +75,22 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool b
 		// channels is 4.29 GB and wraps to ~256 KB, after which copy_mem_image
 		// still writes the real size. MAX_IMAGE_PIXELS only bounds the pixel
 		// count as a double, never the byte count, so it does not catch this.
-		const size_t stride = (size_t)Helpers::DoPadding(width * colors, 4);
+		// F-M12: width * colors used to be computed in 32-bit int before
+		// DoPadding (which itself takes int), and stride was then cast
+		// back to (int)/(unsigned int). Compute the row width in size_t,
+		// pad in size_t, and refuse anything that does not fit in int
+		// before either cast. The IsImageBufferSizeOk check below still
+		// bounds stride * height.
+		size_t rowBytes = (size_t)width * (size_t)colors;
+		if (rowBytes > (size_t)INT_MAX - 3) {
+			bOutOfMemory = true;
+			return NULL;
+		}
+		const size_t stride = (rowBytes + 3) & ~(size_t)3;
+		if (stride > (size_t)INT_MAX) {
+			bOutOfMemory = true;
+			return NULL;
+		}
 		size_t bytes = 0;
 		if (!IsImageBufferSizeOk(stride, (size_t)height, &bytes)) {
 			bOutOfMemory = true;
@@ -126,6 +142,13 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool b
 
 			Image->SetJPEGComment(Helpers::GetJPEGComment(thumb->data, thumb->data_size));
 			Image->SetJPEGChromoSampling(eChromoSubSampling);
+		}
+		// F-L22: a CMYK thumbnail (colors == 4) reaches here with an
+		// allocated pPixelData but no CJPEGImage to own it; free it
+		// instead of leaking one buffer per CMYK thumbnail load.
+		else {
+			delete[] pPixelData;
+			pPixelData = NULL;
 		}
 		RawProcessor.dcraw_clear_mem(thumb);
 	}

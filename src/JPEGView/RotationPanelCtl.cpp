@@ -133,12 +133,18 @@ void CRotationPanelCtl::ApplyTransformation() {
 }
 
 void CRotationPanelCtl::Reset() {
+	if (CurrentImage() == NULL) {
+		return;
+	}
 	m_dRotationLQ = m_dRotationBackup = -2 * 3.141592653 * CurrentImage()->GetRotationParams().FreeRotation / 360;
 	UpdatePanelTitle();
 	InvalidateMainDlg();
 }
 
 void CRotationPanelCtl::UpdatePanelTitle() {
+	if (CurrentImage() == NULL) {
+		return;
+	}
 	const int BUFF_SIZE = 24;
 	double dAngleDeg = CurrentImage()->GetRotationParams().FreeRotation + 360 * m_dRotationLQ / (2 * 3.141592653);
 	TCHAR buff[BUFF_SIZE];
@@ -147,6 +153,9 @@ void CRotationPanelCtl::UpdatePanelTitle() {
 }
 
 void CRotationPanelCtl::ExchangeTransformationParams() {
+	if (CurrentImage() == NULL) {
+		return;
+	}
 	double dTemp = m_dRotationBackup;
 	m_dRotationBackup = m_dRotationLQ;
 	m_dRotationLQ = dTemp;

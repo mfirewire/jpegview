@@ -721,12 +721,12 @@ bool CParameterDB::ConvertVersion1To2(HANDLE hFile, const CString& sFileName) {
 	}
 
 	HANDLE hFileWrite = ::CreateFile(sFileName, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hFile == INVALID_HANDLE_VALUE) {
+	if (hFileWrite == INVALID_HANDLE_VALUE) { // F-M38: was hFile, the already-closed read handle
 		delete[] pTarget;
 		HandleErrorAndCloseHandle(errorOpenFailed, sFileName, 0);
 		return false;
 	}
-	DWORD numWritten;
+	DWORD numWritten = 0; // F-M38: was uninitialised, so a failed WriteFile could misreport
 	::WriteFile(hFileWrite, pTarget, nOldEntries*sizeof(CParameterDBEntry), &numWritten, NULL);
 	delete[] pTarget;
 	if (numWritten != nOldEntries*sizeof(CParameterDBEntry)) {
