@@ -152,6 +152,57 @@ static int GetJFIFBlockLength(unsigned char* pJPEGStream) {
 	return nJFIFLength;
 }
 
+// F-B01: atomic save helpers. No save function below ever opens the
+// target itself for writing. It writes a temp file in the SAME directory
+// as the target (same volume, so ReplaceFile works), and only on full
+// success swaps the temp file into place. On any failure the temp file
+// is deleted and the target is left byte-identical and untouched.
+// This follows the lossless-transform pattern (_WriteFile in
+// JPEGLosslessTransform.cpp: temp + ReplaceFile), except for the temp
+// name: _WriteFile uses target + ".tmp" with CREATE_ALWAYS, which
+// truncates a pre-existing file of that name. Here the name is unique
+// (process id + tick + counter) and the file is created with
+// CREATE_NEW, so an existing file can never be truncated by a save.
+static bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
+	CString sTargetStr(sTarget);
+	int nSlashBack = sTargetStr.ReverseFind(_T('\\'));
+	int nSlashFwd = sTargetStr.ReverseFind(_T('/'));
+	int nSlash = max(nSlashBack, nSlashFwd);
+	CString sDir = (nSlash >= 0) ? sTargetStr.Left(nSlash + 1) : CString(_T(""));
+	DWORD dwPid = ::GetCurrentProcessId();
+	for (int i = 0; i < 100; i++) {
+		CString sCandidate;
+		sCandidate.Format(_T("%sJPEGViewSave_%lu_%lu_%d.tmp"), (LPCTSTR)sDir, (unsigned long)dwPid, (unsigned long)::GetTickCount(), i);
+		HANDLE hFile = ::CreateFile(sCandidate, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			::CloseHandle(hFile);
+			sTempOut = sCandidate;
+			return true;
+		}
+		if (::GetLastError() != ERROR_FILE_EXISTS) {
+			return false;
+		}
+		// Name collided (counter differs next round, so this terminates).
+	}
+	return false;
+}
+static void DeleteAtomicTempFile(LPCTSTR sTemp) {
+	if (sTemp != NULL && sTemp[0] != 0) {
+		::DeleteFile(sTemp);
+	}
+}
+static bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp) {
+	// ReplaceFile requires an existing target and leaves it untouched on
+	// failure; for a brand-new target it would fail, so move instead.
+	// On success the temp file no longer exists as a separate file (it
+	// becomes the target), so the caller must NOT delete it afterwards.
+	// On failure the caller deletes the temp file and reports failure.
+	if (::GetFileAttributes(sTarget) != INVALID_FILE_ATTRIBUTES) {
+		return ::ReplaceFile(sTarget, sTemp, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL) != 0;
+	}
+	return ::MoveFile(sTemp, sTarget) != 0;
+}
+
 // Returns the compressed JPEG stream that must be freed by the caller. NULL in case of error.
 static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage, 
 							 void* pData, int nWidth, int nHeight, int nQuality, int& nJPEGStreamLen, 
@@ -165,8 +216,14 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		return NULL;
 	}
 
-	FILE *fptr = _tfopen(sFileName, _T("wb"));
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+		TurboJpeg::Free(pTargetStream);
+		return NULL;
+	}
+	FILE *fptr = _tfopen(sTempFile, _T("wb"));
 	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
 		TurboJpeg::Free(pTargetStream);
 		return NULL;
 	}
@@ -230,13 +287,26 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		}
 	}
 
-	bool bSuccess = fwrite(pTargetStream, 1, nJPEGStreamLen, fptr) == nJPEGStreamLen;
-	fclose(fptr);
+	bool bWriteOk = fwrite(pTargetStream, 1, nJPEGStreamLen, fptr) == nJPEGStreamLen;
+	// A buffered write can still fail on close (flush to a full disk), so
+	// a fclose failure is a save failure too, not a success. fclose must
+	// run even when fwrite failed, otherwise the temp file stays open
+	// and its deletion below fails.
+	bool bCloseOk = (fclose(fptr) == 0);
+	bool bSuccess = bWriteOk && bCloseOk;
 
-	// delete partial file if no success
+	// delete partial temp file if no success; the target is untouched
 	if (!bSuccess) {
 		if (tjFreeNeeded) TurboJpeg::Free(pTargetStream); else delete[] pTargetStream;
-		_tunlink(sFileName);
+		DeleteAtomicTempFile(sTempFile);
+		return NULL;
+	}
+
+	// Swap the temp file into place; on a swap failure the target stays
+	// untouched and the temp file is removed.
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		if (tjFreeNeeded) TurboJpeg::Free(pTargetStream); else delete[] pTargetStream;
+		DeleteAtomicTempFile(sTempFile);
 		return NULL;
 	}
 
@@ -246,8 +316,13 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 
 // pData must point to 24 bit BGR DIB
 static bool SaveWebP(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bool bUseLosslessWEBP) {
-	FILE *fptr = _tfopen(sFileName, _T("wb"));
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+		return false;
+	}
+	FILE *fptr = _tfopen(sTempFile, _T("wb"));
 	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
@@ -259,16 +334,26 @@ static bool SaveWebP(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bo
 		pOutput = (uint8*)WebpReaderWriter::Compress((uint8*)pData, nWidth, nHeight, nSize, nQuality, bUseLosslessWEBP);
 		// WebPEncode returns 0 bytes on failure; fwrite(NULL, 1, 0) returns 0, so
 		// "0 == 0" made this look like a successful 0-byte save.
-		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
-		fclose(fptr);
+		bool bWriteOk = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bWriteOk && bCloseOk;
+		fptr = NULL;
 		WebpReaderWriter::FreeMemory(pOutput);
 	} catch(...) {
-		fclose(fptr);
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
 	}
 
-	// delete partial file if no success
+	// delete partial temp file if no success; the target is untouched
 	if (!bSuccess) {
-		_tunlink(sFileName);
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
@@ -277,8 +362,13 @@ static bool SaveWebP(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bo
 
 // pData must point to 24 bit BGR DIB
 static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bool bUseLosslessJXL) {
-	FILE* fptr = _tfopen(sFileName, _T("wb"));
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+		return false;
+	}
+	FILE* fptr = _tfopen(sTempFile, _T("wb"));
 	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
@@ -291,17 +381,27 @@ static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, boo
 		if (pOutput == NULL) throw 1;
 		// Like WebP/QOI below: a zero-byte "success" would leave an empty
 		// file behind, so nSize > 0 is part of the success test.
-		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
-		fclose(fptr);
+		bool bWriteOk = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bWriteOk && bCloseOk;
+		fptr = NULL;
 		JxlReader::Free(pOutput);
 	}
 	catch (...) {
-		fclose(fptr);
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
 	}
 
-	// delete partial file if no success
+	// delete partial temp file if no success; the target is untouched
 	if (!bSuccess) {
-		_tunlink(sFileName);
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
@@ -310,8 +410,13 @@ static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, boo
 
 // pData must point to 24 bit BGR DIB
 static bool SaveQOI(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
-	FILE* fptr = _tfopen(sFileName, _T("wb"));
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+		return false;
+	}
+	FILE* fptr = _tfopen(sTempFile, _T("wb"));
 	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
@@ -322,17 +427,27 @@ static bool SaveQOI(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 		pOutput = (uint8*)QoiReaderWriter::Compress((uint8*)pData, nWidth, nHeight, nSize);
 		// Compress leaves nSize at 0 on failure, so a failed encode was reported as
 		// a successful 0-byte save.
-		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
-		fclose(fptr);
+		bool bWriteOk = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bWriteOk && bCloseOk;
+		fptr = NULL;
 		QoiReaderWriter::FreeMemory(pOutput);
 	}
 	catch (...) {
-		fclose(fptr);
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
 	}
 
-	// delete partial file if no success
+	// delete partial temp file if no success; the target is untouched
 	if (!bSuccess) {
-		_tunlink(sFileName);
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
@@ -392,12 +507,28 @@ static bool SaveGDIPlus(LPCTSTR sFileName, EImageFormat eFileFormat, void* pData
 		return false;
 	}
 
-	const wchar_t* sFileNameUnicode;
-	sFileNameUnicode = (const wchar_t*)sFileName;
+	// F-H11, same class as F-B01: GDI+ used to save straight to the
+	// target, leaving a partial file there on failure. Save to a temp
+	// file in the same directory instead, then swap it in.
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+		delete pBitmap;
+		return false;
+	}
+	const wchar_t* sTempFileUnicode;
+	sTempFileUnicode = (const wchar_t*)sTempFile;
 
-	bool bOk = pBitmap->Save(sFileNameUnicode, &encoderClsid, NULL) == Gdiplus::Ok;
+	bool bOk = pBitmap->Save(sTempFileUnicode, &encoderClsid, NULL) == Gdiplus::Ok;
 
 	delete pBitmap;
+	if (!bOk) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
 	return bOk;
 }
 
@@ -491,8 +622,13 @@ bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, bool bUseLoss
 }
 
 bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
-	FILE* fptr = _tfopen(sJxlFile, _T("wb"));
+	CString sTempFile;
+	if (!CreateAtomicTempFileName(sJxlFile, sTempFile)) {
+		return false;
+	}
+	FILE* fptr = _tfopen(sTempFile, _T("wb"));
 	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 	bool bSuccess = false;
@@ -531,8 +667,10 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
 		pBuffer = NULL;
 		if (pOutput == NULL) throw 1;
 		// See SaveJXL above: nSize > 0, or an empty file counts as success.
-		bSuccess = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
-		fclose(fptr);
+		bool bWriteOk = pOutput != NULL && nSize > 0 && fwrite(pOutput, 1, nSize, fptr) == nSize;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bWriteOk && bCloseOk;
+		fptr = NULL;
 		JxlReader::Free(pOutput);
 	}
 	catch (...) {
@@ -540,12 +678,20 @@ bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
 			::CloseHandle(hFile);
 		}
 		delete[] pBuffer;
-		fclose(fptr);
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
 	}
 
-	// delete partial file if no success
+	// delete partial temp file if no success; the target is untouched
 	if (!bSuccess) {
-		_tunlink(sJxlFile);
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sJxlFile, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
 		return false;
 	}
 
