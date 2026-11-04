@@ -434,10 +434,10 @@ void CKeyMap::ShowRejectedShortcuts() {
 // the rejected list (the parser skips them), so no line is double-commented.
 //
 // The rewrite is refused and the file left untouched (result -1) when any
-// physical line holds more than 254 content bytes: _fgetts with BUFF_LEN 256
-// reads at most 255 characters, so a longer line would already have been split
+// physical line holds more than 253 content bytes: _fgetts with BUFF_LEN 256
+// reads at most 255 characters, so a 254-byte CRLF line (256 characters) would already have been split
 // into several chunks by the parser and chunk numbers would no longer match
-// physical line numbers. When every line is at most 254 bytes, each chunk the
+// physical line numbers. When every line is at most 253 bytes, each chunk the
 // parser saw is exactly one physical line, in both ANSI and Unicode builds
 // (a line's wide-character count never exceeds its byte count). A UTF-8 BOM,
 // if present, stays at the front of the file; a UTF-16 BOM aborts the rewrite.
@@ -486,7 +486,7 @@ void CKeyMap::CommentOutRejectedLines(LPCTSTR sPath) {
 		size_t nContentEnd = lines[i].nEnd;
 		if (nContentEnd > lines[i].nBegin && bytes[nContentEnd - 1] == '\n') nContentEnd--;
 		if (nContentEnd > lines[i].nBegin && bytes[nContentEnd - 1] == '\r') nContentEnd--;
-		if (nContentEnd - lines[i].nBegin > 254) {
+		if (nContentEnd - lines[i].nBegin > 253) {
 			return; // long line: chunk numbers no longer match physical lines
 		}
 	}
