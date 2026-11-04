@@ -1261,13 +1261,16 @@ struct TiffGateIFD {
 	unsigned long long bits;
 	bool samplesPresent;
 	bool bitsPresent;
+	bool widthPresent;
+	bool heightPresent;
 	TiffGateArray stripOff;
 	TiffGateArray stripCnt;
 	TiffGateArray tileOff;
 	TiffGateArray tileCnt;
 	std::vector<unsigned long long> subIFDs;
 	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0),
-		samplesPresent(false), bitsPresent(false) {}
+		samplesPresent(false), bitsPresent(false),
+		widthPresent(false), heightPresent(false) {}
 };
 
 class TiffGateReader {
@@ -1419,6 +1422,15 @@ public:
 			unsigned long long tag = Rd16(e);
 			unsigned long long type = Rd16(e + 2);
 			unsigned long long count = Rd32(e + 4);
+			// Dimension presence is tracked separately from the value:
+			// a dimension tag whose value cannot be read still counts
+			// as declared, so CheckIFDTree can tell a pointer block
+			// (no dimension tag at all) from a malformed image IFD.
+			if (tag == 256) {
+				info.widthPresent = true;
+			} else if (tag == 257) {
+				info.heightPresent = true;
+			}
 			unsigned long long typeSize = TypeSize(type);
 			if (typeSize == 0 || count == 0) {
 				continue;
@@ -1566,17 +1578,26 @@ public:
 	}
 
 	// R-04: IFD0 plus SubIFDs, depth <= 2 (IFD0 is depth 0; SubIFDs found
-	// at depth 2 are not followed). Every IFD visited must pass the same
-	// verdict: a malformed dimension hidden in a SubIFD is exactly what
-	// this gate is for, and a plausible-looking IFD0 preview does not
-	// excuse it.
+	// at depth 2 are not followed). An IFD that declares a dimension
+	// must pass the same verdict: a malformed dimension hidden in a
+	// SubIFD is exactly what this gate is for, and a
+	// plausible-looking IFD0 preview does not excuse it. An IFD that
+	// declares neither dimension is a preview or metadata pointer
+	// block, not an image: the NEF JpgFromRaw SubIFD has 513/514 but
+	// no 256/257, and an NRW IFD0 carries no dimensions at all, while
+	// the real RAW SubIFD sits behind tag 330. Such an IFD skips
+	// the verdict but its SubIFDs are still walked, so the real
+	// image is always judged. A declared-but-zero dimension is
+	// malformed, not a pointer block, and still fails.
 	bool CheckIFDTree(unsigned long long ifdOff, int depth) const {
 		TiffGateIFD info;
 		if (!ReadIFD(ifdOff, info)) {
 			return false;
 		}
-		if (!CheckIFD(info)) {
-			return false;
+		if (info.widthPresent || info.heightPresent) {
+			if (!CheckIFD(info)) {
+				return false;
+			}
 		}
 		if (depth >= 2) {
 			return true;
