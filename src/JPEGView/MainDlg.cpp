@@ -2076,6 +2076,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			m_pCropCtl->CropLossless();
 			break;
 		case IDM_COPY_SEL:
+		{
 			CRect cropRect = m_pCropCtl->GetImageCropRect(false);
 			// F-M03: with no active crop rect the old code still emptied the
 			// clipboard and stored a 0x0 DIB; do nothing instead.
@@ -2088,6 +2089,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				this->Invalidate(FALSE);
 			}
 			break;
+		}
 		case IDM_CROPMODE_FREE:
 			m_pCropCtl->SetCropMode(CCropCtl::CM_Free);
 
