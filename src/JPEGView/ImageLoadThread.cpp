@@ -1808,6 +1808,158 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	}
 }
 
+// TIFF WhitePoint (318) / PrimaryChromaticities (319) sanitization.
+//
+// A TIFF can carry perfectly valid primaries (e.g. sRGB: white 0.3127/0.3290,
+// primaries 0.64/0.33, 0.30/0.60, 0.15/0.06) encoded with a huge denominator
+// such as 0xFFFFFFFF instead of the usual 10000. Interpreted as unsigned
+// rationals the values are correct, but a reader that treats the numerator
+// or denominator as signed 32-bit sees negative primaries for any value
+// above INT_MAX (e.g. 2748779007 for red-x) and converts colours wrong:
+// that is the red/magenta cast on the GDI+ TIFF path for
+// sample_1280x853.tiff, whose stripped copy displays normally. LibRaw
+// cannot rescue this file (it rejects a plain RGB TIFF as "not RAW"),
+// so the fix is to normalise the encoding before GDI+ sees it: any
+// 318/319 rational above INT_MAX is rewritten in place, in a memory copy
+// only, to denominator 10000 with the numerator rounded (3127/10000,
+// 6400/10000, ...), which is the standard precision for these tags.
+// Only tags that are normalisable are touched: type must be RATIONAL,
+// counts must be 2 (318) / 6 (319), denominators must be non-zero and
+// every value must lie in [0,1] as an unsigned rational. Anything else
+// (wrong type/count, denominator 0, value > 1, out-of-bounds offset,
+// more than 32 IFDs in the chain) aborts sanitization and the original
+// file is loaded exactly as before, so this never turns a readable file
+// into an unreadable one. Normal tags (denominator 10000 and friends)
+// are left byte-identical, so normal TIFFs keep exact GDI+ behaviour.
+static unsigned short TiffU16(const unsigned char* p, bool bBigEndian) {
+	return bBigEndian ? (unsigned short)(((unsigned short)p[0] << 8) | p[1]) : (unsigned short)(p[0] | ((unsigned short)p[1] << 8));
+}
+static unsigned int TiffU32(const unsigned char* p, bool bBigEndian) {
+	return bBigEndian ? ((unsigned int)p[0] << 24) | ((unsigned int)p[1] << 16) | ((unsigned int)p[2] << 8) | p[3] : (unsigned int)p[0] | ((unsigned int)p[1] << 8) | ((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24);
+}
+static void TiffPutU32(unsigned char* p, bool bBigEndian, unsigned int v) {
+	if (bBigEndian) { p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16); p[2] = (unsigned char)(v >> 8); p[3] = (unsigned char)v; }
+	else { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24); }
+}
+static bool TiffReadAtFile(HANDLE hFile, unsigned __int64 nOffset, unsigned char* pBuf, size_t nLen) {
+	LARGE_INTEGER li;
+	li.QuadPart = (LONGLONG)nOffset;
+	if (!::SetFilePointerEx(hFile, li, NULL, FILE_BEGIN)) return false;
+	DWORD nRead = 0;
+	if (!::ReadFile(hFile, pBuf, (DWORD)nLen, &nRead, NULL)) return false;
+	return nRead == nLen;
+}
+static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName) {
+	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) return false;
+	LARGE_INTEGER liSize;
+	bool bResult = false;
+	if (::GetFileSizeEx(hFile, &liSize) && liSize.QuadPart >= 8) {
+		unsigned char header[8];
+		if (TiffReadAtFile(hFile, 0, header, 8)) {
+			bool bBig = (header[0] == 'M' && header[1] == 'M');
+			bool bLittle = (header[0] == 'I' && header[1] == 'I');
+			if (bBig || bLittle) {
+				bool bBE = bBig;
+				if (TiffU16(header + 2, bBE) == 42) {
+					unsigned __int64 nIFD = TiffU32(header + 4, bBE);
+					bool bSuspicious = false;
+					bool bWalkOk = true;
+					for (int nIFDIndex = 0; nIFDIndex < 32 && bWalkOk; nIFDIndex++) {
+						if (nIFD < 8 || nIFD + 2 > (unsigned __int64)liSize.QuadPart) { bWalkOk = false; break; }
+						unsigned char cntBuf[2];
+						if (!TiffReadAtFile(hFile, nIFD, cntBuf, 2)) { bWalkOk = false; break; }
+						unsigned short nEntries = TiffU16(cntBuf, bBE);
+						if (nEntries > 1024) { bWalkOk = false; break; }
+						if (nIFD + 2 + (unsigned __int64)nEntries * 12 + 4 > (unsigned __int64)liSize.QuadPart) { bWalkOk = false; break; }
+						for (unsigned short i = 0; i < nEntries && bWalkOk; i++) {
+							unsigned char entry[12];
+							if (!TiffReadAtFile(hFile, nIFD + 2 + (unsigned __int64)i * 12, entry, 12)) { bWalkOk = false; break; }
+							unsigned short nTag = TiffU16(entry, bBE);
+							if (nTag != 318 && nTag != 319) continue;
+							unsigned short nType = TiffU16(entry + 2, bBE);
+							unsigned int nCount = TiffU32(entry + 4, bBE);
+							if (nType != 5) { bWalkOk = false; break; }
+							if ((nTag == 318 && nCount != 2) || (nTag == 319 && nCount != 6)) { bWalkOk = false; break; }
+							unsigned int nValOff = TiffU32(entry + 8, bBE);
+							if ((unsigned __int64)nValOff + (unsigned __int64)nCount * 8 > (unsigned __int64)liSize.QuadPart) { bWalkOk = false; break; }
+							unsigned char rats[48];
+							if (!TiffReadAtFile(hFile, nValOff, rats, (size_t)nCount * 8)) { bWalkOk = false; break; }
+							for (unsigned int j = 0; j < nCount; j++) {
+								unsigned int nNum = TiffU32(rats + j * 8, bBE);
+								unsigned int nDen = TiffU32(rats + j * 8 + 4, bBE);
+								if (nDen == 0 || nNum > nDen) { bWalkOk = false; break; }
+								if (nNum > 0x7FFFFFFF || nDen > 0x7FFFFFFF) bSuspicious = true;
+							}
+						}
+						if (!bWalkOk) break;
+						unsigned char nextBuf[4];
+						if (!TiffReadAtFile(hFile, nIFD + 2 + (unsigned __int64)nEntries * 12, nextBuf, 4)) { bWalkOk = false; break; }
+						unsigned int nNext = TiffU32(nextBuf, bBE);
+						if (nNext == 0) break;
+						if (nNext == nIFD) { bWalkOk = false; break; }
+						nIFD = nNext;
+					}
+					bResult = bWalkOk && bSuspicious;
+				}
+			}
+		}
+	}
+	::CloseHandle(hFile);
+	return bResult;
+}
+static bool TiffSanitizeChromaticity(unsigned char* pBuffer, size_t nSize) {
+	if (pBuffer == NULL || nSize < 8) return false;
+	bool bBig = (pBuffer[0] == 'M' && pBuffer[1] == 'M');
+	bool bLittle = (pBuffer[0] == 'I' && pBuffer[1] == 'I');
+	if (!bBig && !bLittle) return false;
+	bool bBE = bBig;
+	if (TiffU16(pBuffer + 2, bBE) != 42) return false;
+	unsigned __int64 nIFD = TiffU32(pBuffer + 4, bBE);
+	bool bSuspicious = false;
+	for (int nIFDIndex = 0; nIFDIndex < 32; nIFDIndex++) {
+		if (nIFD < 8 || nIFD + 2 > nSize) return false;
+		unsigned short nEntries = TiffU16(pBuffer + (size_t)nIFD, bBE);
+		if (nEntries > 1024) return false;
+		if (nIFD + 2 + (unsigned __int64)nEntries * 12 + 4 > nSize) return false;
+		for (unsigned short i = 0; i < nEntries; i++) {
+			unsigned char* pEntry = pBuffer + (size_t)nIFD + 2 + (size_t)i * 12;
+			unsigned short nTag = TiffU16(pEntry, bBE);
+			if (nTag != 318 && nTag != 319) continue;
+			unsigned short nType = TiffU16(pEntry + 2, bBE);
+			unsigned int nCount = TiffU32(pEntry + 4, bBE);
+			if (nType != 5) return false;
+			if ((nTag == 318 && nCount != 2) || (nTag == 319 && nCount != 6)) return false;
+			unsigned int nValOff = TiffU32(pEntry + 8, bBE);
+			if ((unsigned __int64)nValOff + (unsigned __int64)nCount * 8 > nSize) return false;
+			bool bTagSuspicious = false;
+			for (unsigned int j = 0; j < nCount; j++) {
+				unsigned int nNum = TiffU32(pBuffer + nValOff + j * 8, bBE);
+				unsigned int nDen = TiffU32(pBuffer + nValOff + j * 8 + 4, bBE);
+				if (nDen == 0 || nNum > nDen) return false;
+				if (nNum > 0x7FFFFFFF || nDen > 0x7FFFFFFF) bTagSuspicious = true;
+			}
+			if (bTagSuspicious) {
+				bSuspicious = true;
+				for (unsigned int j = 0; j < nCount; j++) {
+					unsigned int nNum = TiffU32(pBuffer + nValOff + j * 8, bBE);
+					unsigned int nDen = TiffU32(pBuffer + nValOff + j * 8 + 4, bBE);
+					double dVal = (double)nNum / (double)nDen;
+					unsigned int nNewNum = (unsigned int)(dVal * 10000.0 + 0.5);
+					if (nNewNum > 10000) nNewNum = 10000;
+					TiffPutU32(pBuffer + nValOff + j * 8, bBE, nNewNum);
+					TiffPutU32(pBuffer + nValOff + j * 8 + 4, bBE, 10000);
+				}
+			}
+		}
+		unsigned int nNext = TiffU32(pBuffer + (size_t)nIFD + 2 + (size_t)nEntries * 12, bBE);
+		if (nNext == 0) break;
+		if (nNext == nIFD) return false;
+		nIFD = nNext;
+	}
+	return bSuspicious;
+}
+
 // pEXIFData/nJPEGFileHash are only supplied by the JPEG CMYK fallback
 // (R-09), so a GDI+ fallback keeps the EXIF block and file hash the
 // success path would have attached. All other callers keep the defaults
@@ -1817,15 +1969,52 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 	sFileName = (const wchar_t*)request->FileName;
 
 	Gdiplus::Bitmap* pBitmap = NULL;
-	if (sFileName == m_sLastFileName) {
-		pBitmap = m_pLastBitmap;
-	} else {
+	bool isOutOfMemory = false, isAnimatedGIF = false;
+	// Sanitized first try: if this TIFF carries suspicious 318/319, load a
+	// memory copy, normalise those tags in place, and decode from a stream
+	// (CreateStreamOnHGlobal, the same pattern the JPEG/PNG paths use).
+	// The original file is never modified. If the sanitized decode yields
+	// an image, that is the result; if it yields nothing, the code below
+	// retries the original filename path, so a sanitized failure can never
+	// turn a readable file into an unreadable one.
+	if (Helpers::GetImageFormat(request->FileName) == IF_TIFF && TiffChromaticityNeedsSanitization(sFileName)) {
 		DeleteCachedGDIBitmap();
-		m_pLastBitmap = pBitmap = new Gdiplus::Bitmap(sFileName, CSettingsProvider::This().UseEmbeddedColorProfiles());
-		m_sLastFileName = sFileName;
+		HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			LARGE_INTEGER liSize;
+			if (::GetFileSizeEx(hFile, &liSize) && liSize.QuadPart > 0 && liSize.QuadPart <= 0x7FFFFFFF) {
+				HGLOBAL hBuffer = ::GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)liSize.QuadPart);
+				void* pData = (hBuffer == NULL) ? NULL : ::GlobalLock(hBuffer);
+				if (pData != NULL) {
+					DWORD nRead = 0;
+					if (::ReadFile(hFile, pData, (DWORD)liSize.QuadPart, &nRead, NULL) && nRead == (DWORD)liSize.QuadPart && TiffSanitizeChromaticity((unsigned char*)pData, (size_t)liSize.QuadPart)) {
+						IStream* pStream = NULL;
+						if (::CreateStreamOnHGlobal(hBuffer, FALSE, &pStream) == S_OK) {
+							Gdiplus::Bitmap* pSanitizedBitmap = new Gdiplus::Bitmap(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
+							if (pSanitizedBitmap != NULL && pSanitizedBitmap->GetLastStatus() == Gdiplus::Ok) {
+								request->Image = ConvertGDIPlusBitmapToJPEGImage(pSanitizedBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF);
+							}
+							delete pSanitizedBitmap;
+							pStream->Release();
+						}
+					}
+					::GlobalUnlock(hBuffer);
+				}
+				if (hBuffer != NULL) ::GlobalFree(hBuffer);
+			}
+			::CloseHandle(hFile);
+		}
 	}
-	bool isOutOfMemory, isAnimatedGIF;
-	request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF);
+	if (request->Image == NULL) {
+		if (sFileName == m_sLastFileName) {
+			pBitmap = m_pLastBitmap;
+		} else {
+			DeleteCachedGDIBitmap();
+			m_pLastBitmap = pBitmap = new Gdiplus::Bitmap(sFileName, CSettingsProvider::This().UseEmbeddedColorProfiles());
+			m_sLastFileName = sFileName;
+		}
+		request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF);
+	}
 	request->OutOfMemory = request->Image == NULL && isOutOfMemory;
 	if (request->OutOfMemory && GetBitmapFormat(pBitmap) == IF_TIFF) {
 		request->OutOfMemory = false; // reset before WIC retry
