@@ -27,6 +27,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Setup Git Short SHA
+      shell: powershell
+      run: echo "short_sha=$(git rev-parse --short "${{ github.sha }}")" >> $env:GITHUB_ENV
+
     - name: Setup msbuild
       id: setup-msbuild
       # https://github.com/marketplace/actions/setup-msbuild
@@ -162,7 +166,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: buildlog-${{ inputs.platform-arch }}-${{ inputs.build-config }}
+        name: buildlog-${{ inputs.platform-arch }}-${{ inputs.build-config }}-${{ env.short_sha }}
         path: |
           build.log
           build.err
