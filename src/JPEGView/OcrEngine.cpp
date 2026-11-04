@@ -80,6 +80,105 @@ void ResizeLuminance(Snapshot& result, const uint8_t* source, size_t stride) {
     }
 }
 
+// One engine's line of words, in image space.
+struct OcrLine {
+    std::vector<Word> words;
+    float top = 0, bottom = 0, left = 0;
+    float center() const { return (top + bottom) * 0.5f; }
+    float height() const { return bottom - top; }
+};
+
+// CJK unified ideographs and their extensions/compatibility forms, BMP
+// only. CJK punctuation (U+3000-U+303F, e.g. 《》) and fullwidth forms are
+// deliberately excluded: the zh engine's "He 《《" garbling must not count
+// as Chinese content, or a pure-English line would keep the zh version.
+bool IsCjkIdeograph(wchar_t c) {
+    return (c >= 0x3400 && c <= 0x4DBF)
+        || (c >= 0x4E00 && c <= 0x9FFF)
+        || (c >= 0xF900 && c <= 0xFAFF);
+}
+
+bool IsLatinLetter(wchar_t c) {
+    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z');
+}
+
+// Lowercased primary subtag: the part before the first '-'.
+std::wstring PrimarySubtag(const std::wstring& tag) {
+    std::wstring out;
+    for (wchar_t c : tag) {
+        if (c == L'-') break;
+        out += wchar_t(std::tolower(c));
+    }
+    return out;
+}
+
+// D2: merge zh and en engine lines into one reading order. Lines are
+// matched across engines by vertical overlap (overlap > half the shorter
+// line's height, best match wins, each en line used at most once). A
+// matched pair keeps the zh line when it carries real CJK ideographs
+// (ideograph share >= 0.2 of ideographs + Latin letters), otherwise the
+// en line. Unmatched lines are kept as-is, so a line only one engine saw
+// (pure Chinese, or the en-only "A - B") survives. The merged words come
+// back top-to-bottom with fresh line indices, and zhUsed/enUsed report
+// which engines contributed lines for the status line.
+std::vector<Word> MergeEngineLines(const std::vector<OcrLine>& zh,
+                                   const std::vector<OcrLine>& en,
+                                   bool& zhUsed, bool& enUsed) {
+    zhUsed = false;
+    enUsed = false;
+    struct Picked { const OcrLine* line; bool fromZh; };
+    std::vector<Picked> picked;
+    std::vector<bool> enTaken(en.size(), false);
+    for (const auto& zl : zh) {
+        int best = -1;
+        float bestOverlap = 0.0f;
+        for (size_t j = 0; j < en.size(); ++j) {
+            if (enTaken[j]) continue;
+            const OcrLine& el = en[j];
+            const float overlap = std::min(zl.bottom, el.bottom) - std::max(zl.top, el.top);
+            const float minH = std::min(zl.height(), el.height());
+            if (minH > 0 && overlap > 0.5f * minH && overlap > bestOverlap) {
+                best = int(j);
+                bestOverlap = overlap;
+            }
+        }
+        if (best >= 0) {
+            enTaken[size_t(best)] = true;
+            int c = 0, l = 0;
+            for (const auto& w : zl.words) {
+                for (wchar_t ch : w.text) {
+                    if (IsCjkIdeograph(ch)) ++c;
+                    else if (IsLatinLetter(ch)) ++l;
+                }
+            }
+            // Any real CJK content means the line has Chinese the en engine
+            // cannot show; the 0.2 bar only filters stray hallucinations.
+            // A pure-English zh line has c == 0, so it always loses to en.
+            const bool useZh = (c > 0) && (double(c) / double(c + l) >= 0.2);
+            picked.push_back({useZh ? &zl : &en[size_t(best)], useZh});
+        } else {
+            picked.push_back({&zl, true});
+        }
+    }
+    for (size_t j = 0; j < en.size(); ++j) {
+        if (!enTaken[j]) picked.push_back({&en[j], false});
+    }
+    std::sort(picked.begin(), picked.end(), [](const Picked& a, const Picked& b) {
+        const float ca = a.line->center(), cb = b.line->center();
+        if (ca != cb) return ca < cb;
+        return a.line->left < b.line->left;
+    });
+    std::vector<Word> out;
+    for (size_t i = 0; i < picked.size(); ++i) {
+        if (picked[i].fromZh) zhUsed = true; else enUsed = true;
+        for (auto w : picked[i].line->words) {
+            w.line = i;
+            out.push_back(std::move(w));
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 Snapshot MakeSnapshot(const void* pixels, int width, int height, int channels) {
@@ -253,49 +352,161 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
 
         std::wstring honoredName, honoredTag;
         int attempts = 0;
-        for (const auto& tag : candidates) {
-            if (attempts >= MaxLanguageAttempts) break;
-            OcrEngine engine{ nullptr };
-            try {
-                engine = OcrEngine::TryCreateFromLanguage(Language(winrt::hstring(tag)));
-            } catch (...) {
-                continue;   // 标签写错或语言包已卸载：跳过，别让一条坏配置拖垮整次识别
-            }
-            if (!engine) continue;
-            ++attempts;
-            const std::wstring display(engine.RecognizerLanguage().DisplayName().c_str());
-            const std::wstring languageTag(engine.RecognizerLanguage().LanguageTag().c_str());
-            if (honoredName.empty()) { honoredName = display; honoredTag = languageTag; }
-            if (canceled.load()) return result;
 
-            auto ocrResult = engine.RecognizeAsync(bitmap).get();
-
-            result.words.clear();
-            size_t lineIndex = 0;
-            for (auto line : ocrResult.Lines()) {
-                for (auto word : line.Words()) {
-                    Word w;
-                    w.text = word.Text();
-                    w.line = lineIndex;
-                    // OcrWord 的包围盒属性名是 BoundingRect（Windows.Foundation.Rect），不是 BoundingBox。
-                    auto rect = word.BoundingRect();
-                    // std::array 是聚合类型，不能从 braced-init-list 直接赋值，逐元素写。
-                    const float x0 = rect.X * toImageX, y0 = rect.Y * toImageY;
-                    const float x1 = (rect.X + rect.Width) * toImageX, y1 = (rect.Y + rect.Height) * toImageY;
-                    w.corners[0] = {x0, y0};
-                    w.corners[1] = {x1, y0};
-                    w.corners[2] = {x1, y1};
-                    w.corners[3] = {x0, y1};
-                    result.words.push_back(std::move(w));
+        // Single-engine path, kept for configs without both a zh and an en
+        // engine (and as the fallback when a zh+en merge finds no words).
+        // skipTags lists engines already tried by the merge, so the fallback
+        // never pays for the same engine twice.
+        auto runFirstWithWords = [&](const std::vector<std::wstring>& skipTags) -> bool {
+            for (const auto& tag : candidates) {
+                bool skipped = false;
+                for (const auto& s : skipTags) {
+                    if (_wcsicmp(tag.c_str(), s.c_str()) == 0) { skipped = true; break; }
                 }
-                ++lineIndex;
+                if (skipped) continue;
+                if (attempts >= MaxLanguageAttempts) break;
+                OcrEngine engine{ nullptr };
+                try {
+                    engine = OcrEngine::TryCreateFromLanguage(Language(winrt::hstring(tag)));
+                } catch (...) {
+                    continue;   // 标签写错或语言包已卸载：跳过，别让一条坏配置拖垮整次识别
+                }
+                if (!engine) continue;
+                ++attempts;
+                const std::wstring display(engine.RecognizerLanguage().DisplayName().c_str());
+                const std::wstring languageTag(engine.RecognizerLanguage().LanguageTag().c_str());
+                if (honoredName.empty()) { honoredName = display; honoredTag = languageTag; }
+                if (canceled.load()) return false;
+
+                auto ocrResult = engine.RecognizeAsync(bitmap).get();
+
+                result.words.clear();
+                size_t lineIndex = 0;
+                for (auto line : ocrResult.Lines()) {
+                    for (auto word : line.Words()) {
+                        Word w;
+                        w.text = word.Text();
+                        w.line = lineIndex;
+                        // OcrWord 的包围盒属性名是 BoundingRect（Windows.Foundation.Rect），不是 BoundingBox。
+                        auto rect = word.BoundingRect();
+                        // std::array 是聚合类型，不能从 braced-init-list 直接赋值，逐元素写。
+                        const float x0 = rect.X * toImageX, y0 = rect.Y * toImageY;
+                        const float x1 = (rect.X + rect.Width) * toImageX, y1 = (rect.Y + rect.Height) * toImageY;
+                        w.corners[0] = {x0, y0};
+                        w.corners[1] = {x1, y0};
+                        w.corners[2] = {x1, y1};
+                        w.corners[3] = {x0, y1};
+                        result.words.push_back(std::move(w));
+                    }
+                    ++lineIndex;
+                }
+                if (!result.words.empty()) {
+                    // OcrResult 没有 Language 属性；识别语言在引擎上（RecognizerLanguage）。
+                    result.language = display;
+                    result.languageTag = languageTag;
+                    return true;
+                }
             }
-            if (!result.words.empty()) {
-                // OcrResult 没有 Language 属性；识别语言在引擎上（RecognizerLanguage）。
-                result.language = display;
-                result.languageTag = languageTag;
-                break;      // 认出字就用这个引擎，不再往下试
+            return false;
+        };
+
+        // D2: run the zh and en engines and merge per line, instead of
+        // stopping at the first engine that returns words (M-OCR3's second
+        // half). The first zh and en candidates in preferred order win;
+        // BuildLanguageCandidates already puts exact matches first and
+        // dedups (M-OCR3's matching half, done by M-OCR11).
+        std::wstring zhTag, enTag;
+        for (const auto& tag : candidates) {
+            if (zhTag.empty() && PrimarySubtag(tag) == L"zh") zhTag = tag;
+            if (enTag.empty() && PrimarySubtag(tag) == L"en") enTag = tag;
+        }
+        const bool useMerge = !zhTag.empty() && !enTag.empty()
+            && _wcsicmp(zhTag.c_str(), enTag.c_str()) != 0;
+        if (useMerge) {
+            // Runs one engine and returns its lines in image space.
+            // False means the engine could not be created (or the job was
+            // canceled before the run); a RecognizeAsync failure still
+            // propagates to the outer catch, as on the single-engine path.
+            auto runOne = [&](const std::wstring& tag, std::vector<OcrLine>& linesOut,
+                              std::wstring& displayOut, std::wstring& tagOut) -> bool {
+                OcrEngine engine{ nullptr };
+                try {
+                    engine = OcrEngine::TryCreateFromLanguage(Language(winrt::hstring(tag)));
+                } catch (...) {
+                    return false;
+                }
+                if (!engine) return false;
+                displayOut = engine.RecognizerLanguage().DisplayName().c_str();
+                tagOut = engine.RecognizerLanguage().LanguageTag().c_str();
+                if (canceled.load()) return false;
+
+                auto ocrResult = engine.RecognizeAsync(bitmap).get();
+                for (auto line : ocrResult.Lines()) {
+                    OcrLine ol;
+                    for (auto word : line.Words()) {
+                        Word w;
+                        w.text = word.Text();
+                        // OcrWord 的包围盒属性名是 BoundingRect（Windows.Foundation.Rect），不是 BoundingBox。
+                        auto rect = word.BoundingRect();
+                        const float x0 = rect.X * toImageX, y0 = rect.Y * toImageY;
+                        const float x1 = (rect.X + rect.Width) * toImageX, y1 = (rect.Y + rect.Height) * toImageY;
+                        w.corners[0] = {x0, y0};
+                        w.corners[1] = {x1, y0};
+                        w.corners[2] = {x1, y1};
+                        w.corners[3] = {x0, y1};
+                        ol.words.push_back(std::move(w));
+                    }
+                    if (!ol.words.empty()) {
+                        ol.top = ol.words[0].corners[0].y;
+                        ol.bottom = ol.words[0].corners[2].y;
+                        ol.left = ol.words[0].corners[0].x;
+                        for (const auto& w : ol.words) {
+                            if (w.corners[0].y < ol.top) ol.top = w.corners[0].y;
+                            if (w.corners[2].y > ol.bottom) ol.bottom = w.corners[2].y;
+                            if (w.corners[0].x < ol.left) ol.left = w.corners[0].x;
+                        }
+                        linesOut.push_back(std::move(ol));
+                    }
+                }
+                return true;
+            };
+
+            std::vector<OcrLine> zhLines, enLines;
+            std::wstring zhDisplay, zhLangTag, enDisplay, enLangTag;
+            if (!canceled.load()) {
+                if (runOne(zhTag, zhLines, zhDisplay, zhLangTag)) {
+                    ++attempts;
+                    if (honoredName.empty()) { honoredName = zhDisplay; honoredTag = zhLangTag; }
+                }
             }
+            if (!canceled.load()) {
+                if (runOne(enTag, enLines, enDisplay, enLangTag)) {
+                    ++attempts;
+                    if (honoredName.empty()) { honoredName = enDisplay; honoredTag = enLangTag; }
+                }
+            }
+            if (!canceled.load()) {
+                bool zhUsed = false, enUsed = false;
+                std::vector<Word> merged = MergeEngineLines(zhLines, enLines, zhUsed, enUsed);
+                if (!merged.empty()) {
+                    result.words = std::move(merged);
+                    if (zhUsed && enUsed) {
+                        result.language = zhDisplay + L"+" + enDisplay;
+                        result.languageTag = zhLangTag + L"+" + enLangTag;
+                    } else if (zhUsed) {
+                        result.language = zhDisplay;
+                        result.languageTag = zhLangTag;
+                    } else {
+                        result.language = enDisplay;
+                        result.languageTag = enLangTag;
+                    }
+                }
+            }
+            if (result.words.empty() && !canceled.load()) {
+                runFirstWithWords({zhTag, enTag});
+            }
+        } else {
+            runFirstWithWords({});
         }
         // 一个引擎都没认出字时保留首选引擎的名字，"未找到文字"提示才有东西可显示
         if (result.words.empty()) {
