@@ -44,7 +44,7 @@ CJPEGProvider::~CJPEGProvider(void) {
 
 CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirection eDirection,
                                         LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams,
-                                        bool& bOutOfMemory, bool& bExceptionError) {
+                                        bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW) {
 	if (strFileName == NULL) {
 		bOutOfMemory = false;
 		bExceptionError = false;
@@ -60,7 +60,7 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 
 	if (pRequest == NULL) {
 		// no request pending for this file, add to request queue and start async
-		pRequest = StartNewRequest(strFileName, nFrameIndex, processParams);
+		pRequest = StartNewRequest(strFileName, nFrameIndex, processParams, forceFullSizeRAW);
 		// wait with read ahead when direction changed - maybe user just wants to re-see last image
 		if (!bDirectionChanged && eDirection != NONE) {
 			// start parallel if more than one thread
@@ -102,7 +102,7 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 		bWasOutOfMemory = true;
 		if (FreeAllPossibleMemory()) {
 			DeleteElement(pRequest);
-			pRequest = StartRequestAndWaitUntilReady(strFileName, nFrameIndex, processParams);
+			pRequest = StartRequestAndWaitUntilReady(strFileName, nFrameIndex, processParams, forceFullSizeRAW);
 		}
 	}
 
@@ -216,8 +216,8 @@ CJPEGProvider::CImageRequest* CJPEGProvider::FindRequest(LPCTSTR strFileName, in
 	return NULL;
 }
 
-CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams) {
-	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams);
+CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
+	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams, forceFullSizeRAW);
 	::WaitForSingleObject(pRequest->EventFinished, INFINITE);
 	GetLoadedImageFromWorkThread(pRequest);
 	return pRequest;
@@ -245,7 +245,7 @@ void CJPEGProvider::StartNewRequestBundle(CFileList* pFileList, EReadAheadDirect
 	}
 }
 
-CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams) {
+CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
 #ifdef DEBUG
 	::OutputDebugString(_T("Start new request: ")); ::OutputDebugString(sFileName); ::OutputDebugString(_T("\n"));
 #endif
@@ -253,7 +253,7 @@ CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, 
 	m_requestList.push_back(pRequest);
 	pRequest->HandlingThread = SearchThreadForNewRequest();
 	pRequest->Handle = pRequest->HandlingThread->AsyncLoad(pRequest->FileName, nFrameIndex,
-		processParams, m_hHandlerWnd, pRequest->EventFinished);
+		processParams, m_hHandlerWnd, pRequest->EventFinished, forceFullSizeRAW);
 	return pRequest;
 }
 

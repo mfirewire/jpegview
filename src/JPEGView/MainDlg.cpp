@@ -85,6 +85,7 @@ static const int NO_REQUEST = 1; // used in GotoImage() method
 static const int NO_REMOVE_KEY_MSG = 2; // used in GotoImage() method
 static const int KEEP_PARAMETERS = 4; // used in GotoImage() method
 static const int NO_UPDATE_WINDOW = 8; // used in GotoImage() method
+static const int FORCE_FULLSIZE_RAW = 16; // used in GotoImage() method
 
 static const CSize HUGE_SIZE = CSize(99999999, 99999999);
 
@@ -1266,6 +1267,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	if (m_pCurrentImage == NULL) {
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD, MF_BYCOMMAND | MF_GRAYED);
+		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_BYCOMMAND | MF_GRAYED);
 		//::EnableMenuItem(hMenuTrackPopup, IDM_EXPLORE, MF_BYCOMMAND | MF_GRAYED);  // can still show path to an image which could not be loaded.  If file doesn't exist, nothing happens anyways
 		::EnableMenuItem(hMenuTrackPopup, IDM_PRINT, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_COPY, MF_BYCOMMAND | MF_GRAYED);
@@ -1305,6 +1307,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	if (m_bMovieMode) {
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD, MF_BYCOMMAND | MF_GRAYED);
+		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_PRINT, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_BATCH_COPY, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE_PARAMETERS, MF_BYCOMMAND | MF_GRAYED);
@@ -1431,6 +1434,9 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_RELOAD:
 			ReloadImage(false);
+			break;
+		case IDM_RELOAD_FULLSIZE:
+			ReloadImageFullSize();
 			break;
 		case IDM_PRINT:
 			if (m_pCurrentImage != NULL) {
@@ -2694,7 +2700,7 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	} else {
 		m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, (ePos == POS_AwayFromCurrent) ? CJPEGProvider::NONE : eDirection,  
 			m_pFileList->Current(), nFrameIndex, procParams,
-			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage);
+			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0);
 		m_nLastLoadError = (m_pCurrentImage == NULL) ? ((m_pFileList->Current() == NULL) ? HelpersGUI::FileLoad_NoFilesInDirectory : HelpersGUI::FileLoad_LoadError) : HelpersGUI::FileLoad_Ok;
 	}
 	double minimalDisplayTime = CSettingsProvider::This().MinimalDisplayTime();
@@ -2739,6 +2745,10 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 void CMainDlg::ReloadImage(bool keepParameters, bool updateWindow) {
 	int flags = keepParameters ? KEEP_PARAMETERS : 0;
 	GotoImage(CMainDlg::POS_Current, updateWindow ? flags : flags | NO_UPDATE_WINDOW);
+}
+
+void CMainDlg::ReloadImageFullSize() {
+	GotoImage(CMainDlg::POS_Current, FORCE_FULLSIZE_RAW);
 }
 
 void CMainDlg::AdjustLDC(int nMode, double dInc) {

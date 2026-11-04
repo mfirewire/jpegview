@@ -73,6 +73,7 @@ Ctrl+Shift+E            IDM_TOUCH_IMAGE_EXIF
 Ctrl+O                  IDM_OPEN
 Ctrl+P                  IDM_PRINT
 Ctrl+R                  IDM_RELOAD
+Ctrl+Shift+R            IDM_RELOAD_FULLSIZE
 Alt+R                   IDM_SLIDESHOW_RESUME
 Ctrl+X                  IDM_COPY_FULL
 Ctrl+V                  IDM_PASTE

@@ -38,7 +38,7 @@ public:
 	// received or the event has been signaled.
 	// The file to load is given by its filename (with path) and the frame index (for multiframe images). The
 	// frame index needs to be zero when the image only has one frame.
-	int AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished);
+	int AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, bool forceFullSizeRAW = false);
 
 	// Get loaded image, CImageData::Image is null if not (yet) available - use handle returned by AsyncLoad().
 	// Call after having received the WM_IMAGE_LOAD_COMPLETED message to retrieve the loaded image.
@@ -56,7 +56,7 @@ private:
 	// Request for loading an image
 	class CRequest : public CRequestBase {
 	public:
-		CRequest(LPCTSTR strFileName, int nFrameIndex, HWND wndTarget, const CProcessParams& processParams, HANDLE eventFinished) 
+		CRequest(LPCTSTR strFileName, int nFrameIndex, HWND wndTarget, const CProcessParams& processParams, HANDLE eventFinished, bool forceFullSizeRAW = false) 
 			: CRequestBase(eventFinished), ProcessParams(processParams) {
 			FileName = strFileName;
 			FrameIndex = nFrameIndex;
@@ -65,6 +65,7 @@ private:
 			Image = NULL;
 			OutOfMemory = false;
 			ExceptionError = false;
+			ForceFullSizeRAW = forceFullSizeRAW;
 		}
 
 		CString FileName;
@@ -75,6 +76,7 @@ private:
 		CProcessParams ProcessParams;
 		bool OutOfMemory;  // load caused an out of memory condition
 		bool ExceptionError;  // an unhandled exception caused the load to fail
+		bool ForceFullSizeRAW;  // one-shot: load this request in full size, ignoring DisplayFullSizeRAW
 	};
 
 	// Request to release image file

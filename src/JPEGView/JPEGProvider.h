@@ -40,7 +40,7 @@ public:
 	// blocks until the image is ready. If not specified otherwise, a read-ahead request for the next image is
 	// created automatically so that the next image will be ready immediately when requested in the future.
 	CJPEGImage* RequestImage(CFileList* pFileList, EReadAheadDirection eDirection, LPCTSTR strFileName, int nFrameIndex,
-		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError);
+		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW = false);
 
 	// Notifies that the specified image is no longer used and its memory can be freed.
 	// The CJPEGProvider class may decide to keep the image cached.
@@ -120,8 +120,8 @@ private:
 	void GetLoadedImageFromWorkThread(CImageRequest* pRequest);
 	CImageLoadThread* SearchThreadForNewRequest(void);
 	void RemoveUnusedImages(bool bRemoveAlsoReadAhead);
-	CImageRequest* StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams);
-	CImageRequest* StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams);
+	CImageRequest* StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW = false);
+	CImageRequest* StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW = false);
 	void StartNewRequestBundle(CFileList* pFileList, EReadAheadDirection eDirection, const CProcessParams & processParams, int nNumRequests, CImageRequest* pLastReadyRequest);
 	CImageRequest* FindRequest(LPCTSTR strFileName, int nFrameIndex);
 	void ClearOldestInactiveRequest();

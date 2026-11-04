@@ -270,8 +270,8 @@ CImageLoadThread::~CImageLoadThread(void) {
 	}
 }
 
-int CImageLoadThread::AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished) {
-	CRequest* pRequest = new CRequest(strFileName, nFrameIndex, targetWnd, processParams, eventFinished);
+int CImageLoadThread::AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, bool forceFullSizeRAW) {
+	CRequest* pRequest = new CRequest(strFileName, nFrameIndex, targetWnd, processParams, eventFinished, forceFullSizeRAW);
 
 	ProcessAsync(pRequest);
 
@@ -1768,7 +1768,12 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 		if (!IsPlausibleRawFile(request->FileName)) {
 			return;
 		}
-		int fullsize = CSettingsProvider::This().DisplayFullSizeRAW();
+		// One-shot full-size reload (IDM_RELOAD_FULLSIZE): this request ignores
+		// DisplayFullSizeRAW and uses mode 3 semantics (full size first, thumb
+		// fallback), so a thumbnail-mode user can view the current image in
+		// full size without changing settings. The flag lives on the request,
+		// so navigation and read-ahead requests keep the configured mode.
+		int fullsize = request->ForceFullSizeRAW ? 3 : CSettingsProvider::This().DisplayFullSizeRAW();
 
 #ifndef WINXP
 		// Try with libraw
