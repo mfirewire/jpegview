@@ -83,6 +83,7 @@ public:
 	LPCTSTR DefaultSaveFormat() { return m_sDefaultSaveFormat; }
 	LPCTSTR FilesProcessedByWIC() { return m_sFilesProcessedByWIC; }
 	LPCTSTR FileEndingsRAW() { return m_sFileEndingsRAW; }
+	LPCTSTR FileEndingsExtra() { return m_sFileEndingsExtra; }
 	void AddTemporaryRAWFileEnding(LPCTSTR sEnding) { m_sFileEndingsRAW += CString(_T(";*.")) + sEnding; }
 	int DisplayFullSizeRAW() { return m_nDisplayFullSizeRAW; }
 	bool CreateParamDBEntryOnSave() { return m_bCreateParamDBEntryOnSave; }
@@ -257,6 +258,7 @@ private:
 	CString m_sDefaultSaveFormat;
 	CString m_sFilesProcessedByWIC;
 	CString m_sFileEndingsRAW;
+	CString m_sFileEndingsExtra;
 	int m_nDisplayFullSizeRAW;
 	bool m_bCreateParamDBEntryOnSave;
 	bool m_bWrapAroundFolder;
