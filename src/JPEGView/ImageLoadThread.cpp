@@ -1259,8 +1259,10 @@ struct TiffGateIFD {
 	unsigned long long compression;
 	unsigned long long samples;
 	unsigned long long bits;
+	unsigned long long photometric;
 	bool samplesPresent;
 	bool bitsPresent;
+	bool photometricPresent;
 	bool widthPresent;
 	bool heightPresent;
 	TiffGateArray stripOff;
@@ -1268,8 +1270,8 @@ struct TiffGateIFD {
 	TiffGateArray tileOff;
 	TiffGateArray tileCnt;
 	std::vector<unsigned long long> subIFDs;
-	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0),
-		samplesPresent(false), bitsPresent(false),
+	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0), photometric(0),
+		samplesPresent(false), bitsPresent(false), photometricPresent(false),
 		widthPresent(false), heightPresent(false) {}
 };
 
@@ -1454,6 +1456,10 @@ public:
 				case 256: info.width = ReadScalar(dataOff, type); break;
 				case 257: info.height = ReadScalar(dataOff, type); break;
 				case 259: info.compression = ReadScalar(dataOff, type); break;
+				case 262:
+					info.photometric = ReadScalar(dataOff, type);
+					info.photometricPresent = true;
+					break;
 				case 277:
 					info.samples = ReadScalar(dataOff, type);
 					info.samplesPresent = true;
@@ -1510,11 +1516,27 @@ public:
 		}
 		unsigned long long declaredPixels = info.width * info.height;
 		if (info.compression == 1 || info.compression == 0) {
-			// R-16: missing samples/bits no longer default to 1. A
-			// missing declaration makes the bound meaningless, so the
-			// file is rejected instead of passing a weakened check.
-			if (!info.samplesPresent || !info.bitsPresent) {
+			// R-16: a missing declaration normally makes the bound
+			// meaningless, so the file is rejected instead of passing a
+			// weakened check. One exception: single-channel TIFFs
+			// legitimately omit SamplesPerPixel (the TIFF spec default
+			// is 1), and Kodak DCS monochrome files do exactly that
+			// (photometric 1, single strip of exactly pixels*bits/8).
+			// The default is trusted only for single-channel
+			// photometrics (0 WhiteIsZero, 1 BlackIsZero, 32803 CFA);
+			// a colour file that omits samples contradicts its own
+			// photometric and still fails, as does any file with bits
+			// missing.
+			if (!info.bitsPresent) {
 				return false;
+			}
+			unsigned long long samples = info.samples;
+			if (!info.samplesPresent) {
+				if (!info.photometricPresent ||
+					(info.photometric != 0 && info.photometric != 1 && info.photometric != 32803)) {
+					return false;
+				}
+				samples = 1;
 			}
 			// KDC exemption: Kodak DCS wrapper files declare full-frame
 			// dimensions but store a smaller wrapped payload (DC120: 1280x960
@@ -1524,12 +1546,19 @@ public:
 			// dimension/sample/bits caps still apply, and LibRaw's own
 			// pixels/8 check in RAWWrapper remains as a backstop, so a
 			// truncated KDC fails at decode rather than at the gate.
-			unsigned long long declaredBytes = declaredPixels * info.samples * info.bits / 8;
+			unsigned long long declaredBytes = declaredPixels * samples * info.bits / 8;
 			if (!m_isKdc && declaredBytes > m_fileSize) {
 				return false;
 			}
 		} else {
-			if (m_fileSize < declaredPixels / 8) {
+			// JPEG floor exemption: JPEG routinely compresses below 1 bit
+			// per pixel (DC120_WITH_JPEG: 135,688 bytes for 1280x960 =
+			// 0.88 bpp), so the pixels/8 floor false-rejects real JPEG
+			// RAWs. A truncated JPEG fails in the decoder with an error,
+			// unlike raw unpack over-reads, so skipping the floor for
+			// compression 7 loses no crash protection. Non-JPEG
+			// compressed data keeps the floor.
+			if (info.compression != 7 && m_fileSize < declaredPixels / 8) {
 				return false;
 			}
 			// JPEG-7 exemption: Hasselblad 3FR JPEG strips carry the nominal
