@@ -80,56 +80,6 @@ void ResizeLuminance(Snapshot& result, const uint8_t* source, size_t stride) {
     }
 }
 
-// D1a preprocessing helpers: sharpen the gray buffer, then binarize it.
-// They run on the work buffer only; dimensions never change, so the
-// word-box mapping back to image space is unaffected.
-void UnsharpGray(uint8_t* gray, int width, int height) {
-    if (width <= 0 || height <= 0) return;
-    const std::vector<uint8_t> src(gray, gray + size_t(width) * height);
-    constexpr double kStrength = 0.75;
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            int sum = 0;
-            for (int dy = -1; dy <= 1; ++dy) {
-                const int yy = std::min(height - 1, std::max(0, y + dy));
-                for (int dx = -1; dx <= 1; ++dx) {
-                    const int xx = std::min(width - 1, std::max(0, x + dx));
-                    sum += src[size_t(yy) * width + xx];
-                }
-            }
-            const double blurred = double(sum) / 9.0;
-            const double orig = src[size_t(y) * width + x];
-            double v = orig + kStrength * (orig - blurred);
-            if (v < 0.0) v = 0.0;
-            else if (v > 255.0) v = 255.0;
-            gray[size_t(y) * width + x] = uint8_t(v + 0.5);
-        }
-    }
-}
-
-uint8_t OtsuThreshold(const uint8_t* gray, size_t n) {
-    if (n == 0) return 0;
-    uint64_t hist[256] = {};
-    for (size_t i = 0; i < n; ++i) ++hist[gray[i]];
-    uint64_t sum = 0;
-    for (int i = 0; i < 256; ++i) sum += uint64_t(i) * hist[i];
-    uint64_t sumB = 0, wB = 0;
-    double maxVar = -1.0;
-    int best = 0;
-    for (int t = 0; t < 256; ++t) {
-        wB += hist[t];
-        if (wB == 0) continue;
-        const uint64_t wF = uint64_t(n) - wB;
-        if (wF == 0) break;
-        sumB += uint64_t(t) * hist[t];
-        const double mB = double(sumB) / double(wB);
-        const double mF = double(sum - sumB) / double(wF);
-        const double var = double(wB) * double(wF) * (mB - mF) * (mB - mF);
-        if (var > maxVar) { maxVar = var; best = t; }
-    }
-    return uint8_t(best);
-}
-
 } // namespace
 
 Snapshot MakeSnapshot(const void* pixels, int width, int height, int channels) {
@@ -283,17 +233,6 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
             }
             grayPtr = workGray.data();
         }
-
-        // D1a: sharpen + binarize the work gray before the engine sees it.
-        // No downscale happened -> grayPtr still aliases the input snapshot,
-        // so materialize a mutable copy first; dimensions never change.
-        if (workGray.empty()) {
-            workGray.assign(image.gray.begin(), image.gray.end());
-            grayPtr = workGray.data();
-        }
-        UnsharpGray(workGray.data(), workWidth, workHeight);
-        const uint8_t otsu = OtsuThreshold(workGray.data(), workGray.size());
-        for (auto& px : workGray) px = (px > otsu) ? uint8_t(255) : uint8_t(0);
 
         // Build a SoftwareBitmap from the gray buffer (exact-size work plane only;
         // an earlier draft allocated a second unused buffer of gray.size() bytes here)
