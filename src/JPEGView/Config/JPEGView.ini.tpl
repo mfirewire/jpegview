@@ -30,7 +30,7 @@ FilesProcessedByWIC=*.wdp;*.mdp;*.hdp;*.jxr;*.dds
 
 ; File endings of camera RAW files to be searched for embedded JPEG thumb images to display
 ; Reading just these embedded JPEGs is much faster than decoding the RAW using WIC
-FileEndingsRAW=*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw
+FileEndingsRAW=*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.srf;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw
 
 ; Set behavior for opening RAW files listed in FileEndingsRAW
 ; 0: open embedded thumbnail

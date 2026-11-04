@@ -1325,8 +1325,8 @@ struct TiffGateIFD {
 
 class TiffGateReader {
 public:
-	TiffGateReader(HANDLE hFile, unsigned long long fileSize, bool little, bool isKdc = false)
-		: m_hFile(hFile), m_fileSize(fileSize), m_little(little), m_isKdc(isKdc) {}
+	TiffGateReader(HANDLE hFile, unsigned long long fileSize, bool little, bool isKdc = false, bool isSrf = false)
+		: m_hFile(hFile), m_fileSize(fileSize), m_little(little), m_isKdc(isKdc), m_isSrf(isSrf) {}
 
 	// Seek-read exactly n bytes. Fails closed on any short read, so a
 	// truncated file can never yield a half-read value that looks valid.
@@ -1594,8 +1594,17 @@ public:
 			// dimension/sample/bits caps still apply, and LibRaw's own
 			// pixels/8 check in RAWWrapper remains as a backstop, so a
 			// truncated KDC fails at decode rather than at the gate.
+			// SRF exemption: Sony SRF tags are nominal, not the data
+			// layout (DSC-F828: 3360x2460 declares 43,394,400 bytes at
+			// 3 samples x 14 bits, but the actual strip is 16,531,200
+			// bytes = pixels x 2, single-channel 16-bit-aligned sensor
+			// data; LibRaw's Sony parser owns the layout), so the
+			// declared-bytes bound false-rejects every SRF. Only the
+			// declared-bytes bound is skipped for .srf; the
+			// dimension/sample/bits caps and the pixels/8 floor below
+			// still apply.
 			unsigned long long declaredBytes = declaredPixels * samples * info.bits / 8;
-			if (!m_isKdc && declaredBytes > m_fileSize) {
+			if (!m_isKdc && !m_isSrf && declaredBytes > m_fileSize) {
 				return false;
 			}
 			// F-H06: the pixels/8 floor applies even for .kdc. It is very
@@ -1768,6 +1777,7 @@ private:
 	unsigned long long m_fileSize;
 	bool m_little;
 	bool m_isKdc;
+	bool m_isSrf;
 };
 
 static bool IsPlausibleRawFile(LPCTSTR fileName) {
@@ -1815,10 +1825,11 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 		return false; // claims to be TIFF but has no IFD
 	}
 
-	// KDC signal: Kodak DCS files are plain MM TIFFs, so the extension
+	// KDC/SRF signal: Kodak DCS files are plain MM TIFFs, so the extension
 	// (basename dot only, as in Helpers::GetImageFormat) is the only
-	// reliable marker for the wrapper exemption in CheckIFD.
+	// reliable marker for the wrapper/nominal-tags exemptions in CheckIFD.
 	bool isKdc = false;
+	bool isSrf = false;
 	{
 		LPCTSTR base = _tcsrchr(fileName, _T('\\'));
 		LPCTSTR baseAlt = _tcsrchr(fileName, _T('/'));
@@ -1826,8 +1837,9 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 		base = (base == NULL) ? fileName : (base + 1);
 		LPCTSTR dot = _tcsrchr(base, _T('.'));
 		isKdc = (dot != NULL && _tcsicmp(dot + 1, _T("kdc")) == 0);
+		isSrf = (dot != NULL && _tcsicmp(dot + 1, _T("srf")) == 0);
 	}
-	TiffGateReader reader(hFile, fileSize, little, isKdc);
+	TiffGateReader reader(hFile, fileSize, little, isKdc, isSrf);
 	bool ok = reader.CheckIFDTree(ifdOff, 0);
 	::CloseHandle(hFile);
 	return ok;

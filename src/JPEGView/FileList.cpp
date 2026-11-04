@@ -141,10 +141,10 @@ static const TCHAR* csFileEndingsInternal[cnNumEndingsInternal] = {_T("jpg"), _T
 	_T("tif"), _T("tiff"), _T("gif"), _T("webp"), _T("jxl"), _T("avif"), _T("heif"), _T("heic"), _T("hif"), _T("tga"), _T("qoi"), _T("psd"), _T("psb"), _T("ppm"), 
 	_T("ico"), _T("wmf"), _T("emf") };
 // supported camera RAW formats
-static const TCHAR* csFileEndingsRAW = _T("*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw");
+static const TCHAR* csFileEndingsRAW = _T("*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.srf;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw");
 
 
-static const int MAX_ENDINGS = 64; // 23 internal + 5 WIC + 24 RAW = 52
+static const int MAX_ENDINGS = 64; // 23 internal + 5 WIC + 25 RAW = 53
 static int nNumEndings;
 static LPCTSTR* sFileEndings;
 
