@@ -24,6 +24,8 @@
 #include "WEBPWrapper.h"
 #include "QOIWrapper.h"
 #include "PPMWrapper.h"
+#include "HDRWrapper.h"
+#include "PBMWrapper.h"
 #include "PSDWrapper.h"
 #include "MaxImageDef.h"
 
@@ -427,6 +429,22 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 			DeleteCachedJxlDecoder();
 			DeleteCachedAvifDecoder();
 			ProcessReadPPMRequest(&rq);
+			break;
+		case IF_HDR:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadHDRRequest(&rq);
+			break;
+		case IF_PBM:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadPBMRequest(&rq);
 			break;
 		case IF_WIC:
 			DeleteCachedGDIBitmap();
@@ -1271,6 +1289,82 @@ void CImageLoadThread::ProcessReadPPMRequest(CRequest* request) {
 	::CloseHandle(hFile);
 	delete[] pBuffer;
 }
+void CImageLoadThread::ProcessReadHDRRequest(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI/PPM: 300 MB Win64, 50 MB Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		pBuffer = new(std::nothrow) char[nFileSize];
+		if (pBuffer == NULL) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = HDRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_HDR, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
+	delete[] pBuffer;
+}
+
+void CImageLoadThread::ProcessReadPBMRequest(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI/PPM: 300 MB Win64, 50 MB Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		pBuffer = new(std::nothrow) char[nFileSize];
+		if (pBuffer == NULL) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = PBMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_PBM, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
+	delete[] pBuffer;
+}
+
 
 // Decoder-independent RAW gate. Both libraw and dcraw_mod allocate and read the
 // image according to the dimensions the file declares, and neither checks those
@@ -1449,7 +1543,7 @@ public:
 	// itself is malformed (truncated, unreadable, absurd SubIFD count).
 	// Tag values that cannot be read are left missing; CheckIFD decides
 	// what a missing value means for each branch.
-	bool ReadIFD(unsigned long long ifdOff, TiffGateIFD& info) const {
+	bool ReadIFD(unsigned long long ifdOff, TiffGateIFD& info, unsigned long long& nextIFD) const {
 		unsigned char countBuf[2];
 		if (!ReadAt(ifdOff, countBuf, 2)) {
 			return false;
@@ -1544,6 +1638,16 @@ public:
 					break;
 				default: break;
 			}
+		}
+		// F-01: read the next-IFD pointer (4 bytes after the entries).
+		// dcraw_mod walks this chain, so the gate must too, or an IFD0
+		// that is small and legal can hide an absurd chained IFD1.
+		// A truncated file that ends before the pointer has no chain
+		// to hide (dcraw stops there as well), so treat it as 0.
+		nextIFD = 0;
+		unsigned char nextBuf[4];
+		if (ReadAt(ifdOff + 2 + entriesSize, nextBuf, 4)) {
+			nextIFD = Rd32(nextBuf);
 		}
 		return true;
 	}
@@ -1704,32 +1808,46 @@ public:
 	// crafted TIFF can force ~1,049,601 nodes (1024 SubIFDs each pointing
 	// at an IFD with 1024 more). A shared offset is walked once; exceeding
 	// the cap fails the gate (fail closed), it never crashes.
+	// F-01: the next-IFD chain is walked too (no depth limit for the
+	// chain; the cap and visited set bound it), because dcraw_mod
+	// follows the chain and an absurd chained IFD must not slip past.
 	bool CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out, std::vector<unsigned long long>& visited) const {
-		for (size_t i = 0; i < visited.size(); ++i) {
-			if (visited[i] == ifdOff) {
-				return true; // shared SubIFD: already walked, do not walk again
+		// F-01: walk the next-IFD chain as well as the SubIFD tree.
+		// dcraw_mod follows the chain (parse_tiff loops on the next
+		// pointer), so a chain IFD that declares absurd dimensions
+		// would otherwise bypass the gate. The chain is walked
+		// iteratively with no depth limit (a multi-page TIFF can
+		// chain many IFDs); the 4096-node cap and the visited set
+		// bound it. SubIFD nesting keeps the depth <= 2 limit.
+		unsigned long long cur = ifdOff;
+		while (cur != 0) {
+			for (size_t i = 0; i < visited.size(); ++i) {
+				if (visited[i] == cur) {
+					return true; // shared SubIFD / chain link already walked
+				}
 			}
-		}
-		if (out.size() >= 4096) {
-			return false;
-		}
-		visited.push_back(ifdOff);
-		TiffGateIFD info;
-		if (!ReadIFD(ifdOff, info)) {
-			return false;
-		}
-		out.push_back(info);
-		if (depth >= 2) {
-			return true;
-		}
-		for (size_t i = 0; i < info.subIFDs.size(); ++i) {
-			unsigned long long sub = info.subIFDs[i];
-			if (sub == 0) {
-				continue; // 0 means "no SubIFD" for this entry
-			}
-			if (!CollectIFDTree(sub, depth + 1, out, visited)) {
+			if (out.size() >= 4096) {
 				return false;
 			}
+			visited.push_back(cur);
+			TiffGateIFD info;
+			unsigned long long nextIFD = 0;
+			if (!ReadIFD(cur, info, nextIFD)) {
+				return false;
+			}
+			out.push_back(info);
+			if (depth < 2) {
+				for (size_t i = 0; i < info.subIFDs.size(); ++i) {
+					unsigned long long sub = info.subIFDs[i];
+					if (sub == 0) {
+						continue; // 0 means "no SubIFD" for this entry
+					}
+					if (!CollectIFDTree(sub, depth + 1, out, visited)) {
+						return false;
+					}
+				}
+			}
+			cur = nextIFD;
 		}
 		return true;
 	}

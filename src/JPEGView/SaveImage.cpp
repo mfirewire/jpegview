@@ -58,7 +58,9 @@ static uint8* FindFirstJPEGMarker(void* pJPEGStream, int nStreamLength) {
 	do {
 		if (pStream[nIndex] == 0xFF) {
 			// block header found, skip padding bytes
-			while (pStream[nIndex] == 0xFF && nIndex < nStreamLength) nIndex++;
+			// ST-03: bound-check first: the old order read pStream[nIndex]
+			// one past the end when the padding ran to the stream tail.
+			while (nIndex < nStreamLength && pStream[nIndex] == 0xFF) nIndex++;
 			break;
 		}
 		else {
@@ -66,7 +68,9 @@ static uint8* FindFirstJPEGMarker(void* pJPEGStream, int nStreamLength) {
 		}
 	} while (nIndex < nStreamLength);
 
-	if (pStream[nIndex] != 0) {
+	// ST-03: nIndex may have reached nStreamLength (padding to the tail);
+	// do not read past the end to test for a marker.
+	if (nIndex < nStreamLength && pStream[nIndex] != 0) {
 		return &(pStream[nIndex - 1]); // place on marker start
 	}
 	else {

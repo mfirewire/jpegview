@@ -426,41 +426,50 @@ static const TCHAR* SHOWN_REJECTED_KEY = _T("ShownRejectedShortcuts");
 static const TCHAR* SHOWN_REJECTED_FILE = _T("RejectedShortcutsShown.txt");
 
 static CString ReadShownRejectedShortcuts() {
-	CString sIni(CSettingsProvider::This().GetUserINIFileName());
-	if (sIni.IsEmpty()) {
-		CString sFile = CString(Helpers::JPEGViewAppDataPath()) + SHOWN_REJECTED_FILE;
-		FILE* f = _tfopen(sFile, _T("r"));
-		if (f == NULL) {
-			return CString();
-		}
-		TCHAR szBuffer[64];
-		CString sValue;
-		if (_fgetts(szBuffer, 64, f) != NULL) {
-			sValue = szBuffer;
-			sValue.Trim();
-		}
-		fclose(f);
-		return sValue;
-	}
+	// O-02: the marker is per-user UI state, so it is always read from
+	// the AppData INI, not from GetUserINIFileName(), which returns the
+	// shared EXE-dir INI when StoreToEXEPath is true. The old
+	// if (sIni.IsEmpty()) branch was dead code: the INI name is never
+	// empty, so the text-file fallback below it never ran.
+	CString sIni = CString(Helpers::JPEGViewAppDataPath()) + CSettingsProvider::This().GetINIFileTitle();
 	TCHAR szBuffer[64];
 	::GetPrivateProfileString(SHOWN_REJECTED_SECTION, SHOWN_REJECTED_KEY, _T(""), szBuffer, 64, sIni);
-	return CString(szBuffer);
+	CString sValue(szBuffer);
+	if (!sValue.IsEmpty()) {
+		return sValue;
+	}
+	// Legacy fallback: a marker previously written as a plain text file.
+	CString sFile = CString(Helpers::JPEGViewAppDataPath()) + SHOWN_REJECTED_FILE;
+	FILE* f = _tfopen(sFile, _T("r"));
+	if (f == NULL) {
+		return CString();
+	}
+	if (_fgetts(szBuffer, 64, f) != NULL) {
+		sValue = szBuffer;
+		sValue.Trim();
+	}
+	fclose(f);
+	return sValue;
 }
 
 static void StoreShownRejectedShortcuts(const CString& sValue) {
-	CString sIni(CSettingsProvider::This().GetUserINIFileName());
-	if (sIni.IsEmpty()) {
+	// O-02: write the marker to the AppData INI (see Read...). Under
+	// Program Files with a non-admin user the old EXE-dir path silently
+	// failed and the conflict dialog reappeared on every start.
+	CString sIni = CString(Helpers::JPEGViewAppDataPath()) + CSettingsProvider::This().GetINIFileTitle();
+	// An empty value deletes the key, so a resolved conflict leaves no
+	// stale marker behind.
+	BOOL bOk = ::WritePrivateProfileString(SHOWN_REJECTED_SECTION, SHOWN_REJECTED_KEY, sValue.IsEmpty() ? NULL : (LPCTSTR)sValue, sIni);
+	if (!bOk) {
+		// AppData INI unwritable (should not happen): fall back to a
+		// plain text marker so the dialog still shows only once.
 		CString sFile = CString(Helpers::JPEGViewAppDataPath()) + SHOWN_REJECTED_FILE;
 		FILE* f = _tfopen(sFile, _T("w"));
 		if (f != NULL) {
 			_fputts(sValue, f);
 			fclose(f);
 		}
-		return;
 	}
-	// An empty value deletes the key, so a resolved conflict leaves no
-	// stale marker behind.
-	::WritePrivateProfileString(SHOWN_REJECTED_SECTION, SHOWN_REJECTED_KEY, sValue.IsEmpty() ? NULL : (LPCTSTR)sValue, sIni);
 }
 
 // Show the collected rejections once, and only when at least one of them

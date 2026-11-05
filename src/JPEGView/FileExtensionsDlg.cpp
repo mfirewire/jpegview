@@ -293,6 +293,8 @@ void CFileExtensionsDlg::FillFileExtensionsList() {
 	InsertExtension(_T("*.qoi"), FormatHint(CNLS::GetString(_T("%s images")), _T("Quite OK Image")));
 	InsertExtension(_T("*.psd;*.psb"), FormatHint(CNLS::GetString(_T("%s images")), _T("Photoshop Document")));
 	InsertExtension(_T("*.ppm;*.pgm;*.pnm"), FormatHint(CNLS::GetString(_T("%s images")), _T("PPM")));
+	InsertExtension(_T("*.hdr;*.rgbe"), FormatHint(CNLS::GetString(_T("%s images")), _T("HDR")));
+	InsertExtension(_T("*.pbm"), FormatHint(CNLS::GetString(_T("%s images")), _T("PBM")));
 	InsertExtension(_T("*.ico"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows icon")));
 	InsertExtension(_T("*.wmf;*.emf"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows metafile")));
 	InsertExtensions(CSettingsProvider::This().FilesProcessedByWIC(), CNLS::GetString(_T("%s images (processed by Window Imaging Component - WIC)")));

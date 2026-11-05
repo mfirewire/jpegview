@@ -119,6 +119,8 @@ private:
 	void ProcessReadHEIFRequest(CRequest * request);
 	void ProcessReadQOIRequest(CRequest * request);
 	void ProcessReadPPMRequest(CRequest * request);
+	void ProcessReadHDRRequest(CRequest * request);
+	void ProcessReadPBMRequest(CRequest * request);
 	void ProcessReadPSDRequest(CRequest * request);
 	void ProcessReadRAWRequest(CRequest * request);
 	void ProcessReadGDIPlusRequest(CRequest * request, void* pEXIFData = NULL, __int64 nJPEGFileHash = 0);

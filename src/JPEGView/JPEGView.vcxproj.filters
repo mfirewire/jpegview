@@ -285,6 +285,12 @@
     <ClCompile Include="PPMWrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
+    <ClCompile Include="HDRWrapper.cpp">
+      <Filter>Source Files\Image Types</Filter>
+    </ClCompile>
+    <ClCompile Include="PBMWrapper.cpp">
+      <Filter>Source Files\Image Types</Filter>
+    </ClCompile>
     <ClCompile Include="ICCProfileTransform.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -558,6 +564,12 @@
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="PPMWrapper.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
+    <ClInclude Include="HDRWrapper.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
+    <ClInclude Include="PBMWrapper.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="ICCProfileTransform.h">

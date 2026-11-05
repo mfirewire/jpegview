@@ -52,6 +52,32 @@ CJPEGProvider::~CJPEGProvider(void) {
 	}
 }
 
+// E1: wait for a load request while pumping window messages, so the UI
+// does not freeze when a decode is very slow or stuck. MsgWaitForMultipleObjects
+// returns when the event is set or when there is input to dispatch; the
+// messages are dispatched so the window repaints and stays responsive.
+// A stuck decode still has to finish (the decoders offer no cancel point),
+// so a hard cancel is out of scope; the pump at least lets the user
+// navigate away or close the window instead of facing a frozen UI.
+// (WorkThread::ProcessAndWait keeps its INFINITE wait on purpose: it runs
+// on the load thread, not the UI thread, and the sub-request result is
+// required before the load can proceed.)
+static void WaitForRequestWithMessagePump(HANDLE hEvent) {
+	for (;;) {
+		DWORD dwRet = ::MsgWaitForMultipleObjects(1, &hEvent, FALSE, INFINITE, QS_ALLINPUT);
+		if (dwRet == WAIT_OBJECT_0) {
+			return;
+		}
+		if (dwRet == WAIT_OBJECT_0 + 1) {
+			MSG msg;
+			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+		}
+	}
+}
+
 CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirection eDirection,
                                         LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams,
                                         bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW) {
@@ -83,7 +109,7 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 #ifdef DEBUG
 		::OutputDebugString(_T("Waiting for request: ")); ::OutputDebugString(pRequest->FileName); ::OutputDebugString(_T("\n"));
 #endif
-		::WaitForSingleObject(pRequest->EventFinished, INFINITE);
+		WaitForRequestWithMessagePump(pRequest->EventFinished);
 		GetLoadedImageFromWorkThread(pRequest);
 	} else {
 		CJPEGImage* pImage = pRequest->Image;
@@ -228,7 +254,7 @@ CJPEGProvider::CImageRequest* CJPEGProvider::FindRequest(LPCTSTR strFileName, in
 
 CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
 	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams, forceFullSizeRAW);
-	::WaitForSingleObject(pRequest->EventFinished, INFINITE);
+	WaitForRequestWithMessagePump(pRequest->EventFinished);
 	GetLoadedImageFromWorkThread(pRequest);
 	return pRequest;
 }

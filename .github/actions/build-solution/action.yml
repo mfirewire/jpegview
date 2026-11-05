@@ -37,8 +37,11 @@ runs:
 
     - name: Replace resource vars
       if: ${{ inputs.patch-version }}
-      # 版本号打标只是外观修饰，sed 在 PowerShell 里的转义很脆，失败不应阻断构建
-      continue-on-error: true
+      # O-03: the stamp used to fail silently (continue-on-error + a
+      # Select-String that only checked the line exists, not the stamp),
+      # so a broken regex shipped unstamped dev builds. The step now
+      # fails loudly if the stamp is not applied; fix the regex instead
+      # of re-adding continue-on-error.
       shell: powershell
       # Replace the version information for auto-GH builds so it's clear to me and others that this was not a formal release:
       # * replaces in JPEGView main window and About dialog
@@ -49,11 +52,13 @@ runs:
         $GIT_SHORT_HASH=$(git.exe rev-parse --short "${{ github.sha }}")
         $APPEND_VER_STR="`(~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH`)"
         # " doesn't have to be escaped in linux but needs to be escaped in windows powershell with `, powershell also needs that extra \\\\ when \\ will do in linux
-        sed.exe -i -r -e "s/(#define JPEGVIEW_VERSION `"`[0-9, ]+)(\\0`")/\1 $APPEND_VER_STR\2/g" -e "s/(#define JPEGVIEW_TITLE `"`JPEGVIEW)(\`")/\1 $APPEND_VER_STR\2/g" src/JPEGView/resource.h
+        sed.exe -i -r -e "s/(#define JPEGVIEW_VERSION `"`[0-9., -]+)(\\0`")/\1 $APPEND_VER_STR\2/g" -e "s/(#define JPEGVIEW_TITLE `"`JPEGVIEW)(\`")/\1 $APPEND_VER_STR\2/g" src/JPEGView/resource.h
         sed.exe -i -r -e "s/(\<Product.*ApplicationName\))/\1 $APPEND_VER_STR/g" src/JPEGView.Setup/Product.wxs
-        # see output
-        Select-String -Path src/JPEGView/resource.h -Pattern "JPEGVIEW_"
-        Select-String -Path src/JPEGView.Setup/Product.wxs -Pattern "<Product"
+        # O-03: verify the stamp actually landed (the old Select-String
+        # only checked the lines exist, so a non-matching sed passed
+        # silently). Fail the step if either file is unstamped.
+        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
+        if (-not (Select-String -Path src/JPEGView.Setup/Product.wxs -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView.Setup/Product.wxs" }
 
 
     - name: Build Solution

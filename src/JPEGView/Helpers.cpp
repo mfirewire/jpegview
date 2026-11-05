@@ -881,20 +881,28 @@ LPCTSTR ConvertTransitionEffectToString(ETransitionEffect effect) {
 }
 
 static bool IsInFileEndingList(LPCTSTR sFileEndings, LPCTSTR sEnding) {
-	const int BUFFER_SIZE = 256;
-	TCHAR buffer[BUFFER_SIZE];
-	_tcsncpy_s(buffer, BUFFER_SIZE, sFileEndings, _TRUNCATE);
-	LPTSTR sStart = buffer, sCurrent = buffer;
-	while (*sCurrent != 0) {
+	// F-12: parse the ';'-separated list in place instead of copying
+	// it into a fixed 256-char buffer, which silently truncated
+	// longer lists (user-extended FileEndingsRAW / FilesProcessedByWIC
+	// or repeated AddTemporaryRAWFileEnding) and dropped the extensions
+	// past the cut. The comparison is unchanged: list tokens are
+	// "*.ext" and sEnding points just past the '.' in the file name,
+	// so sStart+1 (".ext") is compared against sEnding-1 (".ext").
+	LPCTSTR sStart = sFileEndings;
+	while (*sStart != 0) {
+		LPCTSTR sCurrent = sStart;
 		while (*sCurrent != 0 && *sCurrent != _T(';')) {
 			sCurrent++;
 		}
-		if (*sCurrent == _T(';')) {
-			*sCurrent = 0;
-			sCurrent++;
-		}
-		if (_tcsicmp(sStart + 1, sEnding - 1) == 0) {
+		// Token is [sStart, sCurrent); its ".ext" form has length
+		// (sCurrent - sStart) - 1 and must match sEnding-1 exactly.
+		size_t nTokenLen = (size_t)(sCurrent - sStart);
+		if (nTokenLen >= 1 && _tcslen(sEnding - 1) == nTokenLen - 1 &&
+			_tcsnicmp(sStart + 1, sEnding - 1, nTokenLen - 1) == 0) {
 			return true;
+		}
+		if (*sCurrent == _T(';')) {
+			sCurrent++;
 		}
 		sStart = sCurrent;
 	}
@@ -934,6 +942,10 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_QOI;
 		} else if (_tcsicmp(sEnding, _T("PPM")) == 0 || _tcsicmp(sEnding, _T("PGM")) == 0 || _tcsicmp(sEnding, _T("PNM")) == 0) {
 			return IF_PPM;
+		} else if (_tcsicmp(sEnding, _T("HDR")) == 0 || _tcsicmp(sEnding, _T("RGBE")) == 0) {
+			return IF_HDR;
+		} else if (_tcsicmp(sEnding, _T("PBM")) == 0) {
+			return IF_PBM;
 		} else if (_tcsicmp(sEnding, _T("PSD")) == 0 || _tcsicmp(sEnding, _T("PSB")) == 0) {
 			return IF_PSD;
 		} else if (IsInFileEndingList(CSettingsProvider::This().FilesProcessedByWIC(), sEnding)) {

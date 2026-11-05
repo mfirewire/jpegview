@@ -1,8 +1,10 @@
 #include "stdafx.h"
 
 #include "PPMWrapper.h"
-// stb_image is vendored for PNM only. JPEG/PNG/BMP/TGA/GIF/HDR/PIC
-// are compiled out. PSD is deliberately NOT compiled out: stb_image
+// stb_image is vendored for PNM and HDR. JPEG/PNG/BMP/TGA/GIF/PIC
+// are compiled out. HDR is deliberately NOT compiled out (B-1): the
+// HDR decoder lives in this object and HDRWrapper.cpp calls it.
+// PSD is deliberately NOT compiled out: stb_image
 // v2.30 omits stbi__convert_format16 (and stbi__compute_y_16) when both
 // STBI_NO_PNG and STBI_NO_PSD are defined, yet stbi__pnm_load still
 // references convert_format16 for its 16-bit path, so defining both
@@ -27,7 +29,6 @@
 #define STBI_NO_BMP
 #define STBI_NO_TGA
 #define STBI_NO_GIF
-#define STBI_NO_HDR
 #define STBI_NO_PIC
 #include "stb/stb_image.h"
 #include "MaxImageDef.h"

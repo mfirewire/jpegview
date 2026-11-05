@@ -130,6 +130,8 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	// Now we move the file pointer to the pixel data
 	if (fseek(pFile, length, SEEK_CUR) != 0)
 	{
+		// F-13: the image buffer was already allocated above; free it.
+		delete[] pImageData;
 		fclose(pFile);
 		return NULL;
 	}
@@ -138,7 +140,14 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	byte palette[768];
 	if (isIndexed)
 	{  
-		fread(&palette, 768, 1, pFile);
+		// F-13: a short palette read leaves the palette uninitialised;
+		// fail the file instead of indexing into garbage.
+		if (fread(&palette, 768, 1, pFile) != 1)
+		{
+			delete[] pImageData;
+			fclose(pFile);
+			return NULL;
+		}
 	}
 
 	byte* pImage = pImageData;
@@ -152,7 +161,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 			for(int x = 0; x < width; x++)
 			{
 				byte grey;
-				fread(&grey, sizeof(byte), 1, pFile);
+				// F-13: short read -> truncated file, fail cleanly.
+				if (fread(&grey, sizeof(byte), 1, pFile) != 1)
+				{
+					delete[] pImageData;
+					fclose(pFile);
+					return NULL;
+				}
 				*pLine++ = grey;
 				*pLine++ = grey;
 				*pLine++ = grey;
@@ -168,7 +183,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 			for(int x = 0; x < width; x++)
 			{
 				byte index;
-				fread(&index, sizeof(byte), 1, pFile);
+				// F-13: short read -> truncated file, fail cleanly.
+				if (fread(&index, sizeof(byte), 1, pFile) != 1)
+				{
+					delete[] pImageData;
+					fclose(pFile);
+					return NULL;
+				}
 				*pLine++ = palette[index*3];
 				*pLine++ = palette[index*3 + 1];
 				*pLine++ = palette[index*3 + 2];
@@ -189,7 +210,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 			// Load in all the pixel data line by line
 			for(int y = 0; y < height; y++)
 			{
-				fread(pImage, stride, 1, pFile);
+				// F-13: short read -> truncated file, fail cleanly.
+				if (fread(pImage, stride, 1, pFile) != 1)
+				{
+					delete[] pImageData;
+					fclose(pFile);
+					return NULL;
+				}
 				pImage += targetStride;
 			}
 		}
@@ -211,7 +238,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 				for(int i = 0; i < width; i++)
 				{
 					// Read in the current pixel
-					fread(&pixel, sizeof(unsigned short), 1, pFile);
+					// F-13: short read -> truncated file, fail cleanly.
+					if (fread(&pixel, sizeof(unsigned short), 1, pFile) != 1)
+					{
+						delete[] pImageData;
+						fclose(pFile);
+						return NULL;
+					}
 				
 					// To convert a 16-bit pixel into an R, G, B, we need to
 					// do some masking and such to isolate each color value.
@@ -268,7 +301,14 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 		while(i < numPixels)
 		{
 			// Read in the current color count + 1
-			fread(&rleID, sizeof(byte), 1, pFile);
+			// F-13: short read -> truncated file, fail cleanly (and do
+			// not spin on EOF with a stale rleID).
+			if (fread(&rleID, sizeof(byte), 1, pFile) != 1)
+			{
+				delete[] pImageData;
+				fclose(pFile);
+				return NULL;
+			}
 			
 			// Check if we don't have an encoded string of colors
 			bool useSameColor;
@@ -286,7 +326,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 				useSameColor = true;
 
 				// Read in the current color, which is the same for a while
-				fread(pColors, sizeof(byte) * channels, 1, pFile);
+				// F-13: short read -> truncated file, fail cleanly.
+				if (fread(pColors, sizeof(byte) * channels, 1, pFile) != 1)
+				{
+					delete[] pImageData;
+					fclose(pFile);
+					return NULL;
+				}
 			}
 
 			// Go through and read all the unique colors found
@@ -295,7 +341,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 				if (!useSameColor)
 				{
 					// Read in the current color
-					fread(pColors, sizeof(byte) * channels, 1, pFile);
+					// F-13: short read -> truncated file, fail cleanly.
+					if (fread(pColors, sizeof(byte) * channels, 1, pFile) != 1)
+					{
+						delete[] pImageData;
+						fclose(pFile);
+						return NULL;
+					}
 				}
 
 				if(bits == 32)

@@ -458,6 +458,9 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".ico" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".wmf" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".emf" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".hdr" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".rgbe" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pbm" Value="" Type="string" />
 						<!-- csFileEndingsRAW -->
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pef" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".dng" Value="" Type="string" />
