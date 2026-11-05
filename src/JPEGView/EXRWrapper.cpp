@@ -1,5 +1,16 @@
 #include "stdafx.h"
 
+// stdafx.h 经 ATL/windows.h 引入 max/min 宏，tinyexr.h 里有
+// std::numeric_limits<int>::max() / std::max(...)，会被宏展开成语法错误
+// （C2589）。本项目用预编译头，#define NOMINMAX 写在 stdafx.h 之前不生效，
+// 所以按 OcrEngine.cpp 的成例在这里直接 undef。
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
 #include "EXRWrapper.h"
 // tinyexr, vendored under tinyexr/ (upstream syoyo/tinyexr master
 // snapshot, 2026-11-06; sha256 of tinyexr.h:
