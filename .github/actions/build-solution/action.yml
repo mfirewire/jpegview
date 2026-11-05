@@ -47,17 +47,20 @@ runs:
       # * replaces in JPEGView main window and About dialog
       # * replaces in Setup's initial startup screen
       run: |
-        # NOTE: sed uses '|' delimiters, not '/': $APPEND_VER_STR holds
-        # 'owner/sha', whose '/' terminates an s/// command (the old form
-        # errored with "unknown option to 's'"). The title pattern is
-        # "JPEGView", matching the file (the old "JPEGVIEW" never matched).
-        # needed on older runners (or when testing locally): $env:Path += ";C:\Program Files\Git\usr\bin"
-        Get-Command sed.exe | Format-List
+        # Pure PowerShell regex, no sed: passing a sed expression through
+        # PowerShell's native-command quoting mangled it (the sed form failed
+        # on the runner, and its '/' in 'owner/sha' also broke s///).
+        # The title pattern is "JPEGView", matching the file (the old
+        # "JPEGVIEW" never matched).
         $GIT_SHORT_HASH=$(git.exe rev-parse --short "${{ github.sha }}")
-        $APPEND_VER_STR="`(~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH`)"
-        # " doesn't have to be escaped in linux but needs to be escaped in windows powershell with `, powershell also needs that extra \\\\ when \\ will do in linux
-        sed.exe -i -r -e "s|(#define JPEGVIEW_VERSION `"`[A-Za-z0-9., -]+)(\\0`")|\1 $APPEND_VER_STR\2|g" -e "s|(#define JPEGVIEW_TITLE `"`JPEGView)(\`")|\1 $APPEND_VER_STR\2|g" src/JPEGView/resource.h
-        sed.exe -i -r -e "s|(\<Product.*ApplicationName\))|\1 $APPEND_VER_STR|g" src/JPEGView.Setup/Product.wxs
+        $APPEND_VER_STR = " (~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH)"
+        $content = [System.IO.File]::ReadAllText("src/JPEGView/resource.h")
+        $content = [regex]::Replace($content, '(#define JPEGVIEW_VERSION ")([A-Za-z0-9., -]+)(\\0")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        $content = [regex]::Replace($content, '(#define JPEGVIEW_TITLE ")(JPEGView)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content)
+        $wxs = [System.IO.File]::ReadAllText("src/JPEGView.Setup/Product.wxs")
+        $wxs = [regex]::Replace($wxs, '(<Product.*ApplicationName\))', ('$1' + $APPEND_VER_STR))
+        [System.IO.File]::WriteAllText("src/JPEGView.Setup/Product.wxs", $wxs)
         # O-03: verify the stamp actually landed (the old Select-String
         # only checked the lines exist, so a non-matching sed passed
         # silently). Fail the step if either file is unstamped.

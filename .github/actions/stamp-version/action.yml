@@ -12,16 +12,20 @@ runs:
       if: ${{ github.ref_type == 'tag' }}
       # Tag builds are formal releases: the version is the tag itself, taken
       # as-is (with the leading 'v'), and no dev marker is appended.
-      # Fails loudly if the stamp does not land (O-03 lesson: a silent
-      # non-matching regex shipped unstamped builds).
-      # NOTE: sed uses '|' delimiters, not '/': the dev stamp value holds
-      # 'owner/sha', whose '/' would terminate an s/// command (this broke
-      # the old build-solution stamp; see O-03 follow-up).
+      # Pure PowerShell regex, no sed: passing a sed expression through
+      # PowerShell's native-command quoting mangled it (the sed form failed
+      # on the runner with "unterminated 's' command").
+      # Fails loudly if the stamp does not land (O-03 lesson).
       shell: powershell
       run: |
         $TAG_VER = "${{ github.ref_name }}"
-        sed.exe -i -r -e "s|(#define JPEGVIEW_VERSION `")[^`"]*(\\0`")|\1${TAG_VER}\2|g" src/JPEGView/resource.h
-        sed.exe -i -r -e "s|(VALUE `"FileVersion`", `")[^`"]*(`")|\1${TAG_VER}\2|g" -e "s|(VALUE `"ProductVersion`", `")[^`"]*(`")|\1${TAG_VER}\2|g" src/JPEGView/JPEGView.rc
+        $content = [System.IO.File]::ReadAllText("src/JPEGView/resource.h")
+        $content = [regex]::Replace($content, '(#define JPEGVIEW_VERSION ")[^"]*\\0"', ('$1' + $TAG_VER + '\0"'))
+        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content)
+        $rc = [System.IO.File]::ReadAllText("src/JPEGView/JPEGView.rc")
+        $rc = [regex]::Replace($rc, '(VALUE "FileVersion", ")[^"]*(")', ('$1' + $TAG_VER + '$2'))
+        $rc = [regex]::Replace($rc, '(VALUE "ProductVersion", ")[^"]*(")', ('$1' + $TAG_VER + '$2'))
+        [System.IO.File]::WriteAllText("src/JPEGView/JPEGView.rc", $rc)
         if (-not (Select-String -Path src/JPEGView/resource.h -Pattern ([regex]::Escape($TAG_VER)) -Quiet)) { throw "tag version stamp was not applied to src/JPEGView/resource.h" }
         if (-not (Select-String -Path src/JPEGView/JPEGView.rc -Pattern ([regex]::Escape($TAG_VER)) -Quiet)) { throw "tag version stamp was not applied to src/JPEGView/JPEGView.rc" }
         Write-Output "Stamped release version $TAG_VER"
@@ -34,7 +38,10 @@ runs:
       shell: powershell
       run: |
         $GIT_SHORT_HASH=$(git.exe rev-parse --short "${{ github.sha }}")
-        $APPEND_VER_STR="`(~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH`)"
-        sed.exe -i -r -e "s|(#define JPEGVIEW_VERSION `"`[A-Za-z0-9., -]+)(\\0`")|\1 $APPEND_VER_STR\2|g" -e "s|(#define JPEGVIEW_TITLE `"`JPEGView)(\`")|\1 $APPEND_VER_STR\2|g" src/JPEGView/resource.h
+        $APPEND_VER_STR = " (~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH)"
+        $content = [System.IO.File]::ReadAllText("src/JPEGView/resource.h")
+        $content = [regex]::Replace($content, '(#define JPEGVIEW_VERSION ")([A-Za-z0-9., -]+)(\\0")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        $content = [regex]::Replace($content, '(#define JPEGVIEW_TITLE ")(JPEGView)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content)
         if (-not (Select-String -Path src/JPEGView/resource.h -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
         Write-Output "Stamped dev version $APPEND_VER_STR"
