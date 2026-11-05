@@ -47,13 +47,17 @@ runs:
       # * replaces in JPEGView main window and About dialog
       # * replaces in Setup's initial startup screen
       run: |
+        # NOTE: sed uses '|' delimiters, not '/': $APPEND_VER_STR holds
+        # 'owner/sha', whose '/' terminates an s/// command (the old form
+        # errored with "unknown option to 's'"). The title pattern is
+        # "JPEGView", matching the file (the old "JPEGVIEW" never matched).
         # needed on older runners (or when testing locally): $env:Path += ";C:\Program Files\Git\usr\bin"
         Get-Command sed.exe | Format-List
         $GIT_SHORT_HASH=$(git.exe rev-parse --short "${{ github.sha }}")
         $APPEND_VER_STR="`(~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH`)"
         # " doesn't have to be escaped in linux but needs to be escaped in windows powershell with `, powershell also needs that extra \\\\ when \\ will do in linux
-        sed.exe -i -r -e "s/(#define JPEGVIEW_VERSION `"`[0-9., -]+)(\\0`")/\1 $APPEND_VER_STR\2/g" -e "s/(#define JPEGVIEW_TITLE `"`JPEGVIEW)(\`")/\1 $APPEND_VER_STR\2/g" src/JPEGView/resource.h
-        sed.exe -i -r -e "s/(\<Product.*ApplicationName\))/\1 $APPEND_VER_STR/g" src/JPEGView.Setup/Product.wxs
+        sed.exe -i -r -e "s|(#define JPEGVIEW_VERSION `"`[A-Za-z0-9., -]+)(\\0`")|\1 $APPEND_VER_STR\2|g" -e "s|(#define JPEGVIEW_TITLE `"`JPEGView)(\`")|\1 $APPEND_VER_STR\2|g" src/JPEGView/resource.h
+        sed.exe -i -r -e "s|(\<Product.*ApplicationName\))|\1 $APPEND_VER_STR|g" src/JPEGView.Setup/Product.wxs
         # O-03: verify the stamp actually landed (the old Select-String
         # only checked the lines exist, so a non-matching sed passed
         # silently). Fail the step if either file is unstamped.

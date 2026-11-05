@@ -134,6 +134,7 @@ jobs:
     - uses: ./.github/actions/setup-wix
 
     - uses: ./.github/actions/wtl-submodule
+    - uses: ./.github/actions/stamp-version
 
     - name: Build Solution
       shell: cmd

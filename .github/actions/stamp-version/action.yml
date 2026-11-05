@@ -1,0 +1,40 @@
+name: Action - Stamp version from tag (or dev stamp)
+description: >
+  Stamp JPEGVIEW_VERSION (and the .rc version strings) from the tag on tag
+  builds, so About shows the release tag and no manual bump commit is needed.
+  On non-tag builds, append the dev stamp instead, so a dev build stays
+  distinguishable from the release.
+
+runs:
+  using: composite
+  steps:
+    - name: Stamp release version from tag
+      if: ${{ github.ref_type == 'tag' }}
+      # Tag builds are formal releases: the version is the tag itself, taken
+      # as-is (with the leading 'v'), and no dev marker is appended.
+      # Fails loudly if the stamp does not land (O-03 lesson: a silent
+      # non-matching regex shipped unstamped builds).
+      # NOTE: sed uses '|' delimiters, not '/': the dev stamp value holds
+      # 'owner/sha', whose '/' would terminate an s/// command (this broke
+      # the old build-solution stamp; see O-03 follow-up).
+      shell: powershell
+      run: |
+        $TAG_VER = "${{ github.ref_name }}"
+        sed.exe -i -r -e "s|(#define JPEGVIEW_VERSION `")[^`"]*(\\0`")|\1${TAG_VER}\2|g" src/JPEGView/resource.h
+        sed.exe -i -r -e "s|(VALUE `"FileVersion`", `")[^`"]*(`")|\1${TAG_VER}\2|g" -e "s|(VALUE `"ProductVersion`", `")[^`"]*(`")|\1${TAG_VER}\2|g" src/JPEGView/JPEGView.rc
+        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern ([regex]::Escape($TAG_VER)) -Quiet)) { throw "tag version stamp was not applied to src/JPEGView/resource.h" }
+        if (-not (Select-String -Path src/JPEGView/JPEGView.rc -Pattern ([regex]::Escape($TAG_VER)) -Quiet)) { throw "tag version stamp was not applied to src/JPEGView/JPEGView.rc" }
+        Write-Output "Stamped release version $TAG_VER"
+
+    - name: Stamp dev version (non-tag build)
+      if: ${{ github.ref_type != 'tag' }}
+      # Non-tag builds fall back to the previous release version in source
+      # plus the short SHA, so they stay distinguishable from the release
+      # (same dev marker as the build-solution action).
+      shell: powershell
+      run: |
+        $GIT_SHORT_HASH=$(git.exe rev-parse --short "${{ github.sha }}")
+        $APPEND_VER_STR="`(~GHdevtest ${{ github.repository_owner }}/$GIT_SHORT_HASH`)"
+        sed.exe -i -r -e "s|(#define JPEGVIEW_VERSION `"`[A-Za-z0-9., -]+)(\\0`")|\1 $APPEND_VER_STR\2|g" -e "s|(#define JPEGVIEW_TITLE `"`JPEGView)(\`")|\1 $APPEND_VER_STR\2|g" src/JPEGView/resource.h
+        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
+        Write-Output "Stamped dev version $APPEND_VER_STR"
