@@ -26,6 +26,9 @@
 #include "PPMWrapper.h"
 #include "HDRWrapper.h"
 #include "PBMWrapper.h"
+#include "JP2Wrapper.h"
+#include "EXRWrapper.h"
+#include "SVGWrapper.h"
 #include "PSDWrapper.h"
 #include "MaxImageDef.h"
 
@@ -48,6 +51,169 @@ private:
 };
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////
+// E6/E12: one memo for bad-file and TIFF-probe conclusions, shared by both
+// load threads. A RAW/TIFF that fails decoding is decoded 3-5 times before it
+// finally fails (LibRaw -> dcraw_mod -> thumbnail; TIFF probe + cleanup +
+// decode), and again on every revisit. The memo records the conclusion once
+// and later loads skip straight to the failure. It is keyed by path + file
+// size + last-write time, so an externally edited file (same name, different
+// content) is never served a stale verdict, and releasing a file for reload
+// (CImageLoadThread::ReleaseFile) drops its entries. OOM is never memoized:
+// it is transient, and a retry after freeing memory must re-decode.
+/////////////////////////////////////////////////////////////////////////////////////////////
+struct LoadMemoEntry {
+	CString sPath;
+	__int64 nSize;
+	FILETIME ftWrite;
+	bool bBad; // a previous load failed with a decode error (not OOM)
+	bool bProbeKnown; // TIFF 318/319 probe conclusion is known
+	bool bProbeNeedsSanitize; // probe said the TIFF needs 318/319 sanitizing
+};
+static const int kLoadMemoMaxEntries = 32;
+static std::vector<LoadMemoEntry> s_loadMemo;
+struct CLoadMemoLockHolder {
+	CRITICAL_SECTION cs;
+	CLoadMemoLockHolder() { ::InitializeCriticalSection(&cs); }
+	~CLoadMemoLockHolder() { ::DeleteCriticalSection(&cs); }
+};
+static CLoadMemoLockHolder& LoadMemoLock() { static CLoadMemoLockHolder lock; return lock; }
+
+// File identity for the memo: size + last-write time from one open.
+static bool GetFileIdentity(LPCTSTR sFileName, __int64& nSize, FILETIME& ftWrite) {
+	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	LARGE_INTEGER liSize;
+	bool bOk = ::GetFileSizeEx(hFile, &liSize) && ::GetFileTime(hFile, NULL, NULL, &ftWrite);
+	if (bOk) {
+		nSize = liSize.QuadPart;
+	}
+	::CloseHandle(hFile);
+	return bOk;
+}
+
+static bool LoadMemoLookup(LPCTSTR sFileName, __int64 nSize, const FILETIME& ftWrite, LoadMemoEntry& entryOut) {
+	Helpers::CAutoCriticalSection lock(LoadMemoLock().cs);
+	for (size_t i = 0; i < s_loadMemo.size(); i++) {
+		const LoadMemoEntry& e = s_loadMemo[i];
+		if (e.nSize == nSize && e.ftWrite.dwLowDateTime == ftWrite.dwLowDateTime &&
+			e.ftWrite.dwHighDateTime == ftWrite.dwHighDateTime && e.sPath.CompareNoCase(sFileName) == 0) {
+			entryOut = e;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void LoadMemoRecord(LPCTSTR sFileName, __int64 nSize, const FILETIME& ftWrite, bool bBad, bool bProbeKnown, bool bProbeNeedsSanitize) {
+	Helpers::CAutoCriticalSection lock(LoadMemoLock().cs);
+	for (size_t i = 0; i < s_loadMemo.size(); i++) {
+		LoadMemoEntry& e = s_loadMemo[i];
+		if (e.nSize == nSize && e.ftWrite.dwLowDateTime == ftWrite.dwLowDateTime &&
+			e.ftWrite.dwHighDateTime == ftWrite.dwHighDateTime && e.sPath.CompareNoCase(sFileName) == 0) {
+			if (bBad) e.bBad = true;
+			if (bProbeKnown) { e.bProbeKnown = true; e.bProbeNeedsSanitize = bProbeNeedsSanitize; }
+			return;
+		}
+	}
+	LoadMemoEntry e;
+	e.sPath = sFileName;
+	e.nSize = nSize;
+	e.ftWrite = ftWrite;
+	e.bBad = bBad;
+	e.bProbeKnown = bProbeKnown;
+	e.bProbeNeedsSanitize = bProbeNeedsSanitize;
+	s_loadMemo.push_back(e);
+	while (s_loadMemo.size() > (size_t)kLoadMemoMaxEntries) {
+		s_loadMemo.erase(s_loadMemo.begin());
+	}
+}
+
+void CImageLoadThread::InvalidateLoadMemo(LPCTSTR sFileName) {
+	Helpers::CAutoCriticalSection lock(LoadMemoLock().cs);
+	for (size_t i = 0; i < s_loadMemo.size();) {
+		if (s_loadMemo[i].sPath.CompareNoCase(sFileName) == 0) {
+			s_loadMemo.erase(s_loadMemo.begin() + (std::vector<LoadMemoEntry>::difference_type)i);
+		} else {
+			i++;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+// F-14/E13: blend an image's alpha channel onto the background colour, in place.
+// Replaces the six per-format loops that used an int counter over nWidth*nHeight
+// (F-14: the int product overflows for very large images; the counter is size_t
+// here). E13: two optimizations, both pixel-exact. First, if every pixel is
+// opaque the blend is the identity (AlphaBlendBackground returns the pixel
+// unchanged for alpha 0xFF), so a cheap scan skips the whole blend pass for
+// images that carry an alpha channel but use no transparency. Second, the
+// blend itself uses lookup tables instead of the double math in
+// Helpers::AlphaBlendBackground: out = (v*a + bg*(255-a) + 127) / 255, which a
+// brute-force check over all 256^3 (value, alpha, background) combinations
+// proved identical to the (x / 255.0) + 0.5 formula. The tables are built per
+// call on the heap - no state is shared between the two load threads, and no
+// large stack allocation. Fully transparent pixels (alpha 0) become the
+// background colour with alpha 0, exactly as the original did.
+/////////////////////////////////////////////////////////////////////////////////////////////
+static void AlphaBlendImageToBackground(uint32* pPixels, size_t nPixels, COLORREF bkColor) {
+	if (pPixels == NULL || nPixels == 0) {
+		return;
+	}
+	bool bAnyTransparent = false;
+	for (size_t i = 0; i < nPixels; i++) {
+		if ((pPixels[i] & 0xFF000000) != 0xFF000000) {
+			bAnyTransparent = true;
+			break;
+		}
+	}
+	if (!bAnyTransparent) {
+		return; // every pixel opaque: blending would not change a single pixel
+	}
+	const uint8 bgR = GetRValue(bkColor);
+	const uint8 bgG = GetGValue(bkColor);
+	const uint8 bgB = GetBValue(bkColor);
+	uint8* pTables = new(std::nothrow) uint8[3 * 256 * 256];
+	if (pTables == NULL) {
+		// Out of memory for the tables: fall back to the per-pixel helper.
+		// Still size_t-correct, just slower; pixel results are identical.
+		for (size_t i = 0; i < nPixels; i++) {
+			pPixels[i] = Helpers::AlphaBlendBackground(pPixels[i], bkColor);
+		}
+		return;
+	}
+	uint8* pTableR = pTables;
+	uint8* pTableG = pTables + 256 * 256;
+	uint8* pTableB = pTables + 2 * 256 * 256;
+	for (unsigned int a = 0; a < 256; a++) {
+		for (unsigned int v = 0; v < 256; v++) {
+			pTableR[a * 256 + v] = (uint8)((v * a + bgR * (255 - a) + 127) / 255);
+			pTableG[a * 256 + v] = (uint8)((v * a + bgG * (255 - a) + 127) / 255);
+			pTableB[a * 256 + v] = (uint8)((v * a + bgB * (255 - a) + 127) / 255);
+		}
+	}
+	const uint32 bgRGB = ((uint32)bgR << 16) | ((uint32)bgG << 8) | (uint32)bgB;
+	for (size_t i = 0; i < nPixels; i++) {
+		uint32 pixel = pPixels[i];
+		uint32 alpha = pixel & 0xFF000000;
+		if (alpha == 0xFF000000) {
+			continue;
+		}
+		if (alpha == 0) {
+			pPixels[i] = bgRGB;
+			continue;
+		}
+		unsigned int a = alpha >> 24;
+		pPixels[i] = 0xFF000000 |
+			((uint32)pTableR[a * 256 + ((pixel >> 16) & 0xFF)] << 16) |
+			((uint32)pTableG[a * 256 + ((pixel >> 8) & 0xFF)] << 8) |
+			(uint32)pTableB[a * 256 + (pixel & 0xFF)];
+	}
+	delete[] pTables;
+}
+
 // static initializers
 volatile int CImageLoadThread::m_curHandle = 0;
 
@@ -61,11 +227,12 @@ static EImageFormat GetImageFormat(LPCTSTR sFileName) {
 	if ((fptr = _tfopen(sFileName, _T("rb"))) == NULL) {
 		return IF_Unknown;
 	}
-	// Zero-initialised: a file shorter than 16 bytes leaves the tail as zero
+	// Zero-initialised: a file shorter than 48 bytes leaves the tail as zero
 	// instead of uninitialised stack, and the format checks below then compare
-	// against fixed bytes rather than garbage.
-	unsigned char header[16] = { 0 };
-	int nSize = (int)fread((void*)header, 1, 16, fptr);
+	// against fixed bytes rather than garbage. 48 bytes so the EMF dSignature
+	// at offset 40 can be checked (F-10).
+	unsigned char header[48] = { 0 };
+	int nSize = (int)fread((void*)header, 1, 48, fptr);
 	fclose(fptr);
 	if (nSize < 2) {
 		return IF_Unknown;
@@ -106,6 +273,19 @@ static EImageFormat GetImageFormat(LPCTSTR sFileName) {
 		return IF_PSD;
 	} else if (header[0] == 0xd7 && header[1] == 0xcd && header[2] == 0xc6 && header[3] == 0x9a) {
 		return IF_WMF;
+	} else if (nSize >= 12 && header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x00 && header[3] == 0x0c &&
+		header[4] == 0x6a && header[5] == 0x50 && header[6] == 0x20 && header[7] == 0x20) {
+		return IF_JP2;
+	} else if (header[0] == 0xff && header[1] == 0x4f && header[2] == 0xff && header[3] == 0x51) {
+		return IF_JP2;
+	} else if (header[0] == 0x76 && header[1] == 0x2f && header[2] == 0x31 && header[3] == 0x01) {
+		return IF_EXR;
+	} else if (header[0] == 'P' && (header[1] == '5' || header[1] == '6')) {
+		return IF_PPM;
+	} else if (header[0] == 'P' && header[1] == '4') {
+		return IF_PBM;
+	} else if (!memcmp(header, "DDS ", 4)) {
+		return IF_WIC;
 	}
 
 	// default fallback if no matches based on magic bytes
@@ -124,7 +304,10 @@ static EImageFormat GetImageFormat(LPCTSTR sFileName) {
 		return IF_TIFF;
 	} else if (header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x01 && header[3] == 0x00) {
 		return IF_ICO;
-	} else if (header[0] == 0x01 && header[1] == 0x00 && header[2] == 0x00 && header[3] == 0x00) {
+	} else if (header[0] == 0x01 && header[1] == 0x00 && header[2] == 0x00 && header[3] == 0x00 &&
+		// F-10: the bare 01 00 00 00 matches any file starting with those bytes;
+		// also require the EMF dSignature 0x464D4520 (" EMF") at offset 40.
+		nSize >= 44 && header[40] == 0x20 && header[41] == 'E' && header[42] == 'M' && header[43] == 'F') {
 		return IF_EMF;
 	}
 	return IF_Unknown;
@@ -149,23 +332,29 @@ static EImageFormat GetBitmapFormat(Gdiplus::Bitmap * pBitmap) {
 }
 
 static CJPEGImage* ConvertGDIPlusBitmapToJPEGImage(Gdiplus::Bitmap* pBitmap, int nFrameIndex, void* pEXIFData, 
-	__int64 nJPEGHash, bool &isOutOfMemory, bool &isAnimatedGIF) {
+	__int64 nJPEGHash, bool &isOutOfMemory, bool &isAnimatedGIF, bool &isSizeLimitExceeded) {
 
 	isOutOfMemory = false;
 	isAnimatedGIF = false;
+	isSizeLimitExceeded = false;
 	Gdiplus::Status lastStatus = pBitmap->GetLastStatus();
 	if (lastStatus != Gdiplus::Ok) {
 		isOutOfMemory = lastStatus == Gdiplus::OutOfMemory;
 		return NULL;
 	}
 
+	// P2-5: an image larger than the viewer can display is a size-limit
+	// rejection, not out-of-memory. The old code set isOutOfMemory here, so
+	// the provider freed memory and re-decoded the whole image, then reported
+	// "not enough memory" for an image that simply exceeds the pixel cap.
 	if (pBitmap->GetWidth() > MAX_IMAGE_DIMENSION || pBitmap->GetHeight() > MAX_IMAGE_DIMENSION)
 	{
+		isSizeLimitExceeded = true;
 		return NULL;
 	}
-	if ((double)pBitmap->GetWidth() * pBitmap->GetHeight() > MAX_IMAGE_PIXELS)
+	if ((double)pBitmap->GetWidth() * pBitmap->GetHeight() > (double)CSettingsProvider::This().MaxImagePixels())
 	{
-		isOutOfMemory = true;
+		isSizeLimitExceeded = true;
 		return NULL;
 	}
 
@@ -286,6 +475,7 @@ CImageData CImageLoadThread::GetLoadedImage(int nHandle) {
 	CJPEGImage* imageFound = NULL;
 	bool bFailedMemory = false;
 	bool bFailedException = false;
+	bool bFailedSizeLimit = false;
 	std::list<CRequestBase*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
 		CRequest* pRequest = (CRequest*)(*iter);
@@ -293,12 +483,13 @@ CImageData CImageLoadThread::GetLoadedImage(int nHandle) {
 			imageFound = pRequest->Image;
 			bFailedMemory = pRequest->OutOfMemory;
 			bFailedException = pRequest->ExceptionError;
+			bFailedSizeLimit = pRequest->SizeLimitExceeded;
 			// only mark as deleted
 			pRequest->Deleted = true;
 			break;
 		}
 	}
-	return CImageData(imageFound, bFailedMemory, bFailedException);
+	return CImageData(imageFound, bFailedMemory, bFailedException, bFailedSizeLimit);
 }
 
 void CImageLoadThread::ReleaseFile(LPCTSTR strFileName) {
@@ -329,13 +520,34 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 		if (rq.FileName == m_sLastAvifFileName) {
 			DeleteCachedAvifDecoder();
 		}
+		// E6/E12: the file is being released for reload (e.g. after an external
+		// edit), so its bad-file / probe conclusions must not survive.
+		InvalidateLoadMemo(rq.FileName);
 		return;
 	}
 
 	CRequest& rq = (CRequest&)request;
-	double dStartTime = Helpers::GetExactTickCount(); 
-	// Get image format and read the image
-	switch (GetImageFormat(rq.FileName)) {
+	double dStartTime = Helpers::GetExactTickCount();
+	// Get image format and read the image. The format is sniffed once here:
+	// the memo check below and the switch both need it.
+	EImageFormat eFormat = GetImageFormat(rq.FileName);
+	// E6: a RAW/TIFF that already failed decoding (bad-file memo) is not
+	// decoded again - LibRaw, dcraw_mod and the thumbnail fallback would each
+	// chew on it again. The memo is keyed by path + size + mtime, so an
+	// edited file is re-tried; OOM is never memoized.
+	__int64 nMemoSize = 0;
+	FILETIME ftMemoWrite = { 0, 0 };
+	bool bMemoIdentityKnown = false;
+	if (eFormat == IF_CameraRAW || eFormat == IF_TIFF) {
+		bMemoIdentityKnown = GetFileIdentity(rq.FileName, nMemoSize, ftMemoWrite);
+		if (bMemoIdentityKnown) {
+			LoadMemoEntry memo;
+			if (LoadMemoLookup(rq.FileName, nMemoSize, ftMemoWrite, memo) && memo.bBad) {
+				return;
+			}
+		}
+	}
+	switch (eFormat) {
 		case IF_JPEG :
 			DeleteCachedGDIBitmap();
 			DeleteCachedWebpDecoder();
@@ -446,6 +658,30 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 			DeleteCachedAvifDecoder();
 			ProcessReadPBMRequest(&rq);
 			break;
+		case IF_JP2:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadJP2Request(&rq);
+			break;
+		case IF_EXR:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadEXRRequest(&rq);
+			break;
+		case IF_SVG:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadSVGRequest(&rq);
+			break;
 		case IF_WIC:
 			DeleteCachedGDIBitmap();
 			DeleteCachedWebpDecoder();
@@ -465,11 +701,21 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 	}
 	// then process the image if read was successful
 	if (rq.Image != NULL) {
-		rq.Image->SetLoadTickCount(Helpers::GetExactTickCount() - dStartTime); 
-		if (!ProcessImageAfterLoad(&rq)) {
+		rq.Image->SetLoadTickCount(Helpers::GetExactTickCount() - dStartTime);
+		// P2-6: tri-state. Only a genuine allocation failure sets OutOfMemory
+		// (and may trigger the provider's free-and-retry); any other failure
+		// just drops the image as a plain load error.
+		EAfterLoadResult eAfterLoad = ProcessImageAfterLoad(&rq);
+		if (eAfterLoad != AfterLoad_OK) {
 			delete rq.Image;
 			rq.Image = NULL;
-			rq.OutOfMemory = true;
+			rq.OutOfMemory = (eAfterLoad == AfterLoad_OOM);
+		}
+	} else if (bMemoIdentityKnown && (eFormat == IF_CameraRAW || eFormat == IF_TIFF)) {
+		// E6: remember the failure so the next visit skips the decoders.
+		// OutOfMemory is transient and is never memoized.
+		if (!rq.OutOfMemory) {
+			LoadMemoRecord(rq.FileName, nMemoSize, ftMemoWrite, true, false, false);
 		}
 	}
 }
@@ -692,10 +938,11 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 				IStream* pStream = NULL;
 				if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
 					Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
-					bool isOutOfMemory, isAnimatedGIF;
+					bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
 					request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, Helpers::FindEXIFBlock(pBuffer, nFileSize),
-						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), isOutOfMemory, isAnimatedGIF);
+						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
 					request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+					request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
 					if (request->Image != NULL) {
 						request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
 					}
@@ -864,10 +1111,10 @@ void CImageLoadThread::ProcessReadWEBPRequest(CRequest * request) {
 			void* pEXIFData;
 			uint8* pPixelData = (uint8*)WebpReaderWriter::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
 			if (pPixelData && nBPP == 4) {
-				// Multiply alpha value into each AABBGGRR pixel
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (int i = 0; i < nWidth * nHeight; i++)
-					*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
+				// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
+				// the loop entirely when no pixel is transparent (see
+				// AlphaBlendImageToBackground; pixel results are identical).
+				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 				if (bHasAnimation) {
 					m_sLastWebpFileName = sFileName;
@@ -951,10 +1198,10 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastPngFileName = sFileName;
-				// Multiply alpha value into each AABBGGRR pixel
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (int i = 0; i < nWidth * nHeight; i++)
-					*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
+				// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
+				// the loop entirely when no pixel is transparent (see
+				// AlphaBlendImageToBackground; pixel results are identical).
+				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_PNG, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
 			} else {
@@ -963,10 +1210,11 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 				IStream* pStream = NULL;
 				if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
 					Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
-					bool isOutOfMemory, isAnimatedGIF;
+					bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
 					pEXIFData = PngReader::GetEXIFBlock(pBuffer, nFileSize);
-					request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, pEXIFData, 0, isOutOfMemory, isAnimatedGIF);
+					request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, pEXIFData, 0, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
 					request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+					request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
 					pStream->Release();
 					delete pBitmap;
 				} else {
@@ -1036,10 +1284,10 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastJxlFileName = sFileName;
-				// Multiply alpha value into each AABBGGRR pixel
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (int i = 0; i < nWidth * nHeight; i++)
-					*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
+				// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
+				// the loop entirely when no pixel is transparent (see
+				// AlphaBlendImageToBackground; pixel results are identical).
+				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_JXL, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
 				free(pEXIFData);
@@ -1088,8 +1336,10 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 	}
 	char* pBuffer = NULL;
 	CErrorModeGuard errorModeGuard;
+	// E8: file size at function scope so the AVIF->HEIF fallback below can
+	// reuse the already-read buffer (nFileSize is needed after the try).
+	long long nFileSize = 0;
 	try {
-		long long nFileSize = 0;
 		unsigned int nNumBytesRead;
 		if (!bUseCachedDecoder) {
 			// Don't read too huge files
@@ -1116,10 +1366,10 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastAvifFileName = sFileName;
-				// Multiply alpha value into each AABBGGRR pixel
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (int i = 0; i < nWidth * nHeight; i++)
-					*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
+				// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
+				// the loop entirely when no pixel is transparent (see
+				// AlphaBlendImageToBackground; pixel results are identical).
+				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_AVIF, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
 				free(pEXIFData);
@@ -1134,12 +1384,21 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 		request->Image = NULL;
 		request->ExceptionError = true;
 	}
+	// E8: fall back to HEIF with the buffer this function already read, instead
+	// of letting the HEIF path open and read the file a second time. The buffer
+	// is still owned here, so the fallback runs before it is freed below. On
+	// the cached-decoder path there is no buffer; fall back the old way.
+	if (!bSuccess) {
+		if (!bUseCachedDecoder && pBuffer != NULL) {
+			ProcessReadHEIFRequest(request, pBuffer, nFileSize);
+		} else {
+			ProcessReadHEIFRequest(request);
+		}
+	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
 		delete[] pBuffer;
 	}
-	if (!bSuccess)
-		return ProcessReadHEIFRequest(request);
 }
 #endif
 
@@ -1169,20 +1428,7 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request) {
 			return;
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
-			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
-			nFrameCount = 1;
-			nFrameTimeMs = 0;
-			void* pEXIFData;
-			uint8* pPixelData = (uint8*)HeifReader::ReadImage(nWidth, nHeight, nBPP, nFrameCount, pEXIFData, request->OutOfMemory, request->FrameIndex, pBuffer, nFileSize);
-			if (pPixelData != NULL) {
-				// Multiply alpha value into each AABBGGRR pixel
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (int i = 0; i < nWidth * nHeight; i++)
-					*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
-
-				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, nBPP, 0, IF_HEIF, false, request->FrameIndex, nFrameCount, nFrameTimeMs);
-				free(pEXIFData);
-			}
+			ProcessReadHEIFRequest(request, pBuffer, nFileSize);
 		}
 	} catch(heif::Error he) {
 		// invalid image
@@ -1195,6 +1441,38 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request) {
 	}
 	::CloseHandle(hFile);
 	delete[] pBuffer;
+}
+
+// E8: HEIF decode from a buffer the caller already read (the AVIF fallback).
+// No file open here; the caller owns the buffer and frees it. The size cap
+// was already applied by the caller (same MAX_HEIF_FILE_SIZE), so it is not
+// re-checked - the buffer is at most that large by construction.
+void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request, const char* pBuffer, long long nFileSize) {
+	CErrorModeGuard errorModeGuard;
+	try {
+		int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
+		nFrameCount = 1;
+		nFrameTimeMs = 0;
+		void* pEXIFData;
+		uint8* pPixelData = (uint8*)HeifReader::ReadImage(nWidth, nHeight, nBPP, nFrameCount, pEXIFData, request->OutOfMemory, request->FrameIndex, pBuffer, nFileSize);
+		if (pPixelData != NULL) {
+			// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
+			// the loop entirely when no pixel is transparent (see
+			// AlphaBlendImageToBackground; pixel results are identical).
+			AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+
+			request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, nBPP, 0, IF_HEIF, false, request->FrameIndex, nFrameCount, nFrameTimeMs);
+			free(pEXIFData);
+		}
+	} catch(heif::Error he) {
+		// invalid image
+		delete request->Image;
+		request->Image = NULL;
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
 }
 
 void CImageLoadThread::ProcessReadPSDRequest(CRequest* request) {
@@ -1234,10 +1512,9 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 			void* pPixelData = QoiReaderWriter::ReadImage(nWidth, nHeight, nBPP, request->OutOfMemory, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
 				if (nBPP == 4) {
-					// Multiply alpha value into each AABBGGRR pixel
-					uint32* pImage32 = (uint32*)pPixelData;
-					for (int i = 0; i < nWidth * nHeight; i++)
-						*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, CSettingsProvider::This().ColorTransparency());
+					// F-14/E13: see AlphaBlendImageToBackground (size_t counter, LUTs,
+					// opaque skip; pixel results are identical).
+					AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 				}
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, nBPP, 0, IF_QOI, false, 0, 1, 0);
 			}
@@ -1365,6 +1642,119 @@ void CImageLoadThread::ProcessReadPBMRequest(CRequest* request) {
 	delete[] pBuffer;
 }
 
+void CImageLoadThread::ProcessReadJP2Request(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI/PPM: 300 MB Win64, 50 MB Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		pBuffer = new(std::nothrow) char[nFileSize];
+		if (pBuffer == NULL) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = JP2Reader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_JP2, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
+	delete[] pBuffer;
+}
+
+void CImageLoadThread::ProcessReadEXRRequest(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI/PPM: 300 MB Win64, 50 MB Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		pBuffer = new(std::nothrow) char[nFileSize];
+		if (pBuffer == NULL) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = EXRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_EXR, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
+	delete[] pBuffer;
+}
+
+void CImageLoadThread::ProcessReadSVGRequest(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI/PPM: 300 MB Win64, 50 MB Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		pBuffer = new(std::nothrow) char[nFileSize];
+		if (pBuffer == NULL) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = SVGReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_SVG, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
+	delete[] pBuffer;
+}
 
 // Decoder-independent RAW gate. Both libraw and dcraw_mod allocate and read the
 // image according to the dimensions the file declares, and neither checks those
@@ -2054,12 +2444,190 @@ static bool TiffReadAtFile(HANDLE hFile, unsigned __int64 nOffset, unsigned char
 	if (!::ReadFile(hFile, pBuf, (DWORD)nLen, &nRead, NULL)) return false;
 	return nRead == nLen;
 }
+// F-20/E12: TIFF 318/319 probe and sanitizer, both walking SubIFDs.
+//
+// F-20: the old versions only followed the next-IFD chain, so 318/319 tags
+// inside a SubIFD were never probed or cleaned. Both walks below recurse into
+// SubIFD (tag 330) with the same shape as the Batch 2 gate's CollectIFDTree:
+// depth <= 2 for SubIFD nesting, a visited-offset set, and a 32-IFD total cap
+// (the old code already stopped its chain walk at 32 IFDs).
+// E12: the old probe did a seek+read syscall pair per 12-byte entry. Each
+// IFD's entry block is now read in one bulk read. The probe conclusion is also
+// cached in the load memo (E6's cache - one cache for both), keyed by path +
+// size + mtime, so a repeat open of the same TIFF skips the probe walk.
+
+// Reads one SubIFD offset out of a tag-330 entry. The entry bytes are in hand
+// (bulk-read entry block); external values are read from the file. Returns
+// false when the value cannot be read.
+static bool TiffSubIFDOffset(HANDLE hFile, const unsigned char* pEntry, bool bBE, unsigned __int64 nFileSize, unsigned int j, unsigned __int64& nSubIFD) {
+	unsigned short nType = TiffU16(pEntry + 2, bBE);
+	unsigned int nCount = TiffU32(pEntry + 4, bBE);
+	unsigned __int64 typeSize = (nType == 3) ? 2 : 4;
+	unsigned __int64 byteCount = typeSize * nCount;
+	if (byteCount <= 4) {
+		// Inline: the offsets live in the entry's own value field.
+		if (nType == 3) {
+			nSubIFD = TiffU16(pEntry + 8 + j * 2, bBE);
+		} else {
+			nSubIFD = TiffU32(pEntry + 8, bBE);
+		}
+		return true;
+	}
+	unsigned int nValOff = TiffU32(pEntry + 8, bBE);
+	if ((unsigned __int64)nValOff + (unsigned __int64)j * typeSize + typeSize > nFileSize) {
+		return false;
+	}
+	unsigned char buf[4];
+	if (!TiffReadAtFile(hFile, nValOff + (unsigned __int64)j * typeSize, buf, (size_t)typeSize)) {
+		return false;
+	}
+	nSubIFD = (nType == 3) ? TiffU16(buf, bBE) : TiffU32(buf, bBE);
+	return true;
+}
+
+// Walks one IFD for the 318/319 probe: bulk-reads the entry block, checks any
+// 318/319 rationals, recurses into SubIFDs (depth <= 2), then follows the
+// next-IFD chain at the same depth. Returns false when the walk is malformed
+// (fail closed: no sanitization, the original file loads). bSuspicious is set
+// when a 318/319 rational above INT_MAX is found anywhere in the walk.
+static bool TiffProbeWalk(HANDLE hFile, unsigned __int64 nIFD, bool bBE, unsigned __int64 nFileSize,
+		int nDepth, unsigned __int64* pVisited, int& nVisitedCount, bool& bSuspicious) {
+	if (nVisitedCount >= 32) {
+		return true; // cap reached: stop, keep what was found (the old loop stopped at 32 too)
+	}
+	for (int i = 0; i < nVisitedCount; i++) {
+		if (pVisited[i] == nIFD) {
+			return true; // shared IFD: already checked
+		}
+	}
+	pVisited[nVisitedCount++] = nIFD;
+	if (nIFD < 8 || nIFD + 2 > nFileSize) {
+		return false;
+	}
+	unsigned char cntBuf[2];
+	if (!TiffReadAtFile(hFile, nIFD, cntBuf, 2)) {
+		return false;
+	}
+	unsigned short nEntries = TiffU16(cntBuf, bBE);
+	if (nEntries > 1024) {
+		return false;
+	}
+	if (nIFD + 2 + (unsigned __int64)nEntries * 12 + 4 > nFileSize) {
+		return false;
+	}
+	// E12: one bulk read for the whole entry block, not a seek+read per entry.
+	unsigned char* pEntries = new(std::nothrow) unsigned char[(size_t)nEntries * 12];
+	if (pEntries == NULL) {
+		return false;
+	}
+	if (!TiffReadAtFile(hFile, nIFD + 2, pEntries, (size_t)nEntries * 12)) {
+		delete[] pEntries;
+		return false;
+	}
+	std::vector<unsigned __int64> subIFDs;
+	bool bOk = true;
+	for (unsigned short i = 0; i < nEntries && bOk; i++) {
+		unsigned char* pEntry = pEntries + (size_t)i * 12;
+		unsigned short nTag = TiffU16(pEntry, bBE);
+		if (nTag == 330) {
+			// F-20: SubIFD offsets for recursion after this IFD's tags.
+			unsigned short nType = TiffU16(pEntry + 2, bBE);
+			unsigned int nCount = TiffU32(pEntry + 4, bBE);
+			if ((nType != 3 && nType != 4) || nCount == 0 || nCount > 1024) {
+				bOk = false;
+				break;
+			}
+			for (unsigned int j = 0; j < nCount; j++) {
+				unsigned __int64 nSub = 0;
+				if (!TiffSubIFDOffset(hFile, pEntry, bBE, nFileSize, j, nSub)) {
+					bOk = false;
+					break;
+				}
+				subIFDs.push_back(nSub);
+			}
+			continue;
+		}
+		if (nTag != 318 && nTag != 319) {
+			continue;
+		}
+		unsigned short nType = TiffU16(pEntry + 2, bBE);
+		unsigned int nCount = TiffU32(pEntry + 4, bBE);
+		if (nType != 5) {
+			bOk = false;
+			break;
+		}
+		if ((nTag == 318 && nCount != 2) || (nTag == 319 && nCount != 6)) {
+			bOk = false;
+			break;
+		}
+		unsigned int nValOff = TiffU32(pEntry + 8, bBE);
+		if ((unsigned __int64)nValOff + (unsigned __int64)nCount * 8 > nFileSize) {
+			bOk = false;
+			break;
+		}
+		unsigned char rats[48];
+		if (!TiffReadAtFile(hFile, nValOff, rats, (size_t)nCount * 8)) {
+			bOk = false;
+			break;
+		}
+		for (unsigned int j = 0; j < nCount; j++) {
+			unsigned int nNum = TiffU32(rats + j * 8, bBE);
+			unsigned int nDen = TiffU32(rats + j * 8 + 4, bBE);
+			if (nDen == 0 || nNum > nDen) {
+				bOk = false;
+				break;
+			}
+			if (nNum > 0x7FFFFFFF || nDen > 0x7FFFFFFF) {
+				bSuspicious = true;
+			}
+		}
+	}
+	delete[] pEntries;
+	if (!bOk) {
+		return false;
+	}
+	// F-20: recurse into SubIFDs (depth <= 2, as in the gate).
+	if (nDepth < 2) {
+		for (size_t s = 0; s < subIFDs.size(); s++) {
+			if (subIFDs[s] == 0) {
+				continue; // 0 means "no SubIFD" for this entry
+			}
+			if (!TiffProbeWalk(hFile, subIFDs[s], bBE, nFileSize, nDepth + 1, pVisited, nVisitedCount, bSuspicious)) {
+				return false;
+			}
+		}
+	}
+	unsigned char nextBuf[4];
+	if (!TiffReadAtFile(hFile, nIFD + 2 + (unsigned __int64)nEntries * 12, nextBuf, 4)) {
+		return false;
+	}
+	unsigned int nNext = TiffU32(nextBuf, bBE);
+	if (nNext == 0) {
+		return true;
+	}
+	if (nNext == nIFD) {
+		return false;
+	}
+	return TiffProbeWalk(hFile, nNext, bBE, nFileSize, nDepth, pVisited, nVisitedCount, bSuspicious);
+}
+
 static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName) {
 	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) return false;
 	LARGE_INTEGER liSize;
 	bool bResult = false;
 	if (::GetFileSizeEx(hFile, &liSize) && liSize.QuadPart >= 8) {
+		// E12: reuse a previous probe conclusion for this exact file.
+		FILETIME ftWrite = { 0, 0 };
+		__int64 nSize = liSize.QuadPart;
+		bool bIdentityKnown = ::GetFileTime(hFile, NULL, NULL, &ftWrite) != 0;
+		if (bIdentityKnown) {
+			LoadMemoEntry memo;
+			if (LoadMemoLookup(sFileName, nSize, ftWrite, memo) && memo.bProbeKnown) {
+				::CloseHandle(hFile);
+				return memo.bProbeNeedsSanitize;
+			}
+		}
 		unsigned char header[8];
 		if (TiffReadAtFile(hFile, 0, header, 8)) {
 			bool bBig = (header[0] == 'M' && header[1] == 'M');
@@ -2068,51 +2636,151 @@ static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName) {
 				bool bBE = bBig;
 				if (TiffU16(header + 2, bBE) == 42) {
 					unsigned __int64 nIFD = TiffU32(header + 4, bBE);
+					unsigned __int64 visited[32];
+					int nVisitedCount = 0;
 					bool bSuspicious = false;
-					bool bWalkOk = true;
-					for (int nIFDIndex = 0; nIFDIndex < 32 && bWalkOk; nIFDIndex++) {
-						if (nIFD < 8 || nIFD + 2 > (unsigned __int64)liSize.QuadPart) { bWalkOk = false; break; }
-						unsigned char cntBuf[2];
-						if (!TiffReadAtFile(hFile, nIFD, cntBuf, 2)) { bWalkOk = false; break; }
-						unsigned short nEntries = TiffU16(cntBuf, bBE);
-						if (nEntries > 1024) { bWalkOk = false; break; }
-						if (nIFD + 2 + (unsigned __int64)nEntries * 12 + 4 > (unsigned __int64)liSize.QuadPart) { bWalkOk = false; break; }
-						for (unsigned short i = 0; i < nEntries && bWalkOk; i++) {
-							unsigned char entry[12];
-							if (!TiffReadAtFile(hFile, nIFD + 2 + (unsigned __int64)i * 12, entry, 12)) { bWalkOk = false; break; }
-							unsigned short nTag = TiffU16(entry, bBE);
-							if (nTag != 318 && nTag != 319) continue;
-							unsigned short nType = TiffU16(entry + 2, bBE);
-							unsigned int nCount = TiffU32(entry + 4, bBE);
-							if (nType != 5) { bWalkOk = false; break; }
-							if ((nTag == 318 && nCount != 2) || (nTag == 319 && nCount != 6)) { bWalkOk = false; break; }
-							unsigned int nValOff = TiffU32(entry + 8, bBE);
-							if ((unsigned __int64)nValOff + (unsigned __int64)nCount * 8 > (unsigned __int64)liSize.QuadPart) { bWalkOk = false; break; }
-							unsigned char rats[48];
-							if (!TiffReadAtFile(hFile, nValOff, rats, (size_t)nCount * 8)) { bWalkOk = false; break; }
-							for (unsigned int j = 0; j < nCount; j++) {
-								unsigned int nNum = TiffU32(rats + j * 8, bBE);
-								unsigned int nDen = TiffU32(rats + j * 8 + 4, bBE);
-								if (nDen == 0 || nNum > nDen) { bWalkOk = false; break; }
-								if (nNum > 0x7FFFFFFF || nDen > 0x7FFFFFFF) bSuspicious = true;
-							}
-						}
-						if (!bWalkOk) break;
-						unsigned char nextBuf[4];
-						if (!TiffReadAtFile(hFile, nIFD + 2 + (unsigned __int64)nEntries * 12, nextBuf, 4)) { bWalkOk = false; break; }
-						unsigned int nNext = TiffU32(nextBuf, bBE);
-						if (nNext == 0) break;
-						if (nNext == nIFD) { bWalkOk = false; break; }
-						nIFD = nNext;
-					}
-					bResult = bWalkOk && bSuspicious;
+					bResult = TiffProbeWalk(hFile, nIFD, bBE, (unsigned __int64)liSize.QuadPart, 0, visited, nVisitedCount, bSuspicious) && bSuspicious;
 				}
 			}
+		}
+		if (bIdentityKnown) {
+			LoadMemoRecord(sFileName, nSize, ftWrite, false, true, bResult);
 		}
 	}
 	::CloseHandle(hFile);
 	return bResult;
 }
+
+// In-memory twin of TiffSubIFDOffset (see above): reads one SubIFD offset out
+// of a tag-330 entry, from the buffer instead of the file.
+static bool TiffSubIFDOffsetInMemory(const unsigned char* pBuffer, size_t nSize, const unsigned char* pEntry, bool bBE, unsigned int j, unsigned __int64& nSubIFD) {
+	unsigned short nType = TiffU16(pEntry + 2, bBE);
+	unsigned int nCount = TiffU32(pEntry + 4, bBE);
+	unsigned __int64 typeSize = (nType == 3) ? 2 : 4;
+	unsigned __int64 byteCount = typeSize * nCount;
+	if (byteCount <= 4) {
+		if (nType == 3) {
+			nSubIFD = TiffU16(pEntry + 8 + j * 2, bBE);
+		} else {
+			nSubIFD = TiffU32(pEntry + 8, bBE);
+		}
+		return true;
+	}
+	unsigned int nValOff = TiffU32(pEntry + 8, bBE);
+	if ((unsigned __int64)nValOff + (unsigned __int64)j * typeSize + typeSize > nSize) {
+		return false;
+	}
+	if (nType == 3) {
+		nSubIFD = TiffU16(pBuffer + nValOff + j * 2, bBE);
+	} else {
+		nSubIFD = TiffU32(pBuffer + nValOff + j * 4, bBE);
+	}
+	return true;
+}
+
+// In-memory twin of TiffProbeWalk: sanitizes 318/319 rationals in place,
+// recursing into SubIFDs (F-20) and following the next-IFD chain. Same
+// fail-closed semantics: any malformed entry aborts the whole sanitization
+// (returns false) and the caller loads the original file.
+static bool TiffSanitizeWalk(unsigned char* pBuffer, size_t nSize, unsigned __int64 nIFD, bool bBE,
+		int nDepth, unsigned __int64* pVisited, int& nVisitedCount, bool& bSuspicious) {
+	if (nVisitedCount >= 32) {
+		return true; // cap reached: stop, keep what was sanitized (as the old loop did)
+	}
+	for (int i = 0; i < nVisitedCount; i++) {
+		if (pVisited[i] == nIFD) {
+			return true; // shared IFD: already sanitized
+		}
+	}
+	pVisited[nVisitedCount++] = nIFD;
+	if (nIFD < 8 || nIFD + 2 > nSize) {
+		return false;
+	}
+	unsigned short nEntries = TiffU16(pBuffer + (size_t)nIFD, bBE);
+	if (nEntries > 1024) {
+		return false;
+	}
+	if (nIFD + 2 + (unsigned __int64)nEntries * 12 + 4 > nSize) {
+		return false;
+	}
+	std::vector<unsigned __int64> subIFDs;
+	for (unsigned short i = 0; i < nEntries; i++) {
+		unsigned char* pEntry = pBuffer + (size_t)nIFD + 2 + (size_t)i * 12;
+		unsigned short nTag = TiffU16(pEntry, bBE);
+		if (nTag == 330) {
+			unsigned short nType = TiffU16(pEntry + 2, bBE);
+			unsigned int nCount = TiffU32(pEntry + 4, bBE);
+			if ((nType != 3 && nType != 4) || nCount == 0 || nCount > 1024) {
+				return false;
+			}
+			for (unsigned int j = 0; j < nCount; j++) {
+				unsigned __int64 nSub = 0;
+				if (!TiffSubIFDOffsetInMemory(pBuffer, nSize, pEntry, bBE, j, nSub)) {
+					return false;
+				}
+				subIFDs.push_back(nSub);
+			}
+			continue;
+		}
+		if (nTag != 318 && nTag != 319) {
+			continue;
+		}
+		unsigned short nType = TiffU16(pEntry + 2, bBE);
+		unsigned int nCount = TiffU32(pEntry + 4, bBE);
+		if (nType != 5) {
+			return false;
+		}
+		if ((nTag == 318 && nCount != 2) || (nTag == 319 && nCount != 6)) {
+			return false;
+		}
+		unsigned int nValOff = TiffU32(pEntry + 8, bBE);
+		if ((unsigned __int64)nValOff + (unsigned __int64)nCount * 8 > nSize) {
+			return false;
+		}
+		bool bTagSuspicious = false;
+		for (unsigned int j = 0; j < nCount; j++) {
+			unsigned int nNum = TiffU32(pBuffer + nValOff + j * 8, bBE);
+			unsigned int nDen = TiffU32(pBuffer + nValOff + j * 8 + 4, bBE);
+			if (nDen == 0 || nNum > nDen) {
+				return false;
+			}
+			if (nNum > 0x7FFFFFFF || nDen > 0x7FFFFFFF) {
+				bTagSuspicious = true;
+			}
+		}
+		if (bTagSuspicious) {
+			bSuspicious = true;
+			for (unsigned int j = 0; j < nCount; j++) {
+				unsigned int nNum = TiffU32(pBuffer + nValOff + j * 8, bBE);
+				unsigned int nDen = TiffU32(pBuffer + nValOff + j * 8 + 4, bBE);
+				double dVal = (double)nNum / (double)nDen;
+				unsigned int nNewNum = (unsigned int)(dVal * 10000.0 + 0.5);
+				if (nNewNum > 10000) nNewNum = 10000;
+				TiffPutU32(pBuffer + nValOff + j * 8, bBE, nNewNum);
+				TiffPutU32(pBuffer + nValOff + j * 8 + 4, bBE, 10000);
+			}
+		}
+	}
+	if (nDepth < 2) {
+		for (size_t s = 0; s < subIFDs.size(); s++) {
+			if (subIFDs[s] == 0) {
+				continue;
+			}
+			if (!TiffSanitizeWalk(pBuffer, nSize, subIFDs[s], bBE, nDepth + 1, pVisited, nVisitedCount, bSuspicious)) {
+				return false;
+			}
+		}
+	}
+	unsigned int nNext = TiffU32(pBuffer + (size_t)nIFD + 2 + (size_t)nEntries * 12, bBE);
+	if (nNext == 0) {
+		return true;
+	}
+	if (nNext == nIFD) {
+		return false;
+	}
+	return TiffSanitizeWalk(pBuffer, nSize, nNext, bBE, nDepth, pVisited, nVisitedCount, bSuspicious);
+}
+
 static bool TiffSanitizeChromaticity(unsigned char* pBuffer, size_t nSize) {
 	if (pBuffer == NULL || nSize < 8) return false;
 	bool bBig = (pBuffer[0] == 'M' && pBuffer[1] == 'M');
@@ -2121,47 +2789,10 @@ static bool TiffSanitizeChromaticity(unsigned char* pBuffer, size_t nSize) {
 	bool bBE = bBig;
 	if (TiffU16(pBuffer + 2, bBE) != 42) return false;
 	unsigned __int64 nIFD = TiffU32(pBuffer + 4, bBE);
+	unsigned __int64 visited[32];
+	int nVisitedCount = 0;
 	bool bSuspicious = false;
-	for (int nIFDIndex = 0; nIFDIndex < 32; nIFDIndex++) {
-		if (nIFD < 8 || nIFD + 2 > nSize) return false;
-		unsigned short nEntries = TiffU16(pBuffer + (size_t)nIFD, bBE);
-		if (nEntries > 1024) return false;
-		if (nIFD + 2 + (unsigned __int64)nEntries * 12 + 4 > nSize) return false;
-		for (unsigned short i = 0; i < nEntries; i++) {
-			unsigned char* pEntry = pBuffer + (size_t)nIFD + 2 + (size_t)i * 12;
-			unsigned short nTag = TiffU16(pEntry, bBE);
-			if (nTag != 318 && nTag != 319) continue;
-			unsigned short nType = TiffU16(pEntry + 2, bBE);
-			unsigned int nCount = TiffU32(pEntry + 4, bBE);
-			if (nType != 5) return false;
-			if ((nTag == 318 && nCount != 2) || (nTag == 319 && nCount != 6)) return false;
-			unsigned int nValOff = TiffU32(pEntry + 8, bBE);
-			if ((unsigned __int64)nValOff + (unsigned __int64)nCount * 8 > nSize) return false;
-			bool bTagSuspicious = false;
-			for (unsigned int j = 0; j < nCount; j++) {
-				unsigned int nNum = TiffU32(pBuffer + nValOff + j * 8, bBE);
-				unsigned int nDen = TiffU32(pBuffer + nValOff + j * 8 + 4, bBE);
-				if (nDen == 0 || nNum > nDen) return false;
-				if (nNum > 0x7FFFFFFF || nDen > 0x7FFFFFFF) bTagSuspicious = true;
-			}
-			if (bTagSuspicious) {
-				bSuspicious = true;
-				for (unsigned int j = 0; j < nCount; j++) {
-					unsigned int nNum = TiffU32(pBuffer + nValOff + j * 8, bBE);
-					unsigned int nDen = TiffU32(pBuffer + nValOff + j * 8 + 4, bBE);
-					double dVal = (double)nNum / (double)nDen;
-					unsigned int nNewNum = (unsigned int)(dVal * 10000.0 + 0.5);
-					if (nNewNum > 10000) nNewNum = 10000;
-					TiffPutU32(pBuffer + nValOff + j * 8, bBE, nNewNum);
-					TiffPutU32(pBuffer + nValOff + j * 8 + 4, bBE, 10000);
-				}
-			}
-		}
-		unsigned int nNext = TiffU32(pBuffer + (size_t)nIFD + 2 + (size_t)nEntries * 12, bBE);
-		if (nNext == 0) break;
-		if (nNext == nIFD) return false;
-		nIFD = nNext;
-	}
+	if (!TiffSanitizeWalk(pBuffer, nSize, nIFD, bBE, 0, visited, nVisitedCount, bSuspicious)) return false;
 	return bSuspicious;
 }
 
@@ -2174,7 +2805,7 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 	sFileName = (const wchar_t*)request->FileName;
 
 	Gdiplus::Bitmap* pBitmap = NULL;
-	bool isOutOfMemory = false, isAnimatedGIF = false;
+	bool isOutOfMemory = false, isAnimatedGIF = false, isSizeLimitExceeded = false;
 	// Sanitized first try: if this TIFF carries suspicious 318/319, load a
 	// memory copy, normalise those tags in place, and decode from a stream
 	// (CreateStreamOnHGlobal, the same pattern the JPEG/PNG paths use).
@@ -2197,7 +2828,8 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 						if (::CreateStreamOnHGlobal(hBuffer, FALSE, &pStream) == S_OK) {
 							Gdiplus::Bitmap* pSanitizedBitmap = new Gdiplus::Bitmap(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
 							if (pSanitizedBitmap != NULL && pSanitizedBitmap->GetLastStatus() == Gdiplus::Ok) {
-								request->Image = ConvertGDIPlusBitmapToJPEGImage(pSanitizedBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF);
+								request->Image = ConvertGDIPlusBitmapToJPEGImage(pSanitizedBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
+							request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
 							}
 							delete pSanitizedBitmap;
 							pStream->Release();
@@ -2218,9 +2850,10 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 			m_pLastBitmap = pBitmap = new Gdiplus::Bitmap(sFileName, CSettingsProvider::This().UseEmbeddedColorProfiles());
 			m_sLastFileName = sFileName;
 		}
-		request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF);
+		request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, request->FrameIndex, pEXIFData, nJPEGFileHash, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
 	}
 	request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+	request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
 	if (request->OutOfMemory && GetBitmapFormat(pBitmap) == IF_TIFF) {
 		request->OutOfMemory = false; // reset before WIC retry
 		DeleteCachedGDIBitmap();
@@ -2272,18 +2905,22 @@ void CImageLoadThread::ProcessReadWICRequest(CRequest* request) {
 	}
 }
 
-bool CImageLoadThread::ProcessImageAfterLoad(CRequest * request) {
+// P2-6: tri-state (see ImageLoadThread.h). A rotation failure used to return
+// false here and the caller treated every false as out-of-memory, so a bad
+// rotation freed all memory, re-decoded the whole image, and then reported
+// "not enough memory". Only a genuine allocation failure returns OOM now.
+CImageLoadThread::EAfterLoadResult CImageLoadThread::ProcessImageAfterLoad(CRequest * request) {
 	// set process parameters depending on filename
 	request->Image->SetFileDependentProcessParams(request->FileName, &(request->ProcessParams));
 
 	// First do rotation, this maybe modifies the width and height
 	if (!request->Image->VerifyRotation(CRotationParams(request->ProcessParams.RotationParams, request->ProcessParams.RotationParams.Rotation + request->ProcessParams.UserRotation))) {
-		return false;
+		return AfterLoad_Error;
 	}
 
 	// Do nothing (except rotation) if processing after load turned off
 	if (GetProcessingFlag(request->ProcessParams.ProcFlags, PFLAG_NoProcessingAfterLoad)) {
-		return true;
+		return AfterLoad_OK;
 	}
 
 	int nWidth = request->Image->OrigWidth();
@@ -2309,6 +2946,19 @@ bool CImageLoadThread::ProcessImageAfterLoad(CRequest * request) {
 
 	// this will process the image and cache the processed DIB in the CJPEGImage instance
 	CPoint offsetInImage = request->Image->ConvertOffset(newSize, clippedSize, request->ProcessParams.Offsets);
-	return NULL != request->Image->GetDIB(newSize, clippedSize, offsetInImage,
-		request->ProcessParams.ImageProcParams, request->ProcessParams.ProcFlags);
+	if (NULL != request->Image->GetDIB(newSize, clippedSize, offsetInImage,
+		request->ProcessParams.ImageProcParams, request->ProcessParams.ProcFlags)) {
+		return AfterLoad_OK;
+	}
+	// P2-6: the DIB prefetch failed. If the requested DIB itself exceeds the
+	// pixel/byte caps it is a size-limit failure, not OOM - retrying after
+	// freeing memory would just fail again on the same cap. Anything else is
+	// treated as a genuine allocation failure: every NULL return on the DIB
+	// path below the size gate comes from a failed (nothrow) allocation.
+	if ((size_t)clippedSize.cx * (size_t)clippedSize.cy > CSettingsProvider::This().MaxImagePixels() ||
+		!IsImageBufferSizeOk((size_t)clippedSize.cx * 4, (size_t)clippedSize.cy)) {
+		request->SizeLimitExceeded = true;
+		return AfterLoad_Error;
+	}
+	return AfterLoad_OOM;
 }

@@ -46,9 +46,17 @@ const unsigned int MAX_BMP_FILE_SIZE = 1024 * 1024 * 500;
 const unsigned int MAX_BMP_FILE_SIZE = 1024 * 1024 * 100;
 #endif
 
-// this may be an artificial limitation and might make configurable, or ignore custom setting only for win32
+// P2-5: the pixel cap. It used to be 65535*65535 (4.29e9) on x64, which is
+// effectively no cap: a 40000x30000 JPEG passed every header check and then
+// sat in the UI wait for minutes while the decoder chewed on it. The default
+// is now 100 megapixels on both architectures (the old Win32 value). It is
+// configurable with the MaxImagePixelsMP INI setting (megapixels, default
+// 100); CSettingsProvider::MaxImagePixels() returns the effective cap and
+// the load paths that know the setting use that, while this constant stays
+// the default for the decoders that only see this header. MAX_IMAGE_BYTES
+// below stays the hard byte cap whatever the pixel cap is set to.
 #ifdef _WIN64
-const unsigned int MAX_IMAGE_PIXELS = 65535 * 65535;
+const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 100;
 #else
 const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 100;
 #endif

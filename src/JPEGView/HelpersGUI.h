@@ -20,7 +20,8 @@ namespace HelpersGUI {
 
 		// these can be combined with other error codes, so make sure they work with bit arithmetic
 		FileLoad_OutOfMemory = 65536,
-		FileLoad_ExceptionError = 32768
+		FileLoad_ExceptionError = 32768,
+		FileLoad_SizeLimitExceeded = 131072
 	};
 
 	// Scaling factor to scale from 96 dpi to actual screen DPI, 96 dpi -> 1.0, 120 dpi -> 1.2

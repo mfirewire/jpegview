@@ -26,8 +26,22 @@ void * HeifReader::ReadImage(int &width,
 	frame_count = context.get_number_of_top_level_images();
 	heif_item_id item_id = context.get_list_of_top_level_image_IDs().at(frame_index);
 	heif::ImageHandle handle = context.get_image_handle(item_id);
-	// height = handle.get_height();
-	// width = handle.get_width();
+	// F-06: gate on the header dimensions BEFORE decoding. decode_image
+	// below decodes the full frame; a 65535x65535 header would force
+	// GB-scale decoder-internal allocation before the old post-decode check
+	// ever ran. The post-decode checks below stay as a safety net.
+	width = handle.get_width();
+	height = handle.get_height();
+	if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION)
+		return NULL;
+	if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
+		outOfMemory = true;
+		return NULL;
+	}
+	if (!IsImageBufferSizeOk((size_t)width * nchannels, (size_t)height)) {
+		outOfMemory = true;
+		return NULL;
+	}
 	heif::Image image = handle.decode_image(heif_colorspace_RGB, heif_chroma_interleaved_RGBA);
 	int stride;
 	uint8_t* data = image.get_plane(heif_channel_interleaved, &stride);

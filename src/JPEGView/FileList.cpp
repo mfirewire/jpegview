@@ -134,17 +134,17 @@ void CFileDesc::SetModificationDate(const FILETIME& lastModDate) {
 // Public interface
 ///////////////////////////////////////////////////////////////////////////////////
 
-// image file types supported internally (there are additional endings for RAW and WIC - these come from INI file)
+// image file types supported internally (there are additional endings for RAW, WIC and Extra - these come from INI file)
 // NOTE: when adding more supported filetypes, update installer to add another extension for "SupportedTypes"
-static const int cnNumEndingsInternal = 37;
+static const int cnNumEndingsInternal = 43;
 static const TCHAR* csFileEndingsInternal[cnNumEndingsInternal] = {_T("jpg"), _T("jpeg"), _T("jpe"), _T("jfif"), _T("jps"), _T("jfi"), _T("jif"), _T("mpo"), _T("bmp"), _T("png"), _T("apng"),
-	_T("tif"), _T("tiff"), _T("gif"), _T("webp"), _T("jxl"), _T("avif"), _T("avifs"), _T("heif"), _T("heic"), _T("hif"), _T("tga"), _T("icb"), _T("vda"), _T("vst"), _T("qoi"), _T("psd"), _T("psb"), _T("ppm"), _T("pgm"), _T("pnm"), 
-	_T("ico"), _T("wmf"), _T("emf"), _T("hdr"), _T("rgbe"), _T("pbm") };
+	_T("tif"), _T("tiff"), _T("gif"), _T("webp"), _T("jxl"), _T("avif"), _T("avifs"), _T("avis"), _T("heif"), _T("heic"), _T("hif"), _T("tga"), _T("icb"), _T("vda"), _T("vst"), _T("qoi"), _T("psd"), _T("psb"), _T("ppm"), _T("pgm"), _T("pnm"), 
+	_T("ico"), _T("wmf"), _T("emf"), _T("hdr"), _T("rgbe"), _T("pbm"), _T("jp2"), _T("j2k"), _T("j2c"), _T("exr"), _T("svg") };
 // supported camera RAW formats
 static const TCHAR* csFileEndingsRAW = _T("*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.srf;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw");
 
 
-static const int MAX_ENDINGS = 128; // 37 internal + 5 WIC + 25 RAW = 67, plus room for FileEndingsExtra
+static const int MAX_ENDINGS = 128; // 43 internal + 5 WIC + 25 RAW = 73, plus room for FileEndingsExtra
 static int nNumEndings;
 static LPCTSTR* sFileEndings;
 
@@ -161,7 +161,7 @@ static bool WICPresentGuarded(void) {
 
 // Parses a semicolon separated list of file endings of the form "*.nef;*.cr2;*.dng"
 // Returns true if at least one new ending was added. F-H03 (contained
-// part only, MAX_ENDINGS stays 64): duplicates are skipped case-
+// part only): duplicates are skipped case-
 // insensitively instead of consuming a slot, and an ending dropped
 // because the list is full is reported with OutputDebugString (no
 // MessageBox: this runs during list construction).
@@ -226,9 +226,137 @@ static LPCTSTR* GetSupportedFileEndingList() {
 	return sFileEndings;
 }
 
+// E4: sorted index over the supported file endings, for O(log n) lookup
+// instead of a linear scan (up to MAX_ENDINGS entries) per file in
+// FindFiles / per IsImageFile call. The entries point into the same
+// storage as sFileEndings, so no ending string is ever copied; the index
+// is rebuilt whenever ParseAndAddFileEndings grows the list (e.g. a
+// temporarily added RAW ending, O-05), detected by the count. The list
+// only ever grows and duplicates are skipped case-insensitively when
+// adding, so the count is enough to detect staleness.
+struct SFileEndingEntry {
+	LPCTSTR pszEnding; // extension without dot, e.g. "nef"
+	int nOriginalIndex; // position in sFileEndings (E9 match priority)
+};
+static SFileEndingEntry* sSortedFileEndings = NULL; // never freed, like sFileEndings
+static int s_nSortedFileEndings = -1; // nNumEndings the index was built from
+
+static int __cdecl CompareFileEndings(const void* pA, const void* pB) {
+	return _tcsicmp(((const SFileEndingEntry*)pA)->pszEnding, ((const SFileEndingEntry*)pB)->pszEnding);
+}
+
+static void EnsureSortedFileEndings() {
+	LPCTSTR* allFileEndings = GetSupportedFileEndingList();
+	if (sSortedFileEndings == NULL) {
+		sSortedFileEndings = new SFileEndingEntry[MAX_ENDINGS];
+	}
+	if (s_nSortedFileEndings != nNumEndings) {
+		for (int i = 0; i < nNumEndings; i++) {
+			sSortedFileEndings[i].pszEnding = allFileEndings[i];
+			sSortedFileEndings[i].nOriginalIndex = i;
+		}
+		qsort(sSortedFileEndings, nNumEndings, sizeof(SFileEndingEntry), CompareFileEndings);
+		s_nSortedFileEndings = nNumEndings;
+	}
+}
+
+// Compares an ending against a (pointer, length) extension run, as used by
+// the slideshow-list scan (E9), where the run is not NUL-terminated.
+// Identical ordering to _tcsicmp (first differing character, else the
+// shorter string is smaller), so binary search over the sorted index
+// stays valid.
+static int CompareEndingToRun(LPCTSTR pszEnding, LPCTSTR pRun, size_t nRunLen) {
+	size_t nEndingLen = _tcslen(pszEnding);
+	size_t nCommon = (nEndingLen < nRunLen) ? nEndingLen : nRunLen;
+	int nCmp = _tcsnicmp(pszEnding, pRun, nCommon);
+	if (nCmp != 0) {
+		return nCmp;
+	}
+	if (nEndingLen < nRunLen) {
+		return -1;
+	}
+	if (nEndingLen > nRunLen) {
+		return 1;
+	}
+	return 0;
+}
+
+// Binary search over the sorted index for an extension run (E9) or a
+// NUL-terminated extension (E4). Returns the entry, or NULL.
+static const SFileEndingEntry* FindSupportedEndingRun(LPCTSTR pRun, size_t nRunLen) {
+	EnsureSortedFileEndings();
+	int nLow = 0;
+	int nHigh = s_nSortedFileEndings - 1;
+	while (nLow <= nHigh) {
+		int nMid = (nLow + nHigh) / 2;
+		int nCmp = CompareEndingToRun(sSortedFileEndings[nMid].pszEnding, pRun, nRunLen);
+		if (nCmp == 0) {
+			return &sSortedFileEndings[nMid];
+		} else if (nCmp < 0) {
+			nLow = nMid + 1;
+		} else {
+			nHigh = nMid - 1;
+		}
+	}
+	return NULL;
+}
+
+// E4: case-insensitive exact match of an extension (without dot) against
+// the supported endings. Replaces the linear _tcsicmp scan in FindFiles
+// and the MakeLower copy in IsImageFile; unlike the old IsImageFile it
+// also matches when the ini lists an ending in upper case, which
+// FindFiles already listed.
+static bool IsSupportedFileEnding(LPCTSTR sEnding) {
+	if (sEnding == NULL || *sEnding == 0) {
+		return false;
+	}
+	return FindSupportedEndingRun(sEnding, _tcslen(sEnding)) != NULL;
+}
+
+// E9: scans one slideshow-list line for a supported extension, in place.
+// At each '.', the following run of extension characters (letters/digits)
+// is looked up in the shared sorted suffix set (E4) instead of running
+// stristr() once per suffix, which copied the whole line on every call.
+// Returns a pointer to the '.' of the winning match, or NULL. Among
+// several matches the ending earliest in the supported-endings list wins,
+// as the old per-suffix loop did (first suffix with any occurrence, and
+// its first occurrence in the line). One intentional difference from the
+// old stristr loop, narrower: a ".jpgx" run no longer matches ".jpg"
+// (the old code then extracted the whole "photo.jpgx" token and added
+// the file if it existed on disk, even though its extension is not
+// supported at all).
+static TCHAR* FindSlideShowEndingDot(TCHAR* pLine) {
+	const SFileEndingEntry* pBest = NULL;
+	TCHAR* pBestDot = NULL;
+	for (TCHAR* pDot = pLine; *pDot != 0; pDot++) {
+		if (*pDot != _T('.')) {
+			continue;
+		}
+		LPCTSTR pRun = pDot + 1;
+		size_t nRunLen = 0;
+		while (pRun[nRunLen] != 0) {
+			TCHAR c = pRun[nRunLen];
+			if ((c >= _T('A') && c <= _T('Z')) || (c >= _T('a') && c <= _T('z')) || (c >= _T('0') && c <= _T('9'))) {
+				nRunLen++;
+			} else {
+				break;
+			}
+		}
+		if (nRunLen == 0) {
+			continue;
+		}
+		const SFileEndingEntry* pEntry = FindSupportedEndingRun(pRun, nRunLen);
+		if (pEntry != NULL && (pBest == NULL || pEntry->nOriginalIndex < pBest->nOriginalIndex)) {
+			pBest = pEntry;
+			pBestDot = pDot;
+		}
+	}
+	return pBestDot;
+}
+
 CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directoryWatcher, 
 	Helpers::ESorting eInitialSorting, bool isSortedAscending, bool bWrapAroundFolder, int nLevel, bool forceSorting)
-	: m_directoryWatcher(directoryWatcher) {
+	: m_directoryWatcher(directoryWatcher), m_nCurrentIndex(-1) {
 
 	CFileDesc::SetSorting(eInitialSorting, isSortedAscending);
 	m_bDeleteHistory = true;
@@ -247,7 +375,12 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 	CString sExtensionInitialFile = (nPos > 0) ? sInitialFile.Right(sInitialFile.GetLength()-nPos-1) : _T("");
 	sExtensionInitialFile.MakeLower();
 	bool bImageFile = !bIsDirectory && IsImageFile(sExtensionInitialFile);
-	if (!bIsDirectory && !bImageFile && !sExtensionInitialFile.IsEmpty() && _tcsstr(csFileEndingsRAW, _T("*.") + sExtensionInitialFile) != NULL) {
+	// O-05: match whole ';'-separated segments, not a prefix substring:
+	// _tcsstr("*.sr2;...", "*.sr") matched, so a "*.sr" file was wrongly
+	// treated as a supported RAW file. IsInFileEndingList (Helpers.cpp,
+	// F-12) compares the ".ext" form against each "*.ext" token.
+	CString sDottedInitialExtension = _T(".") + sExtensionInitialFile;
+	if (!bIsDirectory && !bImageFile && !sExtensionInitialFile.IsEmpty() && Helpers::IsInFileEndingList(csFileEndingsRAW, (LPCTSTR)sDottedInitialExtension + 1)) {
 		// initial file is a supported camera raw file but was excluded in INI file - add temporarily to file ending list
 		// F-H03: only claim the file is an image file when the extension
 		// was actually added. If the list is full the file must fall
@@ -266,7 +399,7 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 	if (!m_bIsSlideShowList) {
 		if (bImageFile || bIsDirectory) {
 			FindFiles();
-			m_iter = FindFile(sInitialFile);
+			SetCurrentIter(FindFile(sInitialFile));
 			m_iterStart = bWrapAroundFolder ? m_iter : m_fileList.begin();
 		} else {
 			// neither image file nor directory nor list of file names - try to read anyway but normally will fail
@@ -275,11 +408,13 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 				AddToFileList(m_fileList, fileFind, NULL);
 			}
 			m_iter = m_iterStart = m_fileList.begin();
+			m_nCurrentIndex = m_fileList.empty() ? -1 : 0;
 		}
 	} else {
 		sm_eMode = Helpers::NM_LoopDirectory;
 		if (forceSorting) m_fileList.sort();
 		m_iter = m_iterStart = m_fileList.begin();
+		m_nCurrentIndex = m_fileList.empty() ? -1 : 0;
 	}
 }
 
@@ -332,7 +467,7 @@ void CFileList::Reload(LPCTSTR sFileName, bool clearForwardHistory) {
 		VerifyFiles(); // maybe some of the files got deleted or moved
 		m_iterStart = m_fileList.begin();
 	}
-	m_iter = FindFile(sCurrentFile); // go again to current file
+	SetCurrentIter(FindFile(sCurrentFile)); // go again to current file
 }
 
 bool CFileList::CurrentFileExists() const {
@@ -466,6 +601,7 @@ CFileList* CFileList::Prev() {
 				MoveIterToLast();
 			} else {
 				m_iter--;
+				m_nCurrentIndex--;
 			}
 			return this;
 		} else {
@@ -476,8 +612,13 @@ CFileList* CFileList::Prev() {
 		if (m_iter == m_fileList.begin()) {
 			m_iter = m_fileList.end();
 			m_iter--;
+			m_nCurrentIndex = (int)m_fileList.size() - 1;
+		} else if (m_iter == m_fileList.end()) {
+			m_iter--;
+			m_nCurrentIndex = (int)m_fileList.size() - 1;
 		} else {
 			m_iter--;
+			m_nCurrentIndex--;
 		}
 	}
 	return this;
@@ -486,6 +627,7 @@ CFileList* CFileList::Prev() {
 void CFileList::First() {
 	m_nMarkedIndexShow = -1;
 	m_iter = m_iterStart = m_fileList.begin();
+	m_nCurrentIndex = m_fileList.empty() ? -1 : 0;
 }
 
 void CFileList::Last() {
@@ -502,6 +644,7 @@ CFileList* CFileList::AwayFromCurrent() {
 		if (Current() != NULL && sCurrentFile != NULL && _tcscmp(sCurrentFile, Current()) == 0) {
 			// not moved away, only one image
 			m_iter = m_fileList.end();
+			m_nCurrentIndex = -1;
 		}
 		return pFileList;
 	} else {
@@ -536,16 +679,33 @@ LPCTSTR CFileList::CurrentDirectory() const {
 	}
 }
 
-int CFileList::CurrentIndex() const {
+// E10: (re)establish m_iter together with its cached index. Used where
+// m_iter is (re)assigned from a FindFile() result; the walk is O(n) but
+// these sites (construction, Reload, SetSorting) already walk the list,
+// so the navigation hot path (Next/Prev/First/Last) stays O(1).
+void CFileList::SetCurrentIter(std::list<CFileDesc>::iterator iter) {
+	m_iter = iter;
+	RecalcCurrentIndex();
+}
+
+void CFileList::RecalcCurrentIndex() {
+	m_nCurrentIndex = -1;
 	int i = 0;
 	std::list<CFileDesc>::const_iterator iter;
 	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
 		if (iter == m_iter) {
-			return i;
+			m_nCurrentIndex = i;
+			return;
 		}
 		i++;
 	}
-	return -1;
+}
+
+int CFileList::CurrentIndex() const {
+	// E10: cached index, maintained incrementally wherever m_iter moves
+	// (NextInFolder/Prev/First/Last/MoveIterToLast/SetCurrentIter/
+	// VerifyFiles). Callers only use this for the "[n/N]" display.
+	return m_nCurrentIndex;
 }
 
 const FILETIME* CFileList::CurrentModificationTime() const {
@@ -561,6 +721,7 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 		return (m_nMarkedIndexShow == 0) ? m_sMarkedFile : m_sMarkedFileCurrent;
 	} else {
 		std::list<CFileDesc>::iterator thisIter = m_iter;
+		int nSavedIndex = m_nCurrentIndex;
 		LPCTSTR sFileName;
 		if (nIndex != 0) {
 			CFileList* pFL = bForward ? Next() : Prev();
@@ -569,6 +730,7 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 			sFileName = Current();
 		}
 		m_iter = thisIter;
+		m_nCurrentIndex = nSavedIndex;
 		return sFileName;
 	}
 }
@@ -578,7 +740,7 @@ void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
 		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
 		CFileDesc::SetSorting(eSorting, sortAscending);
 		m_fileList.sort();
-		m_iter = FindFile(sThisFile);
+		SetCurrentIter(FindFile(sThisFile));
 		m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
 	}
 }
@@ -684,6 +846,7 @@ void CFileList::MoveIterToLast() {
 		m_iter++;
 	}
 	m_iter = lastIter;
+	m_nCurrentIndex = (m_iter == m_fileList.end()) ? -1 : (int)m_fileList.size() - 1;
 }
 
 std::list<CFileDesc>::iterator CFileList::FindFile(const CString& sName) {
@@ -822,9 +985,20 @@ CFileList* CFileList::WrapToPrevImage() {
 
 void CFileList::NextInFolder() {
 	if (m_fileList.size() > 0) {
-		m_iter++;
 		if (m_iter == m_fileList.end()) {
+			// Not reachable via Next(), which returns early on end(),
+			// but stepping from end() would be undefined; restart at
+			// the first file instead.
 			m_iter = m_fileList.begin();
+			m_nCurrentIndex = 0;
+		} else {
+			m_iter++;
+			if (m_iter == m_fileList.end()) {
+				m_iter = m_fileList.begin();
+				m_nCurrentIndex = 0;
+			} else {
+				m_nCurrentIndex++;
+			}
 		}
 	}
 }
@@ -871,7 +1045,7 @@ void CFileList::FindFiles() {
 	m_fileList.clear();
 	if (!m_sDirectory.IsEmpty()) {
 		// One pass over the directory, matching the ending in memory. The old loop
-		// asked the file system once per ending - up to 48 of them once the RAW and
+		// asked the file system once per ending, once the RAW and
 		// WIC lists from the ini are added - and a suffix wildcard like "*.jpg"
 		// cannot use the directory index, so each of those calls re-scanned the
 		// whole directory. Asking for "*" once turns that into a single scan.
@@ -885,7 +1059,6 @@ void CFileList::FindFiles() {
 		// rejected up front. The ending itself is compared exactly, which also
 		// covers the reason the old code needed expectedExtension: FindFirstFile
 		// ("*.tif") also returns ".tiff" files through their 8.3 short name.
-		LPCTSTR* allFileEndings = GetSupportedFileEndingList();
 		CFindFile fileFind;
 		if (fileFind.FindFile(m_sDirectory + _T("\\*"))) {
 			do {
@@ -898,11 +1071,9 @@ void CFileList::FindFiles() {
 					continue;
 				}
 				LPCTSTR sEnding = ((LPCTSTR) sFileName) + nLastDot + 1;
-				bool bSupported = false;
-				for (int i = 0; i < nNumEndings && !bSupported; i++) {
-					bSupported = (_tcsicmp(sEnding, allFileEndings[i]) == 0);
-				}
-				if (bSupported) {
+				// E4: O(log n) lookup in the sorted suffix set instead of a
+				// linear _tcsicmp scan over all endings for every file.
+				if (IsSupportedFileEnding(sEnding)) {
 					AddToFileList(m_fileList, fileFind, NULL);
 				}
 			} while (fileFind.FindNextFile());
@@ -910,6 +1081,9 @@ void CFileList::FindFiles() {
 	}
 
 	m_fileList.sort();
+	// E10: the list was rebuilt; the current position is re-established
+	// by the caller (FindFile + SetCurrentIter in the constructor/Reload).
+	m_nCurrentIndex = -1;
 }
 
 void CFileList::VerifyFiles() {
@@ -917,26 +1091,38 @@ void CFileList::VerifyFiles() {
 	// which skipped the element after each deleted one, leaving dead entries
 	// behind when several consecutive files were gone. Iterative erase-returning-
 	// next visits every element exactly once.
+	// E10: the cached index is adjusted as elements vanish: an erasure
+	// before the current file shifts it down by one, erasing the current
+	// file moves m_iter to the next file (same index) or to end() (-1).
+	// nPos is the position of iter in the list as it stands now, so it
+	// stays comparable with the adjusted index; it is not advanced past
+	// an erasure because the next element slides into its place.
 	std::list<CFileDesc>::iterator iter = m_fileList.begin();
+	int nPos = 0;
 	while (iter != m_fileList.end()) {
 		if (::GetFileAttributes(iter->GetName()) == INVALID_FILE_ATTRIBUTES) {
+			bool bErasingCurrent = (iter == m_iter);
 			iter = m_fileList.erase(iter);
+			if (m_nCurrentIndex >= 0) {
+				if (bErasingCurrent) {
+					m_iter = iter;
+					m_nCurrentIndex = (iter == m_fileList.end()) ? -1 : nPos;
+				} else if (nPos < m_nCurrentIndex) {
+					m_nCurrentIndex--;
+				}
+			}
 		} else {
 			++iter;
+			++nPos;
 		}
 	}
 }
 
 bool CFileList::IsImageFile(const CString & sEnding) {
-	CString sEndingLC = sEnding;
-	sEndingLC.MakeLower();
-	LPCTSTR* allFileEndings = GetSupportedFileEndingList();
-	for (int i = 0; i < nNumEndings; i++) {
-		if (allFileEndings[i] == sEndingLC) {
-			return true;
-		}
-	}
-	return false;
+	// E4: same O(log n) lookup as FindFiles; no MakeLower copy, and
+	// case-insensitive, so an upper-case ini ending is recognised here
+	// exactly as it already was by FindFiles.
+	return IsSupportedFileEnding(sEnding);
 }
 
 bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
@@ -1051,15 +1237,14 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 				pStart--;
 			} else {
 				// try to find file name with relative path
-				LPCTSTR* allFileEndings = GetSupportedFileEndingList();
-				for (int i = 0; i < nNumEndings; i++) {
-					pStart = Helpers::stristr(lineBuff, (LPCTSTR)(CString(_T(".")) + allFileEndings[i]));
-					if (pStart != NULL) {
-						while (pStart >= lineBuff && *pStart != _T('"') && *pStart != _T('>')) pStart--;
-						pStart++;
-						bRelativePath = true;
-						break;
-					}
+				// E9: one in-place scan of the line (FindSlideShowEndingDot)
+				// instead of one stristr() per suffix, which copied the whole
+				// line and built a temporary CString on every call.
+				pStart = FindSlideShowEndingDot(lineBuff);
+				if (pStart != NULL) {
+					while (pStart >= lineBuff && *pStart != _T('"') && *pStart != _T('>')) pStart--;
+					pStart++;
+					bRelativePath = true;
 				}
 			}
 			

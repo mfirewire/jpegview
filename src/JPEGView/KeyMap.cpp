@@ -388,7 +388,7 @@ void CKeyMap::RecordRejectedShortcut(LPCTSTR sDefinition, LPCTSTR sReason, bool 
 // separator byte, so any change to the set yields a different value.
 // The hash is only a dedup marker, not a security digest.
 static CString HashRejectedShortcuts(const std::vector<CString>& rejected) {
-	unsigned __int64 nHash = 1469598103934665603ULL; // FNV offset basis
+	unsigned __int64 nHash = 14695981039346656037ULL; // FNV offset basis
 	for (size_t i = 0; i < rejected.size(); i++) {
 		LPCTSTR sEntry = rejected[i];
 		for (int j = 0; sEntry[j] != 0; j++) {

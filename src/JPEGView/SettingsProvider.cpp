@@ -177,11 +177,19 @@ CSettingsProvider::CSettingsProvider(void) {
 	else {
 		m_eCPUAlgorithm = Helpers::ProbeCPU();
 	}
-	m_nNumCores = GetInt(_T("CPUCoresUsed"), 0, 0, 4);
+	// E15: the resample pool used to top out at 4 cores, so 8/16-core machines
+	// only ever used 4. The cap is now 16 (explicit setting or auto-detect).
+	m_nNumCores = GetInt(_T("CPUCoresUsed"), 0, 0, 16);
 	if (m_nNumCores == 0) {
 		m_nNumCores = Helpers::NumCoresPerPhysicalProc();
-		if (m_nNumCores > 4) m_nNumCores = 4;
+		if (m_nNumCores > 16) m_nNumCores = 16;
 	}
+
+	// P2-5: configurable pixel cap, in megapixels. Default 100 MP (the old
+	// Win32 MAX_IMAGE_PIXELS); 1..4096 MP covers up to the old x64 cap of
+	// 65535*65535 pixels. The byte cap (MAX_IMAGE_BYTES) still bounds the
+	// allocation whatever this is set to.
+	m_nMaxImagePixels = (size_t)GetInt(_T("MaxImagePixelsMP"), 100, 1, 4096) * 1024 * 1024;
 
 	CString sDownSampling = GetString(_T("DownSamplingFilter"), _T("BestQuality"));
 	if (sDownSampling.CompareNoCase(_T("NoAliasing")) == 0) {

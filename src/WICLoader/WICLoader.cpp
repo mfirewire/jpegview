@@ -64,7 +64,13 @@ __declspec(dllexport) byte* __stdcall LoadImageWithWIC(LPCWSTR fileName, Allocat
 		if (SUCCEEDED(hr)) {
 			piBitmapFrame->GetSize(width, height);
 			if (*width <= MAX_IMAGE_DIMENSION && *height <= MAX_IMAGE_DIMENSION) {
-				if ((double)*width * *height <= MAX_IMAGE_PIXELS) {
+				// F-15: byte cap before allocating. The pixel cap alone does not
+				// bound the buffer: e.g. 40000x30000 passes it, but the 32-bit
+				// CopyPixels size below would wrap. IsImageBufferSizeOk also
+				// guarantees stride*height fits in a UINT, so the cast in
+				// CopyWICBitmapToBuffer is safe.
+				if ((double)*width * *height <= MAX_IMAGE_PIXELS &&
+					IsImageBufferSizeOk((size_t)*width * 4, *height)) {
 					bitmapBuffer = allocator((size_t)*width * *height * 4);
 					if (bitmapBuffer != NULL) {
 						hr = CopyWICBitmapToBuffer(piBitmapFrame, bitmapBuffer);
@@ -113,7 +119,13 @@ static HRESULT CopyWICBitmapToBuffer(IWICBitmapSource *piBitmapSource, byte* tar
 	if (SUCCEEDED(hr)) {
 		UINT stride = width * 4;
 		WICRect rc = { 0, 0, (int)width, (int)height };
-		IFS(piFormatConverter->CopyPixels(&rc, stride, stride * height, targetBuffer));
+		// F-15: compute the buffer size in size_t first. stride * height in
+		// 32-bit UINT wraps for large images (e.g. 40000x30000 -> 4.8 GB wraps
+		// to ~0.5 GB) and CopyPixels would then write past the buffer. The
+		// IsImageBufferSizeOk gate in LoadImageWithWIC guarantees the size
+		// fits in a UINT, so this cast is safe.
+		size_t cbBufferSize = (size_t)stride * height;
+		IFS(piFormatConverter->CopyPixels(&rc, stride, (UINT)cbBufferSize, targetBuffer));
 	}
 
 	RELEASE_INTERFACE(piFormatConverter);

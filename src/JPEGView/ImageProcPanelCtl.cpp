@@ -176,7 +176,8 @@ bool CImageProcPanelCtl::RenameCurrentFile(LPCTSTR sNewFileTitle) {
 	}
 
 	DWORD nAttributes = ::GetFileAttributes(sCurrentFileName);
-	if (nAttributes & FILE_ATTRIBUTE_READONLY) {
+	// O-06: INVALID_FILE_ATTRIBUTES (0xFFFFFFFF) has every bit set, so the READONLY test below would misfire for a deleted file. Check it first, as the other L-U05 sites do; a missing file falls through to the rename attempt, which fails with a real error.
+	if (nAttributes != INVALID_FILE_ATTRIBUTES && (nAttributes & FILE_ATTRIBUTE_READONLY)) {
 		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("The file is read-only!")), CNLS::GetString(_T("Can't rename file")), MB_OK | MB_ICONSTOP);
 		return false;
 	}

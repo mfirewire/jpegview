@@ -254,6 +254,13 @@ namespace Helpers {
 	// Gets the image format given a file name (uses the file extension)
 	EImageFormat GetImageFormat(LPCTSTR sFileName);
 
+	// Tests whether the extension sEnding is in the ';'-separated list
+	// sFileEndings ("*.ext;*.ext"), matching whole segments only, so
+	// "sr" never matches "*.sr2" (O-05). sEnding points just past the
+	// '.' in a file name, i.e. sEnding - 1 is the dot. Defined in
+	// Helpers.cpp (F-12: parsed in place, no length limit).
+	bool IsInFileEndingList(LPCTSTR sFileEndings, LPCTSTR sEnding);
+
 	// Returns the short form of the path (including the short form of the file name)
 	CString GetShortFilePath(LPCTSTR sPath);
 

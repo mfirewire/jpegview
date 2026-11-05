@@ -42,6 +42,8 @@
 	<?define AvifDllFolder = "$(var.JPEGView.ProjectDir)\libavif\$(var.DllBinFolder)" ?>
 	<?define LcmsDllFolder = "$(var.JPEGView.ProjectDir)\lcms2\$(var.DllBinFolder)" ?>
 	<?define RawDllFolder = "$(var.JPEGView.ProjectDir)\libraw\$(var.DllBinFolder)" ?>
+	<?define OpenJpegDllFolder = "$(var.JPEGView.ProjectDir)\libopenjpeg\$(var.DllBinFolder)" ?>
+	<?define ThorvgDllFolder = "$(var.JPEGView.ProjectDir)\libthorvg\$(var.DllBinFolder)" ?>
 
 	<!--
 		====================================================================================
@@ -224,6 +226,12 @@
 				<ComponentRef Id="libde265DLL"/>
 				<ComponentRef Id="heifDLL"/>
 				<ComponentRef Id="avifDLL"/>
+			</Feature>
+			<Feature Id="FeatureJP2" Title="JPEG 2000 Support">
+				<ComponentRef Id="openjp2DLL"/>
+			</Feature>
+			<Feature Id="FeatureSVG" Title="SVG Support">
+				<ComponentRef Id="thorvgDLL"/>
 			</Feature>
 			<!-- dcraw is compiled into JPEGView, but doesn't support the latest (modern) camera formats -->
 			<Feature Id="FeatureRAW" Title="Camera RAW Files Support (modern cameras)">
@@ -442,6 +450,7 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jxl" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".avif" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".avifs" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".avis" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".heif" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".heic" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".hif" Value="" Type="string" />
@@ -461,6 +470,11 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".hdr" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".rgbe" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pbm" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jp2" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".j2k" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".j2c" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".exr" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".svg" Value="" Type="string" />
 						<!-- csFileEndingsRAW -->
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pef" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".dng" Value="" Type="string" />
@@ -559,6 +573,12 @@
 					</Component>
 					<Component Id="avifDLL" Guid="1597e47e-b6ae-44f4-b28a-6b7503bdd1d2">
 						<File Id="avif.dll" Name="avif.dll" Source="$(var.AvifDllFolder)\avif.dll" />
+					</Component>
+					<Component Id="openjp2DLL" Guid="6dbcd108-b57f-4cdc-8093-f6e1a3bbdb1f">
+						<File Id="openjp2.dll" Name="openjp2.dll" Source="$(var.OpenJpegDllFolder)\openjp2.dll" />
+					</Component>
+					<Component Id="thorvgDLL" Guid="32e6c68b-fcbb-4576-8ffd-15222fda7e34">
+						<File Id="libthorvg-1.dll" Name="libthorvg-1.dll" Source="$(var.ThorvgDllFolder)\libthorvg-1.dll" />
 					</Component>
 
 

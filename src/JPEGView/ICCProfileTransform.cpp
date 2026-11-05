@@ -34,20 +34,26 @@ void* ICCProfileTransform::GetsRGBProfile() {
 
 void* ICCProfileTransform::GetLabProfile() {
 	if (LabProfile == NULL) {
-		LabProfile = cmsCreateLab4Profile(cmsD50_xyY());
+		// Use try-catch to avoid crash if lcms2.dll not present
+		try {
+			LabProfile = cmsCreateLab4Profile(cmsD50_xyY());
+		} catch (...) {}
 	}
 	return LabProfile;
 }
 
 void* ICCProfileTransform::GetCMYKProfile() {
 	if (CMYKProfile == NULL) {
-		CHAR path[MAX_PATH + 16];
+		// Use try-catch to avoid crash if lcms2.dll not present
+		try {
+			CHAR path[MAX_PATH + 16];
 		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
 		if (length > 0 && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
 			PathRemoveFileSpecA(path);
 			lstrcatA(path, "\\cmyk.icm");
 			CMYKProfile = cmsOpenProfileFromFile(path, "r");
 		}
+		} catch (...) {}
 	}
 	return CMYKProfile;
 }

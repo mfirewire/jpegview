@@ -39,8 +39,13 @@ public:
 	// When the requested image is already cached, it is returned immediately. Otherwise the method
 	// blocks until the image is ready. If not specified otherwise, a read-ahead request for the next image is
 	// created automatically so that the next image will be ready immediately when requested in the future.
+	// pbSizeLimitExceeded (optional, P2-5): if non-NULL, set to true when the
+	// image was rejected for exceeding the pixel cap. That is distinct from
+	// bOutOfMemory (which stays false then) and must be reported as a size
+	// error, not as "not enough memory". The on-screen text for it lives
+	// with the MainDlg/HelpersGUI error display (not this class).
 	CJPEGImage* RequestImage(CFileList* pFileList, EReadAheadDirection eDirection, LPCTSTR strFileName, int nFrameIndex,
-		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW = false);
+		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW = false, bool* pbSizeLimitExceeded = NULL);
 
 	// Notifies that the specified image is no longer used and its memory can be freed.
 	// The CJPEGProvider class may decide to keep the image cached.
@@ -82,6 +87,7 @@ private:
 		bool IsActive; // true if this request is active (i.e. requested but not ready or ready and in use).
 		bool OutOfMemory; // true if the image failed loading due to out of memory
 		bool ExceptionError; // true if the image failed loading due to an unhandled exception
+		bool SizeLimitExceeded; // P2-5: true if the image exceeded the pixel cap (not OOM)
 		int AccessTimeStamp; // LRU handling
 		CImageLoadThread* HandlingThread; // thread that is loading the image, NULL when image is ready
 		HANDLE EventFinished; // event fired when image has finished loading
@@ -97,6 +103,7 @@ private:
 			IsActive = true;
 			OutOfMemory = false;
 			ExceptionError = false;
+			SizeLimitExceeded = false;
 			AccessTimeStamp = -1;
 			HandlingThread = NULL;
 			EventFinished = ::CreateEvent(NULL, TRUE, FALSE, NULL);

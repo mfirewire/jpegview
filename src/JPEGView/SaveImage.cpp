@@ -12,6 +12,8 @@
 #include "QOIWrapper.h"
 #include "MaxImageDef.h"
 #include <gdiplus.h>
+#include <io.h> // _open_osfhandle, _fdopen (P3-1)
+#include <fcntl.h> // _O_WRONLY (P3-1)
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -165,8 +167,19 @@ static int GetJFIFBlockLength(unsigned char* pJPEGStream) {
 // uses these same helpers, so both save paths share the unique temp
 // name (process id + counter) created with CREATE_NEW: an existing file
 // can never be truncated by a save.
-bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
-	CString sTargetStr(sTarget);
+bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut, HANDLE& hFileOut) {
+	hFileOut = INVALID_HANDLE_VALUE;
+	// P3-2: resolve the target to an absolute path first. The MAX_PATH
+	// check below then measures the absolute temp path, which is what
+	// CreateFile actually opens; a relative target in a deep working
+	// directory used to pass the check and fail later at CreateFile.
+	TCHAR szAbsolute[MAX_PATH];
+	DWORD nAbsoluteLen = ::GetFullPathName(sTarget, MAX_PATH, szAbsolute, NULL);
+	if (nAbsoluteLen == 0 || nAbsoluteLen >= MAX_PATH) {
+		::OutputDebugString(CString(_T("JPEGView: atomic save target path is empty or exceeds MAX_PATH, save aborted: ")) + CString(sTarget) + _T("\n"));
+		return false;
+	}
+	CString sTargetStr(szAbsolute);
 	int nSlashBack = sTargetStr.ReverseFind(_T('\\'));
 	int nSlashFwd = sTargetStr.ReverseFind(_T('/'));
 	int nSlash = max(nSlashBack, nSlashFwd);
@@ -188,7 +201,13 @@ bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
 		}
 		HANDLE hFile = ::CreateFile(sCandidate, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (hFile != INVALID_HANDLE_VALUE) {
-			::CloseHandle(hFile);
+			// P3-1: hand the handle out instead of closing it here. The
+			// caller writes to this handle directly, so nothing can swap
+			// another file into the path between creation and open (the
+			// old create-close-reopen sequence had that TOCTOU window).
+			// The caller owns the handle from here on (fclose closes it
+			// once wrapped in a FILE*, see OpenTempFileForWriting).
+			hFileOut = hFile;
 			sTempOut = sCandidate;
 			return true;
 		}
@@ -198,6 +217,18 @@ bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
 		// Name collided (counter differs next round, so this terminates).
 	}
 	return false;
+}
+bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
+	// Kept for callers that need the path, not the handle: SaveGDIPlus
+	// below (GDI+ saves by file name) and JPEGLosslessTransform.cpp.
+	// The TOCTOU window remains for those two paths; they open the
+	// CREATE_NEW-reserved name immediately after creation.
+	HANDLE hFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sTarget, sTempOut, hFile)) {
+		return false;
+	}
+	::CloseHandle(hFile);
+	return true;
 }
 void DeleteAtomicTempFile(LPCTSTR sTemp) {
 	if (sTemp != NULL && sTemp[0] != 0) {
@@ -216,6 +247,27 @@ bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp) {
 	return ::MoveFile(sTemp, sTarget) != 0;
 }
 
+// P3-1: wrap the CREATE_NEW handle from CreateAtomicTempFileName in a
+// FILE* so the existing fwrite/fclose call sites are unchanged. fclose
+// closes the underlying handle. On failure the handle is closed here and
+// the caller deletes the (empty) temp file.
+static FILE* OpenTempFileForWriting(HANDLE hFile) {
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return NULL;
+	}
+	int nFd = _open_osfhandle((intptr_t)hFile, _O_WRONLY);
+	if (nFd == -1) {
+		::CloseHandle(hFile);
+		return NULL;
+	}
+	FILE* fptr = _fdopen(nFd, "wb");
+	if (fptr == NULL) {
+		_close(nFd);
+		return NULL;
+	}
+	return fptr;
+}
+
 // Returns the compressed JPEG stream that must be freed by the caller. NULL in case of error.
 static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage, 
 							 void* pData, int nWidth, int nHeight, int nQuality, int& nJPEGStreamLen, 
@@ -230,11 +282,12 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 	}
 
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
 		TurboJpeg::Free(pTargetStream);
 		return NULL;
 	}
-	FILE *fptr = _tfopen(sTempFile, _T("wb"));
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
 	if (fptr == NULL) {
 		DeleteAtomicTempFile(sTempFile);
 		TurboJpeg::Free(pTargetStream);
@@ -330,10 +383,11 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 // pData must point to 24 bit BGR DIB
 static bool SaveWebP(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bool bUseLosslessWEBP) {
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
 		return false;
 	}
-	FILE *fptr = _tfopen(sTempFile, _T("wb"));
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
 	if (fptr == NULL) {
 		DeleteAtomicTempFile(sTempFile);
 		return false;
@@ -376,10 +430,11 @@ static bool SaveWebP(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bo
 // pData must point to 24 bit BGR DIB
 static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, bool bUseLosslessJXL) {
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
 		return false;
 	}
-	FILE* fptr = _tfopen(sTempFile, _T("wb"));
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
 	if (fptr == NULL) {
 		DeleteAtomicTempFile(sTempFile);
 		return false;
@@ -424,10 +479,11 @@ static bool SaveJXL(LPCTSTR sFileName, void* pData, int nWidth, int nHeight, boo
 // pData must point to 24 bit BGR DIB
 static bool SaveQOI(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
 		return false;
 	}
-	FILE* fptr = _tfopen(sTempFile, _T("wb"));
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
 	if (fptr == NULL) {
 		DeleteAtomicTempFile(sTempFile);
 		return false;
@@ -646,10 +702,11 @@ bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, bool bUseLoss
 
 bool CSaveImage::ConvertToJXL(LPCTSTR sJxlFile, LPCTSTR sJpegFile) {
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sJxlFile, sTempFile)) {
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sJxlFile, sTempFile, hTempFile)) {
 		return false;
 	}
-	FILE* fptr = _tfopen(sTempFile, _T("wb"));
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
 	if (fptr == NULL) {
 		DeleteAtomicTempFile(sTempFile);
 		return false;

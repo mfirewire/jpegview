@@ -399,6 +399,7 @@ namespace HelpersGUI {
 	void DrawImageLoadErrorText(CDC& dc, const CRect& clientRect, LPCTSTR sFailedFileName, int nFileLoadError, int nLoadErrorDetail) {
 		bool bOutOfMemory = nLoadErrorDetail & FileLoad_OutOfMemory;
 		bool bExceptionError = nLoadErrorDetail & FileLoad_ExceptionError;
+		bool bSizeLimitExceeded = nLoadErrorDetail & FileLoad_SizeLimitExceeded;
 
 		const int BUF_LEN = 512;
 		TCHAR buff[BUF_LEN];
@@ -421,7 +422,10 @@ namespace HelpersGUI {
 			default:
 				return;
 		}
-		if (bOutOfMemory) {
+		if (bSizeLimitExceeded) {
+			_tcscat_s(buff, BUF_LEN, _T("\n"));
+			_tcscat_s(buff, BUF_LEN, CString(CNLS::GetString(_T("Reason:"))) + _T(" ") + CNLS::GetString(_T("Image size exceeds the limit (MaxImagePixelsMP)")));
+		} else if (bOutOfMemory) {
 			_tcscat_s(buff, BUF_LEN, _T("\n"));
 			_tcscat_s(buff, BUF_LEN, CString(CNLS::GetString(_T("Reason:"))) + _T(" ") + CNLS::GetString(_T("Not enough memory available")));
 		} else if (nFileLoadError == FileLoad_LoadError) {

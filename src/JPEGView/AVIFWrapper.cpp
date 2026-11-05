@@ -64,6 +64,25 @@ void* AvifReader::ReadImage(int& width,
 			DeleteCache();
 			return NULL;
 		}
+		// F-06: gate on the parsed header dimensions BEFORE decoding the
+		// frame. avifDecoderNthImage below decodes the full YUV planes; a
+		// 65535x65535 header would force GB-scale decoder-internal allocation
+		// before the old post-decode check ever ran. All frames of an AVIF
+		// sequence share the primary image dimensions, so the parsed first
+		// image is the right thing to gate on. If Parse left no image
+		// (should not happen), fall through: the post-decode check below
+		// still applies.
+		if (cache.decoder->image != NULL) {
+			uint32_t nHeaderWidth = cache.decoder->image->width;
+			uint32_t nHeaderHeight = cache.decoder->image->height;
+			if (nHeaderWidth < 1 || nHeaderHeight < 1 ||
+				nHeaderWidth > (uint32_t)MAX_IMAGE_DIMENSION || nHeaderHeight > (uint32_t)MAX_IMAGE_DIMENSION ||
+				(double)nHeaderWidth * nHeaderHeight > MAX_IMAGE_PIXELS ||
+				!IsImageBufferSizeOk((size_t)nHeaderWidth * nchannels, (size_t)nHeaderHeight)) {
+				DeleteCache();
+				return NULL;
+			}
+		}
 		cache.rgb = { 0 };
 		
 		cache.data_size = sizebytes;

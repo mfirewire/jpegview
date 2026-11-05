@@ -17,6 +17,29 @@ void* QoiReaderWriter::ReadImage(int& width,
 	int sizebytes)
 {
 	outOfMemory = false;
+	if (buffer == NULL || sizebytes < 14)
+		return NULL;
+	// F-07 size gate, before qoi_decode: the 14-byte header carries the
+	// dimensions (big-endian uint32 width/height), so a header claiming
+	// 65535x65535 is refused before qoi_decode allocates a 17 GB raster.
+	const unsigned char* pHeader = (const unsigned char*)buffer;
+	if (pHeader[0] != 'q' || pHeader[1] != 'o' || pHeader[2] != 'i' || pHeader[3] != 'f')
+		return NULL;
+	unsigned int nHdrWidth = ((unsigned int)pHeader[4] << 24) | ((unsigned int)pHeader[5] << 16) | ((unsigned int)pHeader[6] << 8) | (unsigned int)pHeader[7];
+	unsigned int nHdrHeight = ((unsigned int)pHeader[8] << 24) | ((unsigned int)pHeader[9] << 16) | ((unsigned int)pHeader[10] << 8) | (unsigned int)pHeader[11];
+	unsigned int nHdrChannels = pHeader[12];
+	if (nHdrWidth == 0 || nHdrHeight == 0 || nHdrWidth > MAX_IMAGE_DIMENSION || nHdrHeight > MAX_IMAGE_DIMENSION)
+		return NULL;
+	if (nHdrChannels != 3 && nHdrChannels != 4)
+		return NULL;
+	if (abs((double)nHdrWidth * nHdrHeight) > MAX_IMAGE_PIXELS) {
+		outOfMemory = true;
+		return NULL;
+	}
+	if (!IsImageBufferSizeOk((size_t)nHdrWidth * (size_t)nHdrChannels, (size_t)nHdrHeight, NULL)) {
+		outOfMemory = true;
+		return NULL;
+	}
 
 	qoi_desc desc = { 0 };
 	unsigned char* pDecodedPixels = (unsigned char*)qoi_decode(buffer, sizebytes, &desc, 0);

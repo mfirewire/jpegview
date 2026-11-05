@@ -59,6 +59,13 @@ void* PPMReader::ReadImage(int& width,
 	// through and let stb_image fail as it would have.
 	const unsigned char* pLoadBuffer = pMagic;
 	unsigned char* pSwappedBuffer = NULL;
+	// F-07: header dimensions, filled in by the parse block below before
+	// any decode runs, so a header claiming 65535x65535 is refused before
+	// stb_image allocates a 13 GB raster for it. bHdrOk stays false when
+	// the header is malformed; then stb_image fails on it as before.
+	int nHdrWidth = 0;
+	int nHdrHeight = 0;
+	bool bHdrOk = false;
 	{
 		size_t pos = 0;
 		unsigned char c = 0;
@@ -100,6 +107,11 @@ void* PPMReader::ReadImage(int& width,
 			if (!bParseOk) break;
 			nValues[t] = v;
 		}
+		if (bParseOk) {
+			nHdrWidth = nValues[0];
+			nHdrHeight = nValues[1];
+			bHdrOk = true;
+		}
 		if (bParseOk && nValues[2] > 255 && nValues[2] <= 65535 && nValues[0] > 0 && nValues[1] > 0) {
 			int nCh = (pMagic[1] == '6') ? 3 : 1;
 			size_t nRasterBytes = (size_t)nValues[0] * (size_t)nValues[1] * (size_t)nCh * 2;
@@ -115,6 +127,33 @@ void* PPMReader::ReadImage(int& width,
 					pLoadBuffer = pSwappedBuffer;
 				}
 			}
+		}
+	}
+
+	// F-07 size gate, before stbi_load_from_memory: the only allocation so
+	// far is a copy of the input file (bounded by the file size, not the
+	// header). The byte gate is the one that bites for 65535x65535: the
+	// pixel count alone sits exactly at MAX_IMAGE_PIXELS on x64.
+	if (bHdrOk) {
+		// Gate on the padded 3-byte BGR output stride (as HDRWrapper does):
+		// it bounds both the stb raster and the output buffer, so even a
+		// 1-channel P5 at 65535x65535 (4.29 GB raster, just under the byte
+		// cap) is refused here instead of after a huge decode.
+		if (nHdrWidth <= 0 || nHdrHeight <= 0 || nHdrWidth > MAX_IMAGE_DIMENSION || nHdrHeight > MAX_IMAGE_DIMENSION) {
+			delete[] pSwappedBuffer;
+			return NULL;
+		}
+		if (abs((double)nHdrWidth * nHdrHeight) > MAX_IMAGE_PIXELS) {
+			outOfMemory = true;
+			delete[] pSwappedBuffer;
+			return NULL;
+		}
+		size_t nHdrAllocSize = 0;
+		size_t nHdrPaddedStride = (size_t)Helpers::DoPadding(nHdrWidth * 3, 4);
+		if (!IsImageBufferSizeOk(nHdrPaddedStride, (size_t)nHdrHeight, &nHdrAllocSize)) {
+			outOfMemory = true;
+			delete[] pSwappedBuffer;
+			return NULL;
 		}
 	}
 

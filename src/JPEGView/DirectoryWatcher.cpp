@@ -69,9 +69,20 @@ void CDirectoryWatcher::Abort() {
 
 void CDirectoryWatcher::SetCurrentFile(LPCTSTR fileName)
 {
+	// E18: reading the file time opens the file, which can stall on a
+	// slow or network drive. Do it outside the lock; only the assignment
+	// takes the lock, so lock waiters are never stuck behind file I/O.
+	// The file name is copied first: m_sCurrentFile must not change
+	// under the read.
+	CString sFileName(fileName);
+	FILETIME modificationTime = { 0 };
+	BOOL bTimeValid = !sFileName.IsEmpty() && GetLastModificationTime(sFileName, modificationTime);
 	::EnterCriticalSection(&m_lock);
-	m_sCurrentFile = fileName;
-	m_bModificationTimeValid = !m_sCurrentFile.IsEmpty() && GetLastModificationTime(m_sCurrentFile, m_modificationTimeCurrentFile);
+	m_sCurrentFile = sFileName;
+	m_bModificationTimeValid = bTimeValid;
+	if (bTimeValid) {
+		m_modificationTimeCurrentFile = modificationTime;
+	}
 	::LeaveCriticalSection(&m_lock);
 }
 

@@ -880,7 +880,7 @@ LPCTSTR ConvertTransitionEffectToString(ETransitionEffect effect) {
 	}
 }
 
-static bool IsInFileEndingList(LPCTSTR sFileEndings, LPCTSTR sEnding) {
+bool IsInFileEndingList(LPCTSTR sFileEndings, LPCTSTR sEnding) {
 	// F-12: parse the ';'-separated list in place instead of copying
 	// it into a fixed 256-char buffer, which silently truncated
 	// longer lists (user-extended FileEndingsRAW / FilesProcessedByWIC
@@ -932,7 +932,7 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_WEBP;
 		} else if (_tcsicmp(sEnding, _T("JXL")) == 0) {
 			return IF_JXL;
-		} else if (_tcsicmp(sEnding, _T("AVIF")) == 0 || _tcsicmp(sEnding, _T("AVIFS")) == 0) {
+		} else if (_tcsicmp(sEnding, _T("AVIF")) == 0 || _tcsicmp(sEnding, _T("AVIFS")) == 0 || _tcsicmp(sEnding, _T("AVIS")) == 0) {
 			return IF_AVIF;
 		} else if (_tcsicmp(sEnding, _T("HEIF")) == 0 || _tcsicmp(sEnding, _T("HEIC")) == 0 || _tcsicmp(sEnding, _T("HIF")) == 0) {
 			return IF_HEIF;
@@ -946,12 +946,27 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_HDR;
 		} else if (_tcsicmp(sEnding, _T("PBM")) == 0) {
 			return IF_PBM;
+		} else if (_tcsicmp(sEnding, _T("JP2")) == 0 || _tcsicmp(sEnding, _T("J2K")) == 0 || _tcsicmp(sEnding, _T("J2C")) == 0) {
+			return IF_JP2;
+		} else if (_tcsicmp(sEnding, _T("EXR")) == 0) {
+			return IF_EXR;
+		} else if (_tcsicmp(sEnding, _T("SVG")) == 0) {
+			return IF_SVG;
 		} else if (_tcsicmp(sEnding, _T("PSD")) == 0 || _tcsicmp(sEnding, _T("PSB")) == 0) {
 			return IF_PSD;
 		} else if (IsInFileEndingList(CSettingsProvider::This().FilesProcessedByWIC(), sEnding)) {
 			return IF_WIC;
 		} else if (IsInFileEndingList(CSettingsProvider::This().FileEndingsRAW(), sEnding)) {
 			return IF_CameraRAW;
+		} else if (IsInFileEndingList(CSettingsProvider::This().FileEndingsExtra(), sEnding)) {
+			// F-11: an Extra-listed extension no decoder claims by extension.
+			// Formats with a magic signature already open through the magic
+			// sniff in ImageLoadThread (which runs before this fallback), so
+			// this only covers the no-magic remainder: give WIC one attempt
+			// with the machine's installed codecs, and fail cleanly as before
+			// when there is none. The shipped ini already warns that Extra is
+			// browsing-only for anything no decoder understands (fa00eb3).
+			return IF_WIC;
 		}
 	}
 	return IF_Unknown;

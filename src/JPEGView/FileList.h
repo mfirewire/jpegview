@@ -159,6 +159,7 @@ private:
 	CFileList* m_prev;
 	std::list<CFileDesc> m_fileList;
 	std::list<CFileDesc>::iterator m_iter; // current position in m_fileList
+	int m_nCurrentIndex; // 0-based index of m_iter in m_fileList, or -1 when m_iter == end(); maintained incrementally, see E10 in FileList.cpp
 	std::list<CFileDesc>::iterator m_iterStart; // start of iteration in m_fileList
 	std::list<CFileDesc>::iterator m_iterCheckPoint;
 
@@ -169,6 +170,10 @@ private:
 	CDirectoryWatcher & m_directoryWatcher;
 
 	void MoveIterToLast();
+	// E10: (re)establish m_iter together with its cached index (SetCurrentIter
+	// walks the list; RecalcCurrentIndex only recomputes the index).
+	void SetCurrentIter(std::list<CFileDesc>::iterator iter);
+	void RecalcCurrentIndex();
 	void NextInFolder();
 	CFileList* GotoFirstShown();
 	std::list<CFileDesc>::iterator FindFile(const CString& sName);

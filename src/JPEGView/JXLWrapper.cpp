@@ -22,6 +22,7 @@ struct JxlReader::jxl_cache {
 	uint8_t* data;
 	size_t data_size;
 	int prev_frame_timestamp;
+	int total_frames; // F-16: frames counted on the first decode of this file (0 = not counted yet); JXL stores no frame count.
 	int width;
 	int height;
 	void* transform;
@@ -34,6 +35,11 @@ JxlReader::jxl_cache JxlReader::cache = { 0 };
 // and https://github.com/libjxl/libjxl/blob/main/examples/decode_exif_metadata.cc
 bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector<uint8_t>* pixels, int& xsize,
 	int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory) {
+
+	// F-16: true only on the first decode of a file, when the decoder is
+	// created below; the total frame count is counted on that call (JXL
+	// stores no frame count) and cached for later frames.
+	bool bCountThisCall = (cache.decoder.get() == NULL);
 
 	if (cache.decoder.get() == NULL) {
 		cache.runner = JxlResizableParallelRunnerMake(nullptr);
@@ -70,6 +76,9 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 	size_t output_pos = 0;
 
 	bool loop_check = false;
+	int nFrameEvents = 0; // F-16: JXL_DEC_FRAME events seen in this call
+	bool bCountingFrames = false; // F-16: first frame seen, counting the rest
+	bool bRewoundAfterCount = false; // F-16: decoder rewound after the counting pass
 	for (;;) {
 		JxlDecoderStatus status = JxlDecoderProcessInput(cache.decoder.get());
 
@@ -107,6 +116,7 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 				return false;
 			}
 		} else if (status == JXL_DEC_FRAME) {
+			nFrameEvents++; // F-16: count frames as they are decoded
 			JxlFrameHeader header;
 			JxlDecoderGetFrameHeader(cache.decoder.get(), &header);
 			JxlAnimationHeader animation = cache.info.animation;
@@ -137,19 +147,45 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			xsize = cache.info.xsize;
 			ysize = cache.info.ysize;
 			have_animation = cache.info.have_animation;
-			if (have_animation) {
-				// TODO: Find a better way to indicate unknown frame count. JPEG XL images do not store number of frames.
-				frame_count = 2;
-			} else {
+			if (!have_animation) {
 				frame_count = 1;
+				return true;
 			}
-			return true;
+			if (bCountThisCall && !bCountingFrames) {
+				// F-16: first frame of an animation on the first decode of
+				// this file. JXL stores no frame count, and the old
+				// hardcoded 2 made the player wrap after frame 1, so
+				// frames 2+ never played. Keep decoding instead: later
+				// frames overwrite *pixels and are discarded, until the
+				// stream ends and the total is known. The SUCCESS branch
+				// below rewinds the decoder and frame 0 is decoded again.
+				// Cost: one full animation decode on first open.
+				bCountingFrames = true;
+			} else if (bCountingFrames && bRewoundAfterCount) {
+				// Re-decoded frame 0 after the counting pass rewound the
+				// decoder; *pixels holds it again and the total is known.
+				frame_count = cache.total_frames;
+				return true;
+			} else if (!bCountingFrames) {
+				// Later frame of an animation whose total was counted on
+				// the first decode of this file.
+				frame_count = cache.total_frames;
+				return true;
+			}
+			// Else: still counting (a later frame's FULL_IMAGE during the
+			// counting pass) - fall through and keep decoding.
 		} else if (status == JXL_DEC_SUCCESS) {
 			// All decoding successfully finished, we are at the end of the file.
 			// We must rewind the decoder to get a new frame.
 			if (loop_check)
 				return false; // escape infinite loop
 			loop_check = true;
+			// F-16: the counting pass ends here; remember the total so later
+			// frames report it without recounting.
+			if (bCountingFrames && cache.total_frames == 0)
+				cache.total_frames = nFrameEvents;
+			if (bCountingFrames)
+				bRewoundAfterCount = true;
 			JxlDecoderRewind(cache.decoder.get());
 			JxlDecoderSubscribeEvents(cache.decoder.get(), JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
 			JxlDecoderSetInput(cache.decoder.get(), cache.data, cache.data_size);

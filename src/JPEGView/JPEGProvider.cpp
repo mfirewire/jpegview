@@ -80,10 +80,11 @@ static void WaitForRequestWithMessagePump(HANDLE hEvent) {
 
 CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirection eDirection,
                                         LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams,
-                                        bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW) {
+                                        bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW, bool* pbSizeLimitExceeded) {
 	if (strFileName == NULL) {
 		bOutOfMemory = false;
 		bExceptionError = false;
+		if (pbSizeLimitExceeded != NULL) *pbSizeLimitExceeded = false;
 		return NULL;
 	}
 
@@ -153,6 +154,13 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 
 	bOutOfMemory = pRequest->OutOfMemory;
 	bExceptionError = pRequest->ExceptionError;
+	// P2-5: a size-limit rejection is not out-of-memory (and never triggered
+	// the retry above, which only runs on pRequest->OutOfMemory). Report it
+	// through the optional out-param; the on-screen "size exceeded" text is
+	// owned by the MainDlg/HelpersGUI error display, not this class.
+	if (pbSizeLimitExceeded != NULL) {
+		*pbSizeLimitExceeded = pRequest->SizeLimitExceeded;
+	}
 	return pRequest->Image;
 }
 
@@ -213,7 +221,19 @@ bool CJPEGProvider::ClearRequest(CJPEGImage* pImage, bool releaseLockedFile) {
 	std::list<CImageRequest*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
 		if ((*iter)->Image == pImage) {
-			if (releaseLockedFile) m_pWorkThreads[0]->ReleaseFile((*iter)->FileName);
+			if (releaseLockedFile) {
+				// E2 follow-up: every load thread owns its own cached decoders
+				// (animated WebP/PNG/JXL/AVIF, GDI+ bitmap), keyed on file
+				// name. Releasing only on thread [0] left a thread-1 cache
+				// behind, so a reload after an external edit could still
+				// serve stale frames. The NULL guard mirrors the destructor:
+				// a slot is NULLed when its thread outlived Terminate().
+				for (int i = 0; i < m_nNumThread; i++) {
+					if (m_pWorkThreads[i] != NULL) {
+						m_pWorkThreads[i]->ReleaseFile((*iter)->FileName);
+					}
+				}
+			}
 			// images that are not ready cannot be removed yet
 			if ((*iter)->Ready) {
 				DeleteElementAt(iter);
@@ -302,6 +322,7 @@ void CJPEGProvider::GetLoadedImageFromWorkThread(CImageRequest* pRequest) {
 		pRequest->Image = imageData.Image;
 		pRequest->OutOfMemory = imageData.IsRequestFailedOutOfMemory;
 		pRequest->ExceptionError = imageData.IsRequestFailedException;
+		pRequest->SizeLimitExceeded = imageData.IsRequestFailedSizeLimit;
 		pRequest->Ready = true;
 		pRequest->HandlingThread = NULL;
 	}

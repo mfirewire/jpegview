@@ -51,6 +51,9 @@ public:
 	LPCTSTR Language() { return m_sLanguage; }
 	Helpers::CPUType AlgorithmImplementation() { return m_eCPUAlgorithm; }
 	int NumberOfCoresToUse() { return m_nNumCores; }
+	// P2-5: effective pixel cap (MaxImagePixelsMP INI setting, megapixels).
+	// Default 100 MP; the byte cap in MaxImageDef.h still applies on top.
+	size_t MaxImagePixels() { return m_nMaxImagePixels; }
 	EFilterType DownsamplingFilter() { return m_eDownsamplingFilter; }
 	Helpers::ESorting Sorting() { return m_eSorting; }
 	bool IsSortedAscending() { return m_bIsSortedAscending; }
@@ -227,6 +230,7 @@ private:
 	CString m_sLanguage;
 	Helpers::CPUType m_eCPUAlgorithm;
 	int m_nNumCores;
+	size_t m_nMaxImagePixels; // P2-5: effective pixel cap, from MaxImagePixelsMP
 	EFilterType m_eDownsamplingFilter;
 	Helpers::ESorting m_eSorting;
 	bool m_bIsSortedAscending;

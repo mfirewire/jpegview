@@ -116,9 +116,10 @@ static void ReadUserCommentTag(CString & strOut, uint8* ptr, uint8* pTIFFHeader,
 					return;
 				}
 				LPCSTR sCodeDesc = (LPCSTR)(pTIFFHeader + nOffset);
-				if (strcmp(sCodeDesc, "ASCII") == 0) {
+				// F-19: bounded compare. strcmp would read past the validated nSize bytes looking for a NUL; nSize > 10 above guarantees the 8 bytes strncmp can touch are inside the range, and the NUL inside each literal makes the match exact ("ASCII" + NUL, "UNICODE" + NUL).
+				if (strncmp(sCodeDesc, "ASCII", 8) == 0) {
 					strOut = CString((LPCSTR)(sCodeDesc + 8), nSize - 8);
-				} else if (strcmp(sCodeDesc, "UNICODE") == 0) {
+				} else if (strncmp(sCodeDesc, "UNICODE", 8) == 0) {
 					bool bLE = bLittleEndian;
 					nSize -= 8;
 					sCodeDesc += 8;

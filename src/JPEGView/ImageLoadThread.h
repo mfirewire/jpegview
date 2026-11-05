@@ -17,11 +17,16 @@ public:
 	bool IsRequestFailedOutOfMemory;
 	// True if the request failed due to an unhandled exception
 	bool IsRequestFailedException;
+	// P2-5: true if the image was rejected for exceeding the pixel cap
+	// (MaxImagePixelsMP). Distinct from out-of-memory: no retry, and the
+	// UI must not report "not enough memory" for it.
+	bool IsRequestFailedSizeLimit;
 
-	CImageData(CJPEGImage* pImage, bool isRequestFailedOutOfMemory, bool isRequestFailedException) {
+	CImageData(CJPEGImage* pImage, bool isRequestFailedOutOfMemory, bool isRequestFailedException, bool isRequestFailedSizeLimit = false) {
 		Image = pImage;
 		IsRequestFailedOutOfMemory = isRequestFailedOutOfMemory;
 		IsRequestFailedException = isRequestFailedException;
+		IsRequestFailedSizeLimit = isRequestFailedSizeLimit;
 	}
 };
 
@@ -65,6 +70,7 @@ private:
 			Image = NULL;
 			OutOfMemory = false;
 			ExceptionError = false;
+			SizeLimitExceeded = false;
 			ForceFullSizeRAW = forceFullSizeRAW;
 		}
 
@@ -76,6 +82,7 @@ private:
 		CProcessParams ProcessParams;
 		bool OutOfMemory;  // load caused an out of memory condition
 		bool ExceptionError;  // an unhandled exception caused the load to fail
+		bool SizeLimitExceeded;  // P2-5: image exceeded the pixel cap (not OOM)
 		bool ForceFullSizeRAW;  // one-shot: load this request in full size, ignoring DisplayFullSizeRAW
 	};
 
@@ -117,15 +124,30 @@ private:
 	void ProcessReadJXLRequest(CRequest* request);
 	void ProcessReadAVIFRequest(CRequest* request);
 	void ProcessReadHEIFRequest(CRequest * request);
+	// E8: HEIF decode from an already-read buffer (AVIF fallback reuses the
+	// buffer it just read instead of opening and reading the file again).
+	void ProcessReadHEIFRequest(CRequest * request, const char* pBuffer, long long nFileSize);
 	void ProcessReadQOIRequest(CRequest * request);
 	void ProcessReadPPMRequest(CRequest * request);
 	void ProcessReadHDRRequest(CRequest * request);
 	void ProcessReadPBMRequest(CRequest * request);
+	void ProcessReadJP2Request(CRequest * request);
+	void ProcessReadEXRRequest(CRequest * request);
+	void ProcessReadSVGRequest(CRequest * request);
 	void ProcessReadPSDRequest(CRequest * request);
 	void ProcessReadRAWRequest(CRequest * request);
 	void ProcessReadGDIPlusRequest(CRequest * request, void* pEXIFData = NULL, __int64 nJPEGFileHash = 0);
 	void ProcessReadWICRequest(CRequest* request);
 
 	static void SetFileDependentProcessParams(CRequest * request);
-	static bool ProcessImageAfterLoad(CRequest * request);
+	// P2-6: ProcessImageAfterLoad is tri-state now. OK = image processed and
+	// its DIB prefetched; OOM = only a genuine allocation failure (the caller
+	// may free memory and retry); Error = anything else (rotation failure,
+	// size-limit trip, ...) - no retry, no "out of memory" report.
+	enum EAfterLoadResult { AfterLoad_OK, AfterLoad_OOM, AfterLoad_Error };
+	static EAfterLoadResult ProcessImageAfterLoad(CRequest * request);
+
+	// E6/E12: drop the load memo (bad-file / TIFF-probe conclusions) for a
+	// file, e.g. when it is released for reload after an external edit.
+	static void InvalidateLoadMemo(LPCTSTR sFileName);
 };

@@ -245,6 +245,7 @@ private:
 	CJPEGImage * m_pCurrentImage; // currently displayed image
 	bool m_bOutOfMemoryLastImage; // true if the last image could not be requested because not enough memory
 	bool m_bExceptionErrorLastImage; // true if the last image could not be requested because of an unhandled exception
+	bool m_bSizeLimitExceededLastImage; // true if the last image exceeded the pixel cap (P2-5, not OOM)
 	int m_nLastLoadError; // one of HelpersGUI::EFileLoadError
 	
 	// Current parameter set

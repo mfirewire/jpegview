@@ -66,8 +66,19 @@ static const double GAMMA_FACTOR = 1.02; // multiplicator for gamma value
 static const double CONTRAST_INC = 0.03; // increment for contrast value
 static const double SHARPEN_INC = 0.05; // increment for sharpen value
 static const double LDC_INC = 0.1; // increment for LDC (lighten shadows and darken highlights)
-static const int NUM_THREADS = 1; // number of readahead threads to use
-static const int READ_AHEAD_BUFFERS = 2; // number of readahead buffers to use (NUM_THREADS+1 is a good choice)
+// E2: two load threads so a cache miss still leaves one thread free to
+// read ahead the next image while the current one decodes. With one
+// thread the parallel bundle in CJPEGProvider::RequestImage is empty
+// (m_nNumThread - 1 == 0), so fast paging waited for a full decode on
+// every image. CJPEGProvider/CImageLoadThread already support N threads
+// (per-thread request queue, cached decoders and COM init; only the
+// static handle counter is shared, via InterlockedIncrement), so this
+// is just the constant change. Follow-up (not in this file):
+// CJPEGProvider::ClearRequest releases the locked file only on
+// m_pWorkThreads[0]; with two threads a cached decoder on thread 1
+// survives a reload/clear - see the batch-3 report.
+static const int NUM_THREADS = 2; // number of readahead threads to use
+static const int READ_AHEAD_BUFFERS = 3; // number of readahead buffers to use (NUM_THREADS+1 is a good choice)
 static const int ZOOM_TIMEOUT = 200; // refinement done after this many milliseconds
 static const int ZOOM_TEXT_TIMEOUT = 1000; // zoom label disappears after this many milliseconds
 
@@ -215,6 +226,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 	m_pCurrentImage = NULL;
 	m_bOutOfMemoryLastImage = false;
 	m_bExceptionErrorLastImage = false;
+	m_bSizeLimitExceededLastImage = false;
 	m_nLastLoadError = HelpersGUI::FileLoad_Ok;
 
 	m_dMovieFPS = 1.0;
@@ -390,7 +402,7 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 	// create JPEG provider and request first image - do no processing yet if not in fullscreen mode (as we do not know the size yet)
 	m_pJPEGProvider = new CJPEGProvider(m_hWnd, NUM_THREADS, READ_AHEAD_BUFFERS);	
 	m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
-		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode), m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage);
+		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode), m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, false, &m_bSizeLimitExceededLastImage);
 	if (m_pCurrentImage != NULL && m_pCurrentImage->IsAnimation()) {
 		StartAnimation();
 	}
@@ -669,7 +681,7 @@ void CMainDlg::DisplayErrors(CJPEGImage* pCurrentImage, const CRect& clientRect,
 			(m_nLastLoadError == HelpersGUI::FileLoad_SlideShowListInvalid) ? m_sStartupFile :
 			(m_nLastLoadError == HelpersGUI::FileLoad_NoFilesInDirectory) ? m_pFileList->CurrentDirectory() : CurrentFileName(false),
 			m_nLastLoadError,
-			(m_bOutOfMemoryLastImage ? HelpersGUI::FileLoad_OutOfMemory : 0) | (m_bExceptionErrorLastImage ? HelpersGUI::FileLoad_ExceptionError : 0));
+			(m_bOutOfMemoryLastImage ? HelpersGUI::FileLoad_OutOfMemory : 0) | (m_bExceptionErrorLastImage ? HelpersGUI::FileLoad_ExceptionError : 0) | (m_bSizeLimitExceededLastImage ? HelpersGUI::FileLoad_SizeLimitExceeded : 0));
 	}
 }
 
@@ -703,6 +715,12 @@ LRESULT CMainDlg::OnSize(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BO
 			StartLowQTimer(ZOOM_TIMEOUT);
 		}
 		ResetZoomToFitScreen(false, false, false);
+	} else if (m_bHQResampling && m_pCurrentImage != NULL) {
+		// E17: fixed zoom gets the same low-quality guard as fit-to-screen.
+		// Without this, every WM_SIZE step of a drag-resize triggers a full
+		// HQ resample on paint; the timer defers the HQ repaint until 200 ms
+		// after the last resize event (same mechanism as the branch above).
+		StartLowQTimer(ZOOM_TIMEOUT);
 	}
 	return 0;
 }
@@ -2301,7 +2319,7 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	m_pJPEGProvider->ClearAllRequests(true);
 	m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
 		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode && (bAfterStartup || IsAdjustWindowToImage())),
-		m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage);
+		m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, false, &m_bSizeLimitExceededLastImage);
 	m_nLastLoadError = GetLoadErrorAfterOpenFile();
 	if (bAfterStartup) CheckIfApplyAutoFitWndToImage(false);
 	AfterNewImageLoaded(true, false, false);
@@ -2715,7 +2733,7 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	} else {
 		m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, (ePos == POS_AwayFromCurrent) ? CJPEGProvider::NONE : eDirection,  
 			m_pFileList->Current(), nFrameIndex, procParams,
-			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0);
+			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0, &m_bSizeLimitExceededLastImage);
 		m_nLastLoadError = (m_pCurrentImage == NULL) ? ((m_pFileList->Current() == NULL) ? HelpersGUI::FileLoad_NoFilesInDirectory : HelpersGUI::FileLoad_LoadError) : HelpersGUI::FileLoad_Ok;
 	}
 	double minimalDisplayTime = CSettingsProvider::This().MinimalDisplayTime();
@@ -3529,7 +3547,16 @@ void CMainDlg::AnimateTransition() {
 	CDC memDC;
 	memDC.CreateCompatibleDC(paintDC);
 	CBitmap memDCBitmap;
-	memDCBitmap.CreateCompatibleBitmap(paintDC, nW, nH);
+	if (!memDCBitmap.CreateCompatibleBitmap(paintDC, nW, nH)) {
+		// P3-10: bitmap creation fails when the window is minimized (0x0
+		// client area). Skip the transition instead of running the frame
+		// loop with a DC that has no bitmap selected: every BitBlt /
+		// AlphaBlend in it would silently fail. Release the window DC
+		// here, mirroring the cleanup at the end of the function (P2-1).
+		paintDC.Detach();
+		::ReleaseDC(m_hWnd, hdc);
+		return;
+	}
 	HBITMAP hOldBitmap = memDC.SelectBitmap(memDCBitmap);
 	PaintToDC(memDC);
 

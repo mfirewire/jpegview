@@ -158,11 +158,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 		// PSD can have bit depths of 1, 2, 4, 8, 16, 32
 		unsigned short nBitDepth = ReadUShortFromFile(hFile);
 		// Only 8-bit is supported for now
+		// F-03 (known limitation, documented not implemented): 16-bit, 32-bit, ZIP-compressed, indexed-color and bitmap PSDs are rejected here; supporting them needs a 16-bit/ZIP/palette path.
 		ThrowIf(nBitDepth != 8);
 
 		
 		// Read color mode
 		// Bitmap = 0; Grayscale = 1; Indexed = 2; RGB = 3; CMYK = 4; Multichannel = 7; Duotone = 8; Lab = 9.
+		// F-03 (known limitation): Bitmap (0) and Indexed (2) have no case below, so nChannels stays 0 and the file is rejected; no palette/bitmap path is implemented.
 		// TODO: NegateCMYK
 		unsigned short nChannels = 0;
 		unsigned short nColorMode = ReadUShortFromFile(hFile);
@@ -285,6 +287,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 
 		// Compression. 0 = Raw Data, 1 = RLE compressed, 2 = ZIP without prediction, 3 = ZIP with prediction.
 		unsigned short nCompressionMethod = ReadUShortFromFile(hFile);
+		// F-03 (known limitation): ZIP without/with prediction (2/3) is rejected here; only raw and RLE are implemented.
 		ThrowIf(nCompressionMethod != COMPRESSION_RLE && nCompressionMethod != COMPRESSION_None);
 
 		unsigned int nImageDataSize = nFileSize - TellFile(hFile);
@@ -365,6 +368,8 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 							unsigned char value = *p;
 							p += 1;
 
+							// ST-05: a PackBits run belongs to one row; a run reaching past the row edge would write into the next row (cross-row corruption). Reject it instead.
+							ThrowIf((unsigned)count + c > nWidth);
 							for (unsigned i = count; i < count + c; i++) {
 								unsigned char* scan = (unsigned char*)pPixelData + row * nRowSize + i * nChannels;
 								unsigned char* pixel = scan + rchannel;
@@ -374,6 +379,8 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 						} else if (c < 128) {
 							c++;
 
+							// ST-05: see the run-length branch above; a literal run must also end at the row edge.
+							ThrowIf((unsigned)count + c > nWidth);
 							for (unsigned i = count; i < count + c; i++) {
 								ThrowIf(p >= (unsigned char*)pBuffer + nImageDataSize);
 								unsigned char value = *p;
@@ -444,7 +451,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 				// image never reaches this loop. The branches are kept so
 				// a future alpha-capable CMYK path can revive the layout
 				// deliberately instead of rediscovering it.
-				for (int i = 0; i < nWidth * nHeight; i++) {
+				for (size_t i = 0; i < (size_t)nWidth * nHeight; i++) {
 					if (nChannels == 5)
 						pImage32 = (uint32*)((uint8*)pImage32 + 1);
 					*pImage32++ = ~(*pImage32);
@@ -473,7 +480,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 		if (nChannels == 4) {
 			uint32* pImage32 = (uint32*)pPixelData;
 			// Multiply alpha value into each AABBGGRR pixel
-			for (int i = 0; i < nWidth * nHeight; i++)
+			for (size_t i = 0; i < (size_t)nWidth * nHeight; i++)
 				*pImage32++ = Helpers::AlphaBlendBackground(*pImage32, backgroundColor);
 		}
 
