@@ -578,7 +578,7 @@
 						<File Id="openjp2.dll" Name="openjp2.dll" Source="$(var.OpenJpegDllFolder)\openjp2.dll" />
 					</Component>
 					<Component Id="thorvgDLL" Guid="32e6c68b-fcbb-4576-8ffd-15222fda7e34">
-						<File Id="libthorvg-1.dll" Name="libthorvg-1.dll" Source="$(var.ThorvgDllFolder)\libthorvg-1.dll" />
+						<File Id="libthorvg1.dll" Name="libthorvg-1.dll" Source="$(var.ThorvgDllFolder)\libthorvg-1.dll" />
 					</Component>
 
 
