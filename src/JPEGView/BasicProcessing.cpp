@@ -3,6 +3,7 @@
 #include "ResizeFilter.h"
 #include "XMMImage.h"
 #include "Helpers.h"
+#include "MaxImageDef.h"
 #include "WorkThread.h"
 #include "ProcessingThreadPool.h"
 #ifdef _WIN64
@@ -879,7 +880,9 @@ void* CBasicProcessing::PointSample(CSize fullTargetSize, CPoint fullTargetOffse
 		return NULL;
 	}
 
-	uint8* pDIB = new(std::nothrow) uint8[clippedTargetSize.cx*4 * clippedTargetSize.cy];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)clippedTargetSize.cx * 4, (size_t)clippedTargetSize.cy, &nAllocBytes)) return NULL;
+	uint8* pDIB = new(std::nothrow) uint8[nAllocBytes];
 	if (pDIB == NULL) return NULL;
 
 	uint32 nIncrementX, nIncrementY;
@@ -943,7 +946,9 @@ void* CBasicProcessing::PointSampleWithRotation(CSize fullTargetSize, CPoint ful
 		return NULL;
 	}
 
-	uint8* pDIB = new(std::nothrow) uint8[clippedTargetSize.cx*4 * clippedTargetSize.cy];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)clippedTargetSize.cx * 4, (size_t)clippedTargetSize.cy, &nAllocBytes)) return NULL;
+	uint8* pDIB = new(std::nothrow) uint8[nAllocBytes];
 	if (pDIB == NULL) return NULL;
 
 	uint32 nBackColor = (GetRValue(backColor) << 16) + (GetGValue(backColor) << 8) + GetBValue(backColor) + ALPHA_OPAQUE;
@@ -1094,7 +1099,9 @@ void* CBasicProcessing::PointSampleTrapezoid(CSize fullTargetSize, const CTrapez
 		return NULL;
 	}
 
-	uint8* pDIB = new(std::nothrow) uint8[clippedTargetSize.cx*4 * clippedTargetSize.cy];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)clippedTargetSize.cx * 4, (size_t)clippedTargetSize.cy, &nAllocBytes)) return NULL;
+	uint8* pDIB = new(std::nothrow) uint8[nAllocBytes];
 	if (pDIB == NULL) return NULL;
 
 	int* pTableY = CalculateTrapezoidYIntersectionTable(fullTargetTrapezoid, clippedTargetSize.cy, sourceSize.cy, fullTargetSize.cy, fullTargetOffset.y);
@@ -1314,7 +1321,9 @@ void* CBasicProcessing::RotateHQ(CPoint targetOffset, CSize targetSize, double d
 		return NULL;
 	}
 
-	uint8* pTargetPixels = new(std::nothrow) uint8[targetSize.cx * 4 * targetSize.cy];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)targetSize.cx * 4, (size_t)targetSize.cy, &nAllocBytes)) return NULL;
+	uint8* pTargetPixels = new(std::nothrow) uint8[nAllocBytes];
 	if (pTargetPixels == NULL) return NULL;
 
 	CProcessingThreadPool& threadPool = CProcessingThreadPool::This();
@@ -1465,7 +1474,9 @@ void* CBasicProcessing::TrapezoidHQ(CPoint targetOffset, CSize targetSize, const
 		return NULL;
 	}
 
-	uint8* pTargetPixels = new(std::nothrow) uint8[targetSize.cx * 4 * targetSize.cy];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)targetSize.cx * 4, (size_t)targetSize.cy, &nAllocBytes)) return NULL;
+	uint8* pTargetPixels = new(std::nothrow) uint8[nAllocBytes];
 	if (pTargetPixels == NULL) return NULL;
 
 	CProcessingThreadPool& threadPool = CProcessingThreadPool::This();
@@ -1498,7 +1509,9 @@ static uint8* ApplyFilter(int nSourceWidth, int nTargetWidth, int nHeight,
 						  int nFilterOffset,
 						  const uint8* pSource) {
 
-	uint8* pTarget = new(std::nothrow) uint8[nTargetWidth*4*nHeight];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)nTargetWidth * 4, (size_t)nHeight, &nAllocBytes)) return NULL;
+	uint8* pTarget = new(std::nothrow) uint8[nAllocBytes];
 	if (pTarget == NULL) return NULL;
 
 	// width of new image is (after rotation) : nHeight
@@ -1859,7 +1872,9 @@ static void* RotateToDIB(const CXMMImage* pSourceImg, int simdPixelsPerRegister,
 
 	const int16* pSource = (const int16*) pSourceImg->AlignedPtr();
 	if (pTarget == NULL) {
-		pTarget = new(std::nothrow) uint8[pSourceImg->GetHeight() * 4 * Helpers::DoPadding(pSourceImg->GetWidth(), simdPixelsPerRegister)];
+		size_t nAllocBytes = 0;
+		if (!IsImageBufferSizeOk((size_t)Helpers::DoPadding(pSourceImg->GetWidth(), simdPixelsPerRegister) * 4, (size_t)pSourceImg->GetHeight(), &nAllocBytes)) return NULL;
+		pTarget = new(std::nothrow) uint8[nAllocBytes];
 		if (pTarget == NULL) return NULL;
 	}
 
@@ -2560,7 +2575,9 @@ void* CBasicProcessing::SampleDown_HQ_SIMD(CSize fullTargetSize, CPoint fullTarg
 		return NULL;
 	}
 	int padding = (simd == AVX2) ? 16 : 8;
-	uint8* pTarget = new(std::nothrow) uint8[clippedTargetSize.cx * 4 * Helpers::DoPadding(clippedTargetSize.cy, padding)];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)clippedTargetSize.cx * 4, (size_t)Helpers::DoPadding(clippedTargetSize.cy, padding), &nAllocBytes)) return NULL;
+	uint8* pTarget = new(std::nothrow) uint8[nAllocBytes];
 	if (pTarget == NULL) return NULL;
 	CProcessingThreadPool& threadPool = CProcessingThreadPool::This();
 	CRequestUpDownSampling request(pPixels, sourceSize,
@@ -2577,7 +2594,9 @@ void* CBasicProcessing::SampleUp_HQ_SIMD(CSize fullTargetSize, CPoint fullTarget
 		return NULL;
 	}
 	int padding = (simd == AVX2) ? 16 : 8;
-	uint8* pTarget = new(std::nothrow) uint8[clippedTargetSize.cx * 4 * Helpers::DoPadding(clippedTargetSize.cy, padding)];
+	size_t nAllocBytes = 0;
+	if (!IsImageBufferSizeOk((size_t)clippedTargetSize.cx * 4, (size_t)Helpers::DoPadding(clippedTargetSize.cy, padding), &nAllocBytes)) return NULL;
+	uint8* pTarget = new(std::nothrow) uint8[nAllocBytes];
 	if (pTarget == NULL) return NULL;
 	CProcessingThreadPool& threadPool = CProcessingThreadPool::This();
 	CRequestUpDownSampling request(pPixels, sourceSize,

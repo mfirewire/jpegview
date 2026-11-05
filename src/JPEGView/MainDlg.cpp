@@ -2652,6 +2652,7 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	if (bCheckIfSameImage && (m_pFileList == pOldFileList && (nOldFrameIndex == nFrameIndex || bNoWrapAroundEdgeFrame) && !m_pFileList->ChangedSinceCheckpoint())) {
 		if (m_bMovieMode && m_bAutoExit) {
 			CleanupAndTerminate();
+			return;
 		} else {
 			if (CSettingsProvider::This().FlashWindowAlert()) {
 				// Flash window to notify user
@@ -2762,6 +2763,10 @@ void CMainDlg::ReloadImage(bool keepParameters, bool updateWindow) {
 }
 
 void CMainDlg::ReloadImageFullSize() {
+	// Intentional: no KEEP_PARAMETERS. The full-size view shows the RAW
+	// original with default processing parameters; per-image edits (gamma,
+	// rotation, sharpening) do not carry over. This is by design, not a
+	// missing flag -- see the note in ProcessReadRAWRequest.
 	GotoImage(CMainDlg::POS_Current, FORCE_FULLSIZE_RAW);
 }
 
@@ -3518,12 +3523,14 @@ void CMainDlg::AnimateTransition() {
 
 	// paint to memory DC
 	int nW = m_clientRect.Width(), nH = m_clientRect.Height();
-	CDC paintDC(::GetDC(m_hWnd));
+	HDC hdc = ::GetDC(m_hWnd);
+	CDC paintDC;
+	paintDC.Attach(hdc);
 	CDC memDC;
 	memDC.CreateCompatibleDC(paintDC);
 	CBitmap memDCBitmap;
 	memDCBitmap.CreateCompatibleBitmap(paintDC, nW, nH);
-	memDC.SelectBitmap(memDCBitmap);
+	HBITMAP hOldBitmap = memDC.SelectBitmap(memDCBitmap);
 	PaintToDC(memDC);
 
 	int nSteps = max(1, (m_nTransitionTime + 20) / nFrameTimeMs);
@@ -3642,6 +3649,11 @@ void CMainDlg::AnimateTransition() {
 		if (::PeekMessage(&msg, m_hWnd, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE)) break;
 		if (::PeekMessage(&msg, m_hWnd, WM_CONTEXTMENU, WM_CONTEXTMENU, PM_NOREMOVE)) break;
 	}
+	// Release the window DC (GetDC must be paired with ReleaseDC, not
+	// DeleteDC) and deselect the bitmap before the DCs are destroyed (P2-1).
+	memDC.SelectBitmap(hOldBitmap);
+	paintDC.Detach();
+	::ReleaseDC(m_hWnd, hdc);
 }
 
 void CMainDlg::CleanupAndTerminate() {

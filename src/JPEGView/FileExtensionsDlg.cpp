@@ -279,19 +279,22 @@ LRESULT CFileExtensionsDlg::OnListViewKeyDown(WPARAM /*wParam*/, LPNMHDR lpnmhdr
 }
 
 void CFileExtensionsDlg::FillFileExtensionsList() {
-	InsertExtension(_T("*.jpg;*.jpeg;*.jfif"), FormatHint(CNLS::GetString(_T("%s images")), _T("JPEG")));
-	InsertExtension(_T("*.png"), FormatHint(CNLS::GetString(_T("%s images")), _T("PNG")));
+	InsertExtension(_T("*.jpg;*.jpeg;*.jpe;*.jfif;*.jps;*.jfi;*.jif;*.mpo"), FormatHint(CNLS::GetString(_T("%s images")), _T("JPEG")));
+	InsertExtension(_T("*.png;*.apng"), FormatHint(CNLS::GetString(_T("%s images")), _T("PNG")));
 	InsertExtension(_T("*.tif;*.tiff"), FormatHint(CNLS::GetString(_T("%s images")), _T("TIFF")));
 	InsertExtension(_T("*.bmp"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows bitmap")));
 	InsertExtension(_T("*.gif"), FormatHint(CNLS::GetString(_T("%s images")), _T("GIF")));
-	InsertExtension(_T("*.tga"), FormatHint(CNLS::GetString(_T("%s images")), _T("TGA")));
+	InsertExtension(_T("*.tga;*.icb;*.vda;*.vst"), FormatHint(CNLS::GetString(_T("%s images")), _T("TGA")));
 	InsertExtension(_T("*.webp"), FormatHint(CNLS::GetString(_T("%s images")), _T("Google WEBP")));
 	InsertExtension(_T("*.jxl"), FormatHint(CNLS::GetString(_T("%s images")), _T("JPEG XL")));
-	InsertExtension(_T("*.avif"), FormatHint(CNLS::GetString(_T("%s images")), _T("AV1 Image File")));
+	InsertExtension(_T("*.avif;*.avifs"), FormatHint(CNLS::GetString(_T("%s images")), _T("AV1 Image File")));
 	InsertExtension(_T("*.heif"), FormatHint(CNLS::GetString(_T("%s images")), _T("High Efficiency Image File")));
 	InsertExtension(_T("*.heic"), FormatHint(CNLS::GetString(_T("%s images")), _T("High Efficiency Image Container")));
 	InsertExtension(_T("*.qoi"), FormatHint(CNLS::GetString(_T("%s images")), _T("Quite OK Image")));
-	InsertExtension(_T("*.psd"), FormatHint(CNLS::GetString(_T("%s images")), _T("Photoshop Document")));
+	InsertExtension(_T("*.psd;*.psb"), FormatHint(CNLS::GetString(_T("%s images")), _T("Photoshop Document")));
+	InsertExtension(_T("*.ppm;*.pgm;*.pnm"), FormatHint(CNLS::GetString(_T("%s images")), _T("PPM")));
+	InsertExtension(_T("*.ico"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows icon")));
+	InsertExtension(_T("*.wmf;*.emf"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows metafile")));
 	InsertExtensions(CSettingsProvider::This().FilesProcessedByWIC(), CNLS::GetString(_T("%s images (processed by Window Imaging Component - WIC)")));
 	InsertExtensions(CSettingsProvider::This().FileEndingsRAW(), CNLS::GetString(_T("%s camera raw images (embedded JPEGs only)")));
 }

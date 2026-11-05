@@ -548,6 +548,11 @@ static bool SaveGDIPlus(LPCTSTR sFileName, EImageFormat eFileFormat, void* pData
 bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, const CImageProcessingParams& procParams,
 			 EProcessingFlags eFlags, bool bFullSize, bool bUseLosslessWEBP, bool bCreateParameterDBEntry) {
 	pImage->EnableDimming(false);
+	// Bad allocation anywhere on the save path (throwing new in the JPEG
+	// comment helpers, CompressAndSave, or the 24bpp buffer below) must
+	// show "Error saving file", not terminate the process (ST-02).
+	char* pDIB24bpp = NULL;
+	try {
 
 	CSize imageSize;
 	void* pDIB32bpp;
@@ -567,7 +572,7 @@ bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, const CImageP
 
 	uint32 nSizeLinePadded = Helpers::DoPadding(imageSize.cx*3, 4);
 	uint32 nSizeBytes = nSizeLinePadded*imageSize.cy;
-	char* pDIB24bpp = new char[nSizeBytes];
+	pDIB24bpp = new char[nSizeBytes];
 	CBasicProcessing::Convert32bppTo24bppDIB(imageSize.cx, imageSize.cy, pDIB24bpp, pDIB32bpp, false);
 
 	EImageFormat eFileFormat = Helpers::GetImageFormat(sFileName);
@@ -622,6 +627,11 @@ bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, const CImageP
 	pImage->EnableDimming(true);
 
 	return bSuccess;
+	} catch (...) {
+		delete[] pDIB24bpp;
+		pImage->EnableDimming(true);
+		return false;
+	}
 }
 
 bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, bool bUseLosslessWEBP)

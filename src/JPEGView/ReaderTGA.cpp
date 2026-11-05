@@ -317,6 +317,14 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 							pImage[colorsRead + 1] = pColors[0];
 							pImage[colorsRead + 2] = pColors[0];
 						}
+					} else if (bits == 16 || bits == 15) {
+						// 16/15-bit pixel is a 5-5-5 packed short; the RLE
+						// branch only read 2 bytes, so unpack it the same
+						// way as the non-RLE path (F-04).
+						unsigned short pixel = (unsigned short)(pColors[0] | (pColors[1] << 8));
+						pImage[colorsRead + 0] = (pixel & 0x1f) << 3;
+						pImage[colorsRead + 1] = ((pixel >> 5) & 0x1f) << 3;
+						pImage[colorsRead + 2] = ((pixel >> 10) & 0x1f) << 3;
 					} else {
 						pImage[colorsRead + 0] = pColors[0];
 						pImage[colorsRead + 1] = pColors[1];

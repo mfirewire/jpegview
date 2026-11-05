@@ -1854,8 +1854,12 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 		// One-shot full-size reload (IDM_RELOAD_FULLSIZE): this request ignores
 		// DisplayFullSizeRAW and uses mode 3 semantics (full size first, thumb
 		// fallback), so a thumbnail-mode user can view the current image in
-		// full size without changing settings. The flag lives on the request,
-		// so navigation and read-ahead requests keep the configured mode.
+		// full size without changing the configured DisplayFullSizeRAW setting.
+		// The flag lives on the request, so navigation and read-ahead requests
+		// keep the configured mode. "Settings" here means the configured mode
+		// only: the per-image processing parameters (gamma, rotation, etc.)
+		// are intentionally reset for this view, because the full-size reload
+		// shows the RAW original as-is (see CMainDlg::ReloadImageFullSize).
 		int fullsize = request->ForceFullSizeRAW ? 3 : CSettingsProvider::This().DisplayFullSizeRAW();
 
 #ifndef WINXP

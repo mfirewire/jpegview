@@ -14,12 +14,12 @@ JPEGView is a lean, fast and highly configurable image viewer/editor with a mini
 
 JPEGView has built-in support the following formats:
 
-* Popular: JPEG, GIF
-* Lossless: BMP, PNG, TIFF, PSD
-* Web: WEBP, JXL, HEIF/HEIC, AVIF
-* Legacy: TGA, WDP, HDP, JXR
+* Popular: JPEG (including JPS, MPO), GIF
+* Lossless: BMP, PNG (including APNG), TIFF, PSD, PPM (including PGM, PNM)
+* Web: WEBP, JXL, HEIF/HEIC, AVIF (including AVIFS)
+* Legacy: TGA (including ICB, VDA, VST), WDP, HDP, JXR
 * Camera RAW formats:
-  * Adobe (DNG), Canon (CRW, CR2, CR3), Nikon (NEF, NRW), Sony (ARW, SR2)
+  * Adobe (DNG), Canon (CRW, CR2, CR3), Nikon (NEF, NRW), Sony (ARW, SR2, SRF)
   * Olympus (ORF), Panasonic (RW2), Fujifilm (RAF)
   * Sigma (X3F), Pentax (PEF), Minolta (MRW), Kodak (KDC, DCR)
   * A full list is available here: [LibRaw supported cameras](https://www.libraw.org/supported-cameras)

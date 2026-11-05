@@ -64,6 +64,11 @@ CJPEGImage* CReaderBMP::ReadBmpImage(LPCTSTR strFileName, bool& bOutOfMemory) {
 		fclose(fptr);
 		return NULL;
 	}
+	/* Only uncompressed (BI_RGB) bitmaps; RLE and BITFIELDS are left to GDI+ */
+	if (infoheader.compression != 0) {
+		fclose(fptr);
+		return NULL;
+	}
 	/* Not too big files */
 	if (infoheader.width > MAX_IMAGE_DIMENSION || infoheader.width <= 0 || abs(infoheader.height) > MAX_IMAGE_DIMENSION) {
 		fclose(fptr);
