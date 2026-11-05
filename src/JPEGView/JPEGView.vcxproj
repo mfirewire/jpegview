@@ -346,9 +346,15 @@
     <ClCompile Include="JP2Wrapper.cpp" />
     <ClCompile Include="EXRWrapper.cpp" />
     <ClCompile Include="SVGWrapper.cpp" />
-    <ClCompile Include="tinyexr\miniz.c" />
-    <ClCompile Include="tinyexr\miniz_tdef.c" />
-    <ClCompile Include="tinyexr\miniz_tinfl.c" />
+    <ClCompile Include="tinyexr\miniz.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="tinyexr\miniz_tdef.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="tinyexr\miniz_tinfl.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="RAWWrapper.cpp" />
     <ClCompile Include="ReaderBMP.cpp" />
     <ClCompile Include="ReaderTGA.cpp" />
