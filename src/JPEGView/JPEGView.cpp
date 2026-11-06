@@ -237,11 +237,17 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 		ULONG_PTR gdiplusToken;
 		Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
-		CMainDlg dlgMain(bForceFullScreen);
-
-		dlgMain.SetStartupInfo(sStartupFile, nAutostartSlideShow, eSorting, eTransitionEffect, nTransitionTime, bAutoExit, nDisplayMonitor);
-
 		try {
+			// N1: the CMainDlg constructor allocates (image processing
+			// params, panel manager, crop control, key map, print image,
+			// OCR controller) and can throw when the process is nearly out
+			// of memory. It used to be constructed outside this try, so a
+			// throw here crashed at startup with no message and skipped
+			// the GDI+ shutdown below.
+			CMainDlg dlgMain(bForceFullScreen);
+
+			dlgMain.SetStartupInfo(sStartupFile, nAutostartSlideShow, eSorting, eTransitionEffect, nTransitionTime, bAutoExit, nDisplayMonitor);
+
 			nRet = (int)dlgMain.DoModal();
 			if (CSettingsProvider::This().StickyWindowSize() && !dlgMain.IsFullScreenMode()) {
 				CSettingsProvider::This().SaveStickyWindowRect(dlgMain.WindowRectOnClose());
@@ -250,6 +256,11 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 		}
 		catch (...) {
 			::ShowCursor(TRUE);
+			// Startup (or the modal loop) failed, most likely out of
+			// memory: report it and exit non-zero instead of silently
+			// exiting 0 as before.
+			::MessageBox(NULL, _T("Not enough memory to start JPEGView."), _T("JPEGView"), MB_OK | MB_ICONERROR);
+			nRet = 1;
 		}
 
 		// Shut down GDI+
