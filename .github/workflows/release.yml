@@ -55,6 +55,11 @@ jobs:
     - name: Build Solution Win32 Release
       shell: cmd
       run: msbuild.exe /property:Platform=Win32 /property:configuration="Release" src\\JPEGView.sln
+    # R-06 verification: the Win32 exe must carry a Safe Exception Handler table.
+    - uses: ./.github/actions/verify-safeseh
+      with:
+        platform-arch: Win32
+        build-config: Release
     - name: Upload Win32 artifact
       uses: actions/upload-artifact@v4
       with:

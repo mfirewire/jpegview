@@ -1,0 +1,48 @@
+name: Action - Verify Win32 SAFESEH table (R-06)
+description: >
+  After msbuild, check the built Win32 JPEGView.exe carries a Safe
+  Exception Handler table (/SAFESEH) via dumpbin /loadconfig. No-op on
+  x64 (/SAFESEH is x86-only; x64 load config has no SE Handler table).
+
+inputs:
+  platform-arch:
+    description: Architecture that was built (Win32 or x64, msbuild Platform names)
+    required: true
+    type: string
+
+  build-config:
+    description: Debug/Release, locates the exe under bin\x86\<config>\
+    required: false
+    type: string
+    default: Release
+
+
+runs:
+  using: composite
+  steps:
+    - name: Verify Win32 SAFESEH table (R-06)
+      if: ${{ inputs.platform-arch == 'Win32' }}
+      shell: powershell
+      run: |
+        # R-06 verification (b): dumpbin /loadconfig prints, for a /SAFESEH
+        # image, lines like "  310751E0 Safe Exception Handler Table" and
+        # "         1 Safe Exception Handler Count". The count token may be
+        # hex, so only "0" means absent - do not parse it as an integer.
+        $exe = "src\JPEGView\bin\x86\${{ inputs.build-config }}\JPEGView.exe"
+        if (-not (Test-Path $exe)) { throw "verify-safeseh: exe not found: $exe" }
+        $vsInstallDir = (vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
+        if (-not $vsInstallDir) { throw "verify-safeseh: vswhere found no Visual Studio installation" }
+        $dumpbin = $null
+        foreach ($hostArch in @("Hostx64", "Hostx86")) {
+          $candidate = Get-ChildItem -Path "$vsInstallDir\VC\Tools\MSVC\*\bin\$hostArch\x86\dumpbin.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($candidate) { $dumpbin = $candidate.FullName; break }
+        }
+        if (-not $dumpbin) { throw "verify-safeseh: dumpbin.exe (x86) not found under $vsInstallDir" }
+        $out = & $dumpbin /loadconfig $exe
+        if ($LASTEXITCODE -ne 0) { throw "verify-safeseh: dumpbin /loadconfig failed on $exe (exit $LASTEXITCODE)" }
+        $line = $out | Select-String -Pattern '^\s*(\S+)\s+Safe Exception Handler Count\s*$' | Select-Object -First 1
+        if (-not $line) { throw "verify-safeseh: no 'Safe Exception Handler Count' line in dumpbin /loadconfig output for $exe - no load config / SAFESEH table present" }
+        $countTok = $line.Matches.Groups[1].Value
+        Write-Output "verify-safeseh: Safe Exception Handler Count token = $countTok"
+        if ($countTok -eq "0" -or $countTok -eq "00000000") { throw "verify-safeseh: Safe Exception Handler Count is 0 - Win32 exe has no SAFESEH table" }
+        Write-Output "verify-safeseh: OK - $exe carries a Safe Exception Handler table"

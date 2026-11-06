@@ -154,6 +154,13 @@ jobs:
         echo (Optional) ATLLIBPATH: %ATLLIBPATH%
         msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" /p:AdditionalLibraryDirectories="%ATLLIBPATH%" "/flp1:LogFile=build.err;ErrorsOnly" "/flp2:LogFile=build.log;Normal" src\\JPEGView.sln
 
+    # R-06 verification: the Win32 exe must carry a Safe Exception Handler
+    # table (dumpbin /loadconfig). No-op on x64.
+    - uses: ./.github/actions/verify-safeseh
+      with:
+        platform-arch: ${{ inputs.platform-arch }}
+        build-config: ${{ inputs.build-config }}
+
     # 把 msbuild 的错误行转成 GitHub annotation，这样 API 侧也能读到具体错误
     - name: Surface build errors as annotations
       if: failure()

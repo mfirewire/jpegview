@@ -85,6 +85,13 @@ runs:
         echo (Optional) INCLUDE: %INCLUDE%
         msbuild.exe /property:Platform=${{ inputs.platform-arch }} /property:configuration="${{ inputs.build-config }}" /p:AdditionalIncludeDirectories="%INCLUDE%" "/flp1:LogFile=build.err;ErrorsOnly" "/flp2:LogFile=build.log;Normal" src\JPEGView.sln
 
+    # R-06 verification: the Win32 exe must carry a Safe Exception Handler
+    # table (dumpbin /loadconfig). No-op on x64.
+    - uses: ./.github/actions/verify-safeseh
+      with:
+        platform-arch: ${{ inputs.platform-arch }}
+        build-config: ${{ inputs.build-config }}
+
     # 把 msbuild 的错误行转成 GitHub annotation，便于在 API 侧定位（job log API 返回 403）
     - name: Surface build errors as annotations
       if: failure()

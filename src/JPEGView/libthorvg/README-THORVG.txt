@@ -10,8 +10,8 @@ WHAT IS HERE
       header comment for why the C++ API is not used.
   bin/libthorvg-1.dll        Win32 (x86) build, 1,118,948 bytes
   bin64/libthorvg-1.dll      x64 build, 1,116,757 bytes
-  lib/libthorvg-1.lib        Win32 import library (dlltool-generated)
-  lib64/libthorvg-1.lib      x64 import library (dlltool-generated)
+  lib/libthorvg-1.lib        Win32 import library (LIB.EXE-regenerated, see below)
+  lib64/libthorvg-1.lib      x64 import library (LIB.EXE-regenerated, see below)
 
 WHY THE DLL IS NAMED libthorvg-1.dll
   Meson names the library "thorvg-<major>", so the MinGW build produces
@@ -44,20 +44,25 @@ HOW THE DLLS WERE BUILT (reproducible)
     present on every Windows system. Verified by PE inspection of both
     DLLs: machine 0x8664 (x64) / 0x014c (x86), 410 exports, 191 tvg_*
     exports, all 14 C API functions used by SVGWrapper.cpp present.
-  - The import libraries were made from the DLL exports with dlltool:
-      x86_64-w64-mingw32-dlltool -d thorvg-x64.def -l thorvg-x64.lib
-      i686-w64-mingw32-dlltool   -d thorvg-x86.def -l thorvg-x86.lib
-    (the .def files list all 410 exports with
-     "LIBRARY libthorvg-1.dll"). dlltool .lib files link from MSVC for
-    plain-C symbols, but that link step can only be proven by the CI
-    build, not on the Linux VM — if CI link fails, that is the first
-    place to look.
+  - The import libraries were regenerated from the DLL exports with
+    MSVC LIB.EXE (CI, 2026-11-07; .def files checked in alongside as
+    JPEGView-thorvg-x86.def / JPEGView-thorvg-x64.def, 410 exports each,
+    "LIBRARY libthorvg-1.dll"):
+      lib /def:JPEGView-thorvg-x86.def /out:lib\libthorvg-1.lib /machine:x86
+      lib /def:JPEGView-thorvg-x64.def /out:lib64\libthorvg-1.lib /machine:x64
+    The checked-in .lib files are LIB.EXE-generated (thunk-only), so
+    they are /SAFESEH-compatible; the old dlltool-generated .lib files
+    were not, and Win32 /SAFESEH linking failed against them
+    (LNK2026/LNK1281). CI regenerates the .lib files before every
+    msbuild (.github/actions/regen-thorvg-lib) and verifies the Win32
+    exe carries a Safe Exception Handler table
+    (.github/actions/verify-safeseh).
 
 SHA256 (as vendored)
   bin64/libthorvg-1.dll  f28dc3c1bc8dedbeff0079a6fe6e855616b35278bd4875a4210452289e486386
   bin/libthorvg-1.dll    7392171a7b0b555e1b7a2f6b886717fae7ad1d44fcc67b8f38485db04f3ec00e
-  lib64/libthorvg-1.lib  ab02f9d71b3c49cefc6f6653ef1cd86f4a3d1f809fd033980faabe75b9f2c80f
-  lib/libthorvg-1.lib    70ea6d2d122d37db6e6c1a400fec85e0955cfb11c79e1af55b3d3f4d2a38fc16
+  lib64/libthorvg-1.lib  6a09db13ed240535fcecdb95395d6960bed0c71d1eafd4c35525dc3cb94e2927
+  lib/libthorvg-1.lib    0769e14b1b94d1f52286abe2f5c9f7b8cefaf4934ac006c98b250f19db1c5f60
 
 DELAY-LOAD
   libthorvg-1.dll is delay-loaded (vcxproj DelayLoadDLLs): opening JPEGView
