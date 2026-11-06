@@ -465,11 +465,13 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pgm" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pnm" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".ico" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".cur" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".wmf" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".emf" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".hdr" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".rgbe" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pbm" Value="" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".pam" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".jp2" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".j2k" Value="" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\JPEGView.exe\SupportedTypes" Name=".j2c" Value="" Type="string" />

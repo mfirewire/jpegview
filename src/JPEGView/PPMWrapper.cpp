@@ -101,7 +101,7 @@ void* PPMReader::ReadImage(int& width,
 			if (c < '0' || c > '9') { bParseOk = false; break; }
 			int v = 0;
 			while (c >= '0' && c <= '9') {
-				if (v > 214748364) { bParseOk = false; break; }
+				if (v > 214748364 || (v == 214748364 && (c - '0') > 7)) { bParseOk = false; break; }
 				v = v * 10 + (c - '0');
 				if (pos >= (size_t)sizebytes) { bParseOk = false; break; }
 				c = pMagic[pos++];
@@ -146,7 +146,9 @@ void* PPMReader::ReadImage(int& width,
 			return NULL;
 		}
 		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-		if (abs((double)nHdrWidth * nHdrHeight) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		// No abs(): nHdrWidth/nHdrHeight are proven > 0 by the check above;
+		// unqualified abs(double) resolves to ::abs(int) (abs(INT_MIN) is UB).
+		if ((double)nHdrWidth * (double)nHdrHeight > (double)CSettingsProvider::This().MaxImagePixels()) {
 			isSizeLimitExceeded = true;
 			delete[] pSwappedBuffer;
 			return NULL;
@@ -173,7 +175,9 @@ void* PPMReader::ReadImage(int& width,
 		return NULL;
 	}
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+	// No abs(): stbi_load success implies width/height > 0; unqualified
+	// abs(double) resolves to ::abs(int) (abs(INT_MIN) is UB on overflow).
+	if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels())
 		isSizeLimitExceeded = true;
 	if (isSizeLimitExceeded || width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		stbi_image_free(pDecoded);

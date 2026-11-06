@@ -20,7 +20,7 @@
 #include "Helpers.h" // DoPadding
 #include "MaxImageDef.h" // IsImageBufferSizeOk
 #include <new> // std::nothrow
-#include <stdio.h> // _tfopen / fwrite / fclose
+#include <stdio.h> // fwrite / fclose
 #include <limits.h> // INT_MAX
 
 // Saves a 24-bit BGR DIB as OpenEXR via SaveEXRToMemory + FILE*.
@@ -34,18 +34,10 @@
 // FILE* keeps the full Unicode path, the same reason SaveWebP/SaveJXL
 // write through a FILE* instead of a filename API.
 //
-// Why the path-only CreateAtomicTempFileName + _tfopen, not the HANDLE
-// overload: OpenTempFileForWriting (HANDLE -> FILE*) is file-static in
-// SaveImage.cpp, so this file cannot use it, and duplicating its
-// _open_osfhandle/_fdopen logic here would leave two copies of the
-// P3-1 logic to maintain. The path-only overload + _tfopen is the
-// in-tree precedent (SaveGDIPlus, SaveImage.cpp, F-H11), and its
-// TOCTOU window is the already-documented one: the helper creates the
-// temp file with CREATE_NEW and closes the handle, and _tfopen reopens
-// that reserved name immediately afterwards (see the comment on the
-// path-only overload in SaveImage.cpp and F-B01). If
-// OpenTempFileForWriting is ever exported from SaveImage.cpp, this
-// function should switch to the HANDLE overload and drop the _tfopen.
+// The temp file comes from the HANDLE overload of
+// CreateAtomicTempFileName, wrapped in a FILE* by the shared
+// OpenTempFileForWriting (SaveImage.cpp, declared in SaveImage.h), so
+// there is no create-close-reopen TOCTOU window here (P3-1).
 //
 // Atomicity (F-B01): the target itself is never opened for writing.
 // The EXR bytes go to a temp file in the target's directory and are
@@ -98,7 +90,7 @@
 //   nothing is owned.
 // - pszErr: _strdup'd by tinyexr's SetErrorMessage on failure only;
 //   freed with FreeEXRErrorMessage() when non-NULL.
-// - fptr: owned here from _tfopen until fclose; a fclose failure is
+// - fptr: owned here from OpenTempFileForWriting until fclose; a fclose failure is
 //   a save failure (a buffered write can still fail on flush, same
 //   rule as CompressAndSave). The catch(...) mirrors SaveJXL/SaveQOI:
 //   tinyexr allocates std::vectors internally, which can throw
@@ -153,15 +145,16 @@ bool SaveEXRFile(LPCTSTR sFileName, void* pData24bppBGR, int nWidth, int nHeight
 		}
 	}
 
-	// Atomic temp file (path-only overload; see the TOCTOU note at the
-	// top of this file). _tfopen is the in-tree way to open a CString
-	// path as FILE* (FileList.cpp, ImageLoadThread.cpp, KeyMap.cpp).
+	// Atomic temp file (P3-1): the HANDLE overload hands out the
+	// CREATE_NEW handle and OpenTempFileForWriting wraps it in a FILE*,
+	// so there is no create-close-reopen window here.
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
 		delete[] pFloatRGB;
 		return false;
 	}
-	FILE* fptr = _tfopen(sTempFile, _T("wb"));
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
 	if (fptr == NULL) {
 		delete[] pFloatRGB;
 		DeleteAtomicTempFile(sTempFile);

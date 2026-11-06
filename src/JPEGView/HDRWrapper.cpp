@@ -37,7 +37,11 @@ void* HDRReader::ReadImage(int& width,
 	if (!stbi_info_from_memory(pMagic, sizebytes, &width, &height, &nChannels))
 		return NULL;
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+	// No abs(): stb only returns non-negative dimensions, and the check
+	// below rejects width/height <= 0; unqualified abs(double) resolves
+	// to ::abs(int), and a product over INT_MAX would narrow to a negative
+	// int (abs(INT_MIN) is UB).
+	if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels())
 		isSizeLimitExceeded = true;
 	if (isSizeLimitExceeded || width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		return NULL;

@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "XMMImage.h"
 #include "Helpers.h"
+#include "MaxImageDef.h"
 
 CXMMImage::CXMMImage(int nWidth, int nHeight, int padding) {
 	Init(nWidth, nHeight, false, padding);
@@ -100,7 +101,20 @@ void CXMMImage::Init(int nWidth, int nHeight, bool bPadHeight, int padding) {
 	}
 	m_nWidth = nWidth;
 	m_nHeight = nHeight;
-	int nMemSize = GetMemSize();
+	// R-09: IsImageBufferSizeOk is the codebase's hard byte cap
+	// (MAX_IMAGE_BYTES, 4 GiB - 1 on x64): an oversized request fails
+	// closed with m_pMemory == NULL instead of wrapping and
+	// under-allocating. A legitimate 100 MP image needs 572 MB and
+	// passes. VirtualAlloc failing also leaves m_pMemory == NULL.
+	// NOTE: the buffer is 3 planes of one line each, so the stride
+	// handed to the check is GetLineSize()*3, i.e. the total equals
+	// GetMemSize(); passing a single line would check (and allocate)
+	// only a third of the buffer.
+	size_t nMemSize = 0;
+	if (!IsImageBufferSizeOk(GetLineSize()*3, (size_t)m_nPaddedHeight, &nMemSize)) {
+		m_pMemory = NULL;
+		return;
+	}
 
 	// Allocate memory aligned on page boundaries
 	m_pMemory = ::VirtualAlloc(

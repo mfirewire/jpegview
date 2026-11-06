@@ -343,6 +343,7 @@
     <ClCompile Include="PPMWrapper.cpp" />
     <ClCompile Include="HDRWrapper.cpp" />
     <ClCompile Include="PBMWrapper.cpp" />
+    <ClCompile Include="PAMWrapper.cpp" />
     <ClCompile Include="JP2Wrapper.cpp" />
     <ClCompile Include="SaveJP2.cpp" />
     <ClCompile Include="EXRWrapper.cpp" />
@@ -457,6 +458,7 @@
     <ClInclude Include="PPMWrapper.h" />
     <ClInclude Include="HDRWrapper.h" />
     <ClInclude Include="PBMWrapper.h" />
+    <ClInclude Include="PAMWrapper.h" />
     <ClInclude Include="JP2Wrapper.h" />
     <ClInclude Include="SaveJP2.h" />
     <ClInclude Include="EXRWrapper.h" />

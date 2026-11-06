@@ -251,7 +251,9 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 			return false;
 		}
 		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-		if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		// No abs(): width/height are unsigned int; unqualified abs(double)
+		// resolves to ::abs(int) (abs(INT_MIN) is UB on overflow).
+		if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels()) {
 			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 			isSizeLimitExceeded = true;
 			return false;

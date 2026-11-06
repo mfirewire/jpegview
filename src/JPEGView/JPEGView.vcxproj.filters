@@ -294,6 +294,9 @@
     <ClCompile Include="PBMWrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
+    <ClCompile Include="PAMWrapper.cpp">
+      <Filter>Source Files\Image Types</Filter>
+    </ClCompile>
     <ClCompile Include="JP2Wrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
@@ -597,6 +600,9 @@
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="PBMWrapper.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
+    <ClInclude Include="PAMWrapper.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="JP2Wrapper.h">

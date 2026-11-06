@@ -26,6 +26,7 @@
 #include "PPMWrapper.h"
 #include "HDRWrapper.h"
 #include "PBMWrapper.h"
+#include "PAMWrapper.h"
 #include "JP2Wrapper.h"
 #include "EXRWrapper.h"
 #include "SVGWrapper.h"
@@ -61,6 +62,22 @@ private:
 // content) is never served a stale verdict, and releasing a file for reload
 // (CImageLoadThread::ReleaseFile) drops its entries. OOM is never memoized:
 // it is transient, and a retry after freeing memory must re-decode.
+// R-16/E19: bBad is recorded only for a genuine decode failure. Three
+// failures are NOT decode failures and are never recorded, so they can
+// never poison the memo: (1) the image decoded fine but ProcessImageAfterLoad
+// failed (VerifyRotation failure, DIB size-limit trip - both depend on the
+// processing parameters / MaxImagePixelsMP, not on the file alone), (2) a
+// size-limit rejection anywhere (it depends on the MaxImagePixelsMP setting,
+// so raising the cap must retry the file), (3) a failure to even open the
+// file at record time (locked by another program, antivirus scan, network
+// hiccup - the file is re-checked with GetFileIdentity before recording).
+// No settings-generation stamp is kept: with (1) and (2) excluded at the
+// source, no settings-dependent verdict ever enters the memo, so there is
+// nothing for a stamp to invalidate; the probe conclusions are file-content
+// only and are unaffected by settings. Residual: FAT/exFAT stores mtime at
+// 2 s granularity, so a same-size rewrite within 2 s of a genuine decode
+// failure can still hit the stale verdict (NTFS mtime is 100 ns and is
+// unaffected); ReleaseFile still clears it.
 /////////////////////////////////////////////////////////////////////////////////////////////
 struct LoadMemoEntry {
 	CString sPath;
@@ -148,62 +165,78 @@ void CImageLoadThread::InvalidateLoadMemo(LPCTSTR sFileName) {
 // (F-14: the int product overflows for very large images; the counter is size_t
 // here). E13: two optimizations, both pixel-exact. First, if every pixel is
 // opaque the blend is the identity (AlphaBlendBackground returns the pixel
-// unchanged for alpha 0xFF), so a cheap scan skips the whole blend pass for
-// images that carry an alpha channel but use no transparency. Second, the
-// blend itself uses lookup tables instead of the double math in
+// unchanged for alpha 0xFF), so the blend pass leaves those pixels untouched.
+// Second, the blend itself uses lookup tables instead of the double math in
 // Helpers::AlphaBlendBackground: out = (v*a + bg*(255-a) + 127) / 255, which a
 // brute-force check over all 256^3 (value, alpha, background) combinations
-// proved identical to the (x / 255.0) + 0.5 formula. The tables are built per
-// call on the heap - no state is shared between the two load threads, and no
-// large stack allocation. Fully transparent pixels (alpha 0) become the
-// background colour with alpha 0, exactly as the original did.
+// proved identical to the (x / 255.0) + 0.5 formula. Fully transparent pixels
+// (alpha 0) become the background colour with alpha 0, exactly as the original did.
+// R-17/E20: the tables are no longer allocated per call (192 KB + 196,608
+// table writes on every call, even for a 2x2 frame with a single transparent
+// pixel). They are a thread_local static - one per load thread, rebuilt only
+// when the background colour changes - and they are built lazily, on the first
+// transparent pixel, so a fully opaque image never builds them at all. Small
+// images (< 4096 pixels) skip the tables entirely and use the scalar
+// Helpers::AlphaBlendBackground loop: building 196,608 table entries to blend
+// a few thousand pixels is pure overhead. E20: the old separate "is anything
+// transparent?" pre-scan is gone - the single pass below blends each pixel as
+// it meets it, so a transparent frame is scanned once instead of twice. All
+// callers run on the load threads, so thread_local is safe here (this function
+// is only called from the ProcessRead* functions); the tables are plain bytes
+// with no destructor, so thread exit needs no cleanup.
 /////////////////////////////////////////////////////////////////////////////////////////////
 static void AlphaBlendImageToBackground(uint32* pPixels, size_t nPixels, COLORREF bkColor) {
 	if (pPixels == NULL || nPixels == 0) {
 		return;
 	}
-	bool bAnyTransparent = false;
-	for (size_t i = 0; i < nPixels; i++) {
-		if ((pPixels[i] & 0xFF000000) != 0xFF000000) {
-			bAnyTransparent = true;
-			break;
-		}
-	}
-	if (!bAnyTransparent) {
-		return; // every pixel opaque: blending would not change a single pixel
-	}
 	const uint8 bgR = GetRValue(bkColor);
 	const uint8 bgG = GetGValue(bkColor);
 	const uint8 bgB = GetBValue(bkColor);
-	uint8* pTables = new(std::nothrow) uint8[3 * 256 * 256];
-	if (pTables == NULL) {
-		// Out of memory for the tables: fall back to the per-pixel helper.
-		// Still size_t-correct, just slower; pixel results are identical.
-		for (size_t i = 0; i < nPixels; i++) {
-			pPixels[i] = Helpers::AlphaBlendBackground(pPixels[i], bkColor);
-		}
-		return;
-	}
-	uint8* pTableR = pTables;
-	uint8* pTableG = pTables + 256 * 256;
-	uint8* pTableB = pTables + 2 * 256 * 256;
-	for (unsigned int a = 0; a < 256; a++) {
-		for (unsigned int v = 0; v < 256; v++) {
-			pTableR[a * 256 + v] = (uint8)((v * a + bgR * (255 - a) + 127) / 255);
-			pTableG[a * 256 + v] = (uint8)((v * a + bgG * (255 - a) + 127) / 255);
-			pTableB[a * 256 + v] = (uint8)((v * a + bgB * (255 - a) + 127) / 255);
-		}
-	}
 	const uint32 bgRGB = ((uint32)bgR << 16) | ((uint32)bgG << 8) | (uint32)bgB;
+	// R-17: one LUT set per load thread, rebuilt only when the background
+	// colour changes. thread_local, not a process static: the two load threads
+	// must never share (see R-01).
+	thread_local static uint8 s_tables[3 * 256 * 256];
+	thread_local static COLORREF s_tablesBkColor = 0;
+	thread_local static bool s_tablesValid = false;
+	bool bTablesReady = false;
+	if (nPixels >= 4096) {
+		// Large image: the tables pay for themselves, but only build them
+		// when the first transparent pixel actually needs them.
+		if (s_tablesValid && s_tablesBkColor == bkColor) {
+			bTablesReady = true;
+		}
+	}
+	uint8* pTableR = s_tables;
+	uint8* pTableG = s_tables + 256 * 256;
+	uint8* pTableB = s_tables + 2 * 256 * 256;
 	for (size_t i = 0; i < nPixels; i++) {
 		uint32 pixel = pPixels[i];
 		uint32 alpha = pixel & 0xFF000000;
 		if (alpha == 0xFF000000) {
-			continue;
+			continue; // opaque: blending would not change this pixel
 		}
 		if (alpha == 0) {
-			pPixels[i] = bgRGB;
+			pPixels[i] = bgRGB; // fully transparent: background, alpha 0
 			continue;
+		}
+		if (nPixels < 4096) {
+			// Small image: the scalar helper is cheaper than building the
+			// tables, and pixel-identical to them (see the comment above).
+			pPixels[i] = Helpers::AlphaBlendBackground(pixel, bkColor);
+			continue;
+		}
+		if (!bTablesReady) {
+			for (unsigned int a = 0; a < 256; a++) {
+				for (unsigned int v = 0; v < 256; v++) {
+					pTableR[a * 256 + v] = (uint8)((v * a + bgR * (255 - a) + 127) / 255);
+					pTableG[a * 256 + v] = (uint8)((v * a + bgG * (255 - a) + 127) / 255);
+					pTableB[a * 256 + v] = (uint8)((v * a + bgB * (255 - a) + 127) / 255);
+				}
+			}
+			s_tablesBkColor = bkColor;
+			s_tablesValid = true;
+			bTablesReady = true;
 		}
 		unsigned int a = alpha >> 24;
 		pPixels[i] = 0xFF000000 |
@@ -211,7 +244,6 @@ static void AlphaBlendImageToBackground(uint32* pPixels, size_t nPixels, COLORRE
 			((uint32)pTableG[a * 256 + ((pixel >> 8) & 0xFF)] << 8) |
 			(uint32)pTableB[a * 256 + (pixel & 0xFF)];
 	}
-	delete[] pTables;
 }
 
 // static initializers
@@ -284,6 +316,8 @@ static EImageFormat GetImageFormat(LPCTSTR sFileName) {
 		return IF_PPM;
 	} else if (header[0] == 'P' && header[1] == '4') {
 		return IF_PBM;
+	} else if (header[0] == 'P' && header[1] == '7') {
+		return IF_PAM;
 	} else if (!memcmp(header, "DDS ", 4)) {
 		return IF_WIC;
 	}
@@ -303,6 +337,12 @@ static EImageFormat GetImageFormat(LPCTSTR sFileName) {
 		// ex: DNG - https://www.adobe.com/creativecloud/file-types/image/raw/dng-file.html#dng
 		return IF_TIFF;
 	} else if (header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x01 && header[3] == 0x00) {
+		return IF_ICO;
+	} else if (header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x02 && header[3] == 0x00) {
+		// F-10: a real cursor file (type 2). Like .ico it routes to IF_ICO
+		// and falls through to the GDI+ default path; the two .cur samples
+		// on hand are ICO-cored (type 1), so a true CUR file still needs a
+		// device sample to verify.
 		return IF_ICO;
 	} else if (header[0] == 0x01 && header[1] == 0x00 && header[2] == 0x00 && header[3] == 0x00 &&
 		// F-10: the bare 01 00 00 00 matches any file starting with those bytes;
@@ -445,6 +485,8 @@ static CJPEGImage* ConvertGDIPlusBitmapToJPEGImage(Gdiplus::Bitmap* pBitmap, int
 
 CImageLoadThread::CImageLoadThread(void) : CWorkThread(true) {
 	m_pLastBitmap = NULL;
+	m_pReadBuffer = NULL;
+	m_nReadBufferCapacity = 0;
 }
 
 CImageLoadThread::~CImageLoadThread(void) {
@@ -459,6 +501,12 @@ CImageLoadThread::~CImageLoadThread(void) {
 		DeleteCachedPngDecoder();
 		DeleteCachedJxlDecoder();
 		DeleteCachedAvifDecoder();
+		// E8: free the per-thread reuse buffer (same rule as the caches
+		// above: skip the release when Terminate() times out, so a decode
+		// still in flight cannot lose its buffer).
+		delete[] m_pReadBuffer;
+		m_pReadBuffer = NULL;
+		m_nReadBufferCapacity = 0;
 	}
 }
 
@@ -658,6 +706,14 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 			DeleteCachedAvifDecoder();
 			ProcessReadPBMRequest(&rq);
 			break;
+		case IF_PAM:
+			DeleteCachedGDIBitmap();
+			DeleteCachedWebpDecoder();
+			DeleteCachedPngDecoder();
+			DeleteCachedJxlDecoder();
+			DeleteCachedAvifDecoder();
+			ProcessReadPAMRequest(&rq);
+			break;
 		case IF_JP2:
 			DeleteCachedGDIBitmap();
 			DeleteCachedWebpDecoder();
@@ -700,6 +756,9 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 			break;
 	}
 	// then process the image if read was successful
+	// R-16/E19: a post-decode failure is not a decode failure. Remember
+	// whether AfterLoad failed so the memo below can tell the two apart.
+	bool bAfterLoadFailed = false;
 	if (rq.Image != NULL) {
 		rq.Image->SetLoadTickCount(Helpers::GetExactTickCount() - dStartTime);
 		// P2-6: tri-state. Only a genuine allocation failure sets OutOfMemory
@@ -710,12 +769,28 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 			delete rq.Image;
 			rq.Image = NULL;
 			rq.OutOfMemory = (eAfterLoad == AfterLoad_OOM);
+			bAfterLoadFailed = true;
 		}
-	} else if (bMemoIdentityKnown && (eFormat == IF_CameraRAW || eFormat == IF_TIFF)) {
+	}
+	if (rq.Image == NULL && bMemoIdentityKnown && (eFormat == IF_CameraRAW || eFormat == IF_TIFF)) {
 		// E6: remember the failure so the next visit skips the decoders.
 		// OutOfMemory is transient and is never memoized.
-		if (!rq.OutOfMemory) {
-			LoadMemoRecord(rq.FileName, nMemoSize, ftMemoWrite, true, false, false);
+		// R-16/E19: only a genuine decode failure is memoized. Skip when the
+		// image decoded but AfterLoad failed (rotation / DIB size-limit: the
+		// verdict depends on the processing parameters, not the file), when
+		// the pixel cap rejected it (depends on MaxImagePixelsMP: raising the
+		// cap must retry the file), and when the file cannot even be opened
+		// right now (locked / antivirus / network hiccup: the failure may
+		// be the open, not the decode). The re-check is one extra open on
+		// the failure path only; a lock that clears between the decode and
+		// this check can still be recorded - that race is unavoidable here,
+		// the flags alone cannot tell an open failure from a decode failure.
+		if (!rq.OutOfMemory && !bAfterLoadFailed && !rq.SizeLimitExceeded) {
+			__int64 nRecheckSize = 0;
+			FILETIME ftRecheck = { 0, 0 };
+			if (GetFileIdentity(rq.FileName, nRecheckSize, ftRecheck)) {
+				LoadMemoRecord(rq.FileName, nMemoSize, ftMemoWrite, true, false, false);
+			}
 		}
 	}
 }
@@ -907,13 +982,56 @@ static void* ConvertYmckInkToRgbNaive(void* pYmck, int nWidth, int nHeight) {
 	return pRgb;
 }
 
+// E8: read a whole file into the thread's reusable buffer. The buffer grows
+// only (never shrinks) and is owned by this CImageLoadThread instance, so the
+// two load threads never share it (R-01). Only "borrow" readers use it: the
+// decoder reads synchronously from the buffer and keeps no pointer to it
+// (QOI/PPM/HDR/PBM/JP2/EXR/SVG, HEIF, and WebP/PNG/AVIF, whose animation
+// caches keep their own malloc'ed copies). Two readers must never use it:
+// JPEG keeps its HGLOBAL buffer because the GDI+ fallback needs a stream
+// built on a moveable global (CreateStreamOnHGlobal), and JXL takes over
+// the caller's buffer (JxlReader::DeleteCache delete[]s cache.data, see
+// R-20) - handing it the shared buffer would free it out from under the
+// next load. Nested use cannot happen either: no function that reads through
+// this buffer calls another one that does (AVIF's HEIF fallback takes the
+// buffer as a parameter and decodes from it without touching this member;
+// GDI+/WIC/RAW fallbacks read by filename).
+// Returns false only when the buffer cannot be grown (the caller reports
+// out-of-memory, exactly as for a failed new[] today). A short read is NOT
+// a failure here: nBytesReadOut reports what was actually read and the
+// caller treats a short read as a plain decode failure, exactly as before.
+bool CImageLoadThread::ReadWholeFileIntoReuseBuffer(HANDLE hFile, long long nFileSize, char*& pBufferOut, unsigned int& nBytesReadOut) {
+	pBufferOut = NULL;
+	nBytesReadOut = 0;
+	if (nFileSize < 0) {
+		return false;
+	}
+	size_t nNeeded = (size_t)nFileSize;
+	if (nNeeded == 0) {
+		nNeeded = 1; // new char[0] returns a non-NULL pointer; keep that
+	}
+	if (nNeeded > m_nReadBufferCapacity) {
+		char* pNew = new(std::nothrow) char[nNeeded];
+		if (pNew == NULL) {
+			return false; // old buffer (if any) stays intact
+		}
+		delete[] m_pReadBuffer;
+		m_pReadBuffer = pNew;
+		m_nReadBufferCapacity = nNeeded;
+	}
+	pBufferOut = m_pReadBuffer;
+	DWORD nRead = 0;
+	::ReadFile(hFile, m_pReadBuffer, (DWORD)nFileSize, &nRead, NULL);
+	nBytesReadOut = nRead;
+	return true;
+}
+
 void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 	HANDLE hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
 		return;
 	}
 
-	HGLOBAL hFileBuffer = NULL;
 	void* pBuffer = NULL;
 	try {
 		// Don't read too huge files
@@ -923,33 +1041,49 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		hFileBuffer  = ::GlobalAlloc(GMEM_MOVEABLE, nFileSize);
-		pBuffer = (hFileBuffer == NULL) ? NULL : ::GlobalLock(hFileBuffer);
-		if (pBuffer == NULL) {
-			if (hFileBuffer) ::GlobalFree(hFileBuffer);
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The GDI+ branch below still needs
+		// a moveable global for its stream, so it makes a temporary copy.
+		unsigned int nNumBytesRead = 0;
+		char* pReadBuffer = NULL;
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pReadBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		unsigned int nNumBytesRead;
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD) &nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		pBuffer = pReadBuffer;
+		if (nNumBytesRead == nFileSize) {
 			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseGDIPlus) {
-				IStream* pStream = NULL;
-				if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
-					Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
-					bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
-					request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, Helpers::FindEXIFBlock(pBuffer, nFileSize),
-						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
-					request->OutOfMemory = request->Image == NULL && isOutOfMemory;
-					request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
-					if (request->Image != NULL) {
-						request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
-					}
-					pStream->Release();
-					delete pBitmap;
-				} else {
+				// E8: the stream needs a moveable global, so the GDI+ path
+				// works on a temporary copy of the reuse buffer. The copy is
+				// freed below, after the stream is released and the bitmap is
+				// deleted - the same lifetime order as the old HGLOBAL.
+				HGLOBAL hTempBuffer = ::GlobalAlloc(GMEM_MOVEABLE, nFileSize);
+				void* pTempBuffer = (hTempBuffer == NULL) ? NULL : ::GlobalLock(hTempBuffer);
+				if (pTempBuffer == NULL) {
+					if (hTempBuffer) ::GlobalFree(hTempBuffer);
 					request->OutOfMemory = true;
+				} else {
+					memcpy(pTempBuffer, pBuffer, (size_t)nFileSize);
+					IStream* pStream = NULL;
+					if (::CreateStreamOnHGlobal(hTempBuffer, FALSE, &pStream) == S_OK) {
+						Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
+						bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
+						request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, Helpers::FindEXIFBlock(pBuffer, nFileSize),
+							Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
+						request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+						request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
+						if (request->Image != NULL) {
+							request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
+						}
+						pStream->Release();
+						delete pBitmap;
+					} else {
+						request->OutOfMemory = true;
+					}
+					::GlobalUnlock(hTempBuffer);
+					::GlobalFree(hTempBuffer);
 				}
 			}
 			if (!bUseGDIPlus || request->OutOfMemory) {
@@ -1045,8 +1179,6 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	if (pBuffer) ::GlobalUnlock(hFileBuffer);
-	if (hFileBuffer) ::GlobalFree(hFileBuffer);
 }
 
 
@@ -1108,14 +1240,16 @@ void CImageLoadThread::ProcessReadWEBPRequest(CRequest * request) {
 				return;
 			}
 
-			pBuffer = new(std::nothrow) char[nFileSize];
-			if (pBuffer == NULL) {
+			// E8: read into the per-thread reuse buffer (see
+			// ReadWholeFileIntoReuseBuffer); the animation cache keeps its
+			// own malloc'ed copy, so it never holds this buffer.
+			if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 				request->OutOfMemory = true;
 				::CloseHandle(hFile);
 				return;
 			}
 		}
-		if (bUseCachedDecoder || (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize)) {
+		if (bUseCachedDecoder || (nNumBytesRead == nFileSize)) {
 			int nWidth, nHeight;
 			bool bHasAnimation = bUseCachedDecoder;
 			int nFrameCount = 1;
@@ -1146,7 +1280,6 @@ void CImageLoadThread::ProcessReadWEBPRequest(CRequest * request) {
 	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
-		delete[] pBuffer;
 	}
 }
 
@@ -1169,7 +1302,6 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			return;
 		}
 	}
-	HGLOBAL hFileBuffer = NULL;
 	void* pBuffer = NULL;
 	try {
 		long long nFileSize;
@@ -1182,18 +1314,22 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 				::CloseHandle(hFile);
 				return;
 			}
-			hFileBuffer = ::GlobalAlloc(GMEM_MOVEABLE, nFileSize);
-			pBuffer = (hFileBuffer == NULL) ? NULL : ::GlobalLock(hFileBuffer);
-			if (pBuffer == NULL) {
-				if (hFileBuffer) ::GlobalFree(hFileBuffer);
+			// E8: read into the per-thread reuse buffer (see
+			// ReadWholeFileIntoReuseBuffer). The PNG cache keeps its own
+			// malloc'ed copy, so it never holds this buffer; the GDI+
+			// fallback below still needs a moveable global, so it makes a
+			// temporary copy there.
+			char* pReadBuffer = NULL;
+			if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pReadBuffer, nNumBytesRead)) {
 				request->OutOfMemory = true;
 				::CloseHandle(hFile);
 				return;
 			}
+			pBuffer = pReadBuffer;
 		} else {
 			nFileSize = 0; // to avoid compiler warnings, not used
 		}
-		if (bUseCachedDecoder || (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize)) {
+		if (bUseCachedDecoder || (nNumBytesRead == nFileSize)) {
 			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
 			bool bHasAnimation;
 			uint8* pPixelData = NULL;
@@ -1222,18 +1358,32 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 				
 				// R-04/P2-5: libpng already proved the file exceeds the pixel cap; GDI+ would reject it the same way after decoding the whole bitmap, so skip the fallback and keep the verdict.
 				if (!request->SizeLimitExceeded) {
-					IStream* pStream = NULL;
-					if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
-						Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
-						bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
-						pEXIFData = PngReader::GetEXIFBlock(pBuffer, nFileSize);
-						request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, pEXIFData, 0, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
-						request->OutOfMemory = request->Image == NULL && isOutOfMemory;
-						request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
-						pStream->Release();
-						delete pBitmap;
-					} else {
+					// E8: the stream needs a moveable global, so the GDI+
+					// fallback works on a temporary copy of the reuse buffer,
+					// freed below after the stream is released and the bitmap
+					// is deleted (the same lifetime order as before).
+					HGLOBAL hTempBuffer = ::GlobalAlloc(GMEM_MOVEABLE, nFileSize);
+					void* pTempBuffer = (hTempBuffer == NULL) ? NULL : ::GlobalLock(hTempBuffer);
+					if (pTempBuffer == NULL) {
+						if (hTempBuffer) ::GlobalFree(hTempBuffer);
 						request->OutOfMemory = true;
+					} else {
+						memcpy(pTempBuffer, pBuffer, (size_t)nFileSize);
+						IStream* pStream = NULL;
+						if (::CreateStreamOnHGlobal(hTempBuffer, FALSE, &pStream) == S_OK) {
+							Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
+							bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
+							pEXIFData = PngReader::GetEXIFBlock(pBuffer, nFileSize);
+							request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, pEXIFData, 0, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
+							request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+							request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
+							pStream->Release();
+							delete pBitmap;
+						} else {
+							request->OutOfMemory = true;
+						}
+						::GlobalUnlock(hTempBuffer);
+						::GlobalFree(hTempBuffer);
 					}
 				}
 			}
@@ -1247,8 +1397,6 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
-		if (pBuffer) ::GlobalUnlock(hFileBuffer);
-		if (hFileBuffer) ::GlobalFree(hFileBuffer);
 	}
 }
 #endif
@@ -1366,14 +1514,16 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 				return;
 			}
 
-			pBuffer = new(std::nothrow) char[nFileSize];
-			if (pBuffer == NULL) {
+			// E8: read into the per-thread reuse buffer (see
+			// ReadWholeFileIntoReuseBuffer); the animation cache keeps its
+			// own malloc'ed copy, so it never holds this buffer.
+			if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 				request->OutOfMemory = true;
 				::CloseHandle(hFile);
 				return;
 			}
 		}
-		if (bUseCachedDecoder || (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize)) {
+		if (bUseCachedDecoder || (nNumBytesRead == nFileSize)) {
 			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
 			bool bHasAnimation;
 			void* pEXIFData;
@@ -1413,7 +1563,6 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
-		delete[] pBuffer;
 	}
 }
 #endif
@@ -1437,13 +1586,15 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request) {
 			return;
 		}
 
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			ProcessReadHEIFRequest(request, pBuffer, nFileSize);
 		}
 	} catch(heif::Error he) {
@@ -1456,7 +1607,6 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 
 // E8: HEIF decode from a buffer the caller already read (the AVIF fallback).
@@ -1518,13 +1668,15 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 			return;
 		}
 
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight, nBPP;
 			void* pPixelData = QoiReaderWriter::ReadImage(nWidth, nHeight, nBPP, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
@@ -1542,7 +1694,6 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 
 void CImageLoadThread::ProcessReadPPMRequest(CRequest* request) {
@@ -1562,13 +1713,15 @@ void CImageLoadThread::ProcessReadPPMRequest(CRequest* request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
 			void* pPixelData = PPMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
@@ -1581,7 +1734,6 @@ void CImageLoadThread::ProcessReadPPMRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 void CImageLoadThread::ProcessReadHDRRequest(CRequest* request) {
 	HANDLE hFile;
@@ -1599,13 +1751,15 @@ void CImageLoadThread::ProcessReadHDRRequest(CRequest* request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
 			void* pPixelData = HDRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
@@ -1618,7 +1772,6 @@ void CImageLoadThread::ProcessReadHDRRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 
 void CImageLoadThread::ProcessReadPBMRequest(CRequest* request) {
@@ -1637,13 +1790,15 @@ void CImageLoadThread::ProcessReadPBMRequest(CRequest* request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
 			void* pPixelData = PBMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
@@ -1656,7 +1811,45 @@ void CImageLoadThread::ProcessReadPBMRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
+}
+
+void CImageLoadThread::ProcessReadPAMRequest(CRequest* request) {
+	HANDLE hFile;
+	hFile = ::CreateFile(request->FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	char* pBuffer = NULL;
+	try {
+		unsigned int nNumBytesRead;
+		// Don't read too huge files (same cap as QOI/PPM: 300 MB Win64, 50 MB Win32).
+		long long nFileSize = Helpers::GetFileSize(hFile);
+		if (nFileSize > MAX_PNG_FILE_SIZE) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
+			request->OutOfMemory = true;
+			::CloseHandle(hFile);
+			return;
+		}
+		if (nNumBytesRead == nFileSize) {
+			int nWidth, nHeight;
+			void* pPixelData = PAMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
+			if (pPixelData != NULL) {
+				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_PAM, false, 0, 1, 0);
+			}
+		}
+	} catch (...) {
+		delete request->Image;
+		request->Image = NULL;
+		request->ExceptionError = true;
+	}
+	::CloseHandle(hFile);
 }
 
 void CImageLoadThread::ProcessReadJP2Request(CRequest* request) {
@@ -1675,13 +1868,15 @@ void CImageLoadThread::ProcessReadJP2Request(CRequest* request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
 			void* pPixelData = JP2Reader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
@@ -1694,7 +1889,6 @@ void CImageLoadThread::ProcessReadJP2Request(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 
 void CImageLoadThread::ProcessReadEXRRequest(CRequest* request) {
@@ -1713,13 +1907,15 @@ void CImageLoadThread::ProcessReadEXRRequest(CRequest* request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
 			void* pPixelData = EXRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
@@ -1732,7 +1928,6 @@ void CImageLoadThread::ProcessReadEXRRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 
 void CImageLoadThread::ProcessReadSVGRequest(CRequest* request) {
@@ -1751,13 +1946,15 @@ void CImageLoadThread::ProcessReadSVGRequest(CRequest* request) {
 			::CloseHandle(hFile);
 			return;
 		}
-		pBuffer = new(std::nothrow) char[nFileSize];
-		if (pBuffer == NULL) {
+		// E8: read into the per-thread reuse buffer (see
+		// ReadWholeFileIntoReuseBuffer). The reader decodes synchronously
+		// from the buffer and keeps no pointer to it.
+		if (!ReadWholeFileIntoReuseBuffer(hFile, nFileSize, pBuffer, nNumBytesRead)) {
 			request->OutOfMemory = true;
 			::CloseHandle(hFile);
 			return;
 		}
-		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
+		if (nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
 			void* pPixelData = SVGReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
@@ -1770,7 +1967,6 @@ void CImageLoadThread::ProcessReadSVGRequest(CRequest* request) {
 		request->ExceptionError = true;
 	}
 	::CloseHandle(hFile);
-	delete[] pBuffer;
 }
 
 // Decoder-independent RAW gate. Both libraw and dcraw_mod allocate and read the
@@ -2476,6 +2672,9 @@ static bool TiffReadAtFile(HANDLE hFile, unsigned __int64 nOffset, unsigned char
 // IFD's entry block is now read in one bulk read. The probe conclusion is also
 // cached in the load memo (E6's cache - one cache for both), keyed by path +
 // size + mtime, so a repeat open of the same TIFF skips the probe walk.
+// E12 (batch 6): the probe also hands its open handle to the sanitizer, so
+// the whole-file cleanup read reuses that open instead of opening the file
+// a second time.
 
 // Reads one SubIFD offset out of a tag-330 entry. The entry bytes are in hand
 // (bulk-read entry block); external values are read from the file. Returns
@@ -2632,8 +2831,12 @@ static bool TiffProbeWalk(HANDLE hFile, unsigned __int64 nIFD, bool bBE, unsigne
 	return TiffProbeWalk(hFile, nNext, bBE, nFileSize, nDepth, pVisited, nVisitedCount, bSuspicious);
 }
 
-static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName) {
+// E12 (batch 6): on a "needs sanitizing" verdict the probe hands its open
+// handle to the caller through hFileOut (the caller closes it); on any other
+// verdict hFileOut is NULL and the probe closes its handle itself.
+static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName, HANDLE& hFileOut) {
 	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	hFileOut = NULL;
 	if (hFile == INVALID_HANDLE_VALUE) return false;
 	LARGE_INTEGER liSize;
 	bool bResult = false;
@@ -2645,8 +2848,16 @@ static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName) {
 		if (bIdentityKnown) {
 			LoadMemoEntry memo;
 			if (LoadMemoLookup(sFileName, nSize, ftWrite, memo) && memo.bProbeKnown) {
+				// E12: hand the probe handle to the caller when the verdict
+				// is "sanitize", so the cleanup read reuses this open instead
+				// of opening the file a second time. On "no sanitize" the
+				// handle is closed here as before.
+				if (memo.bProbeNeedsSanitize) {
+					hFileOut = hFile;
+					return true;
+				}
 				::CloseHandle(hFile);
-				return memo.bProbeNeedsSanitize;
+				return false;
 			}
 		}
 		unsigned char header[8];
@@ -2668,7 +2879,13 @@ static bool TiffChromaticityNeedsSanitization(LPCTSTR sFileName) {
 			LoadMemoRecord(sFileName, nSize, ftWrite, false, true, bResult);
 		}
 	}
-	::CloseHandle(hFile);
+	// E12: same transfer as the memo-hit path above: on "sanitize" the
+	// caller takes over this handle; otherwise close it here.
+	if (bResult) {
+		hFileOut = hFile;
+	} else {
+		::CloseHandle(hFile);
+	}
 	return bResult;
 }
 
@@ -2834,12 +3051,21 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 	// an image, that is the result; if it yields nothing, the code below
 	// retries the original filename path, so a sanitized failure can never
 	// turn a readable file into an unreadable one.
-	if (Helpers::GetImageFormat(request->FileName) == IF_TIFF && TiffChromaticityNeedsSanitization(sFileName)) {
+	// E12: the probe hands over its open handle when the TIFF needs
+	// sanitizing, so the whole-file read below reuses that open instead of
+	// opening the file a second time. The probe leaves the handle at an
+	// arbitrary offset, so seek back to 0 before reading; if the seek fails
+	// the sanitized attempt is skipped and the filename path below runs.
+	HANDLE hProbeFile = NULL;
+	if (Helpers::GetImageFormat(request->FileName) == IF_TIFF && TiffChromaticityNeedsSanitization(sFileName, hProbeFile)) {
 		DeleteCachedGDIBitmap();
-		HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-		if (hFile != INVALID_HANDLE_VALUE) {
+		HANDLE hFile = hProbeFile;
+		if (hFile != INVALID_HANDLE_VALUE && hFile != NULL) {
+			LARGE_INTEGER liZero;
+			liZero.QuadPart = 0;
+			bool bSeekOk = ::SetFilePointerEx(hFile, liZero, NULL, FILE_BEGIN) != 0;
 			LARGE_INTEGER liSize;
-			if (::GetFileSizeEx(hFile, &liSize) && liSize.QuadPart > 0 && liSize.QuadPart <= 0x7FFFFFFF) {
+			if (bSeekOk && ::GetFileSizeEx(hFile, &liSize) && liSize.QuadPart > 0 && liSize.QuadPart <= 0x7FFFFFFF) {
 				HGLOBAL hBuffer = ::GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)liSize.QuadPart);
 				void* pData = (hBuffer == NULL) ? NULL : ::GlobalLock(hBuffer);
 				if (pData != NULL) {

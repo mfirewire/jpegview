@@ -4,6 +4,7 @@
 #include "resource.h"
 #include "Helpers.h"
 #include "SettingsProvider.h"
+#include "SaveImage.h"
 
 #define M_SHIFT 0x10000
 #define M_ALT   0x20000
@@ -608,9 +609,21 @@ void CKeyMap::CommentOutRejectedLines(LPCTSTR sPath) {
 		for (size_t j = lines[i].nBegin; j < lines[i].nEnd; j++) out.push_back(bytes[j]);
 	}
 
-	CString sTempPath = CString(sPath) + _T(".tmp");
+	// O-08(b): unique temp name via the shared F-B01 helper (CREATE_NEW,
+	// process id + counter), not the fixed "<path>.tmp" two instances
+	// could overwrite each other on. The helper reserves the name in the
+	// target's directory; the file is opened right afterwards and removed
+	// again on any failure below, so the target is never truncated and no
+	// temp file is left behind. (The path-only overload is the right one
+	// here: this file is written by name through _tfopen, like
+	// SaveGDIPlus; the handle overload is for FILE* writers.)
+	CString sTempPath;
+	if (!CreateAtomicTempFileName(sPath, sTempPath)) {
+		return;
+	}
 	FILE* fo = _tfopen(sTempPath, _T("wb"));
 	if (fo == NULL) {
+		_tremove(sTempPath);
 		return;
 	}
 	bool bOk = out.empty() || fwrite(&out[0], 1, out.size(), fo) == out.size();
@@ -662,9 +675,17 @@ void CKeyMap::ApplyShortcutOverride(int nCommandId, LPCTSTR sShortcut) {
 
 	// Esc 和鼠标左键承载基本交互（退出当前模式、平移、裁剪）。让配置把它们
 	// 抢走会把用户困在一个没有常规出口的模式里，直接拒绝。
-	if (nKeyCode == VK_ESCAPE || nKeyCode == VK_LBUTTON) {
-		OutputDebugString(_T("JPEGView: OcrShortcut may not use Esc or the left mouse button; ignored.\n"));
-		RecordRejectedShortcut(CString(_T("INI OcrShortcut '")) + sShortcutText + _T("'"), _T("Esc and the left mouse button carry basic interaction and cannot be rebound"), true);
+	// O-08(c): compare the BASE key, not the combined code. Modifiers live
+	// in the high bits (M_SHIFT 0x10000, M_ALT 0x20000, M_CTRL 0x40000), so
+	// Ctrl+Esc / Shift+Esc / Alt+Esc and Ctrl+MouseL used to pass this guard
+	// (their combined code differs from VK_ESCAPE / VK_LBUTTON). The base key
+	// is the low byte, as in _GetKeyShortcutName. This only gates the
+	// override/re-bind check; normal modified shortcuts (e.g. Ctrl+C) are
+	// unaffected.
+	int nBaseKeyCode = nKeyCode & 0xFF;
+	if (nBaseKeyCode == VK_ESCAPE || nBaseKeyCode == VK_LBUTTON || nBaseKeyCode == VK_LBUTTONDBLCLK) {
+		OutputDebugString(_T("JPEGView: OcrShortcut may not use Esc, the left mouse button or double-click; ignored.\n"));
+		RecordRejectedShortcut(CString(_T("INI OcrShortcut '")) + sShortcutText + _T("'"), _T("Esc, the left mouse button and double-click carry basic interaction and cannot be rebound"), true);
 		return;
 	}
 

@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <cstddef> // E8: size_t for m_nReadBufferCapacity
 #include "ProcessParams.h"
 #include "WorkThread.h"
 #include <gdiplus.h>
@@ -129,6 +130,12 @@ private:
 	AvifReader m_avifReader;
 #endif
 
+	// E8: per-thread reusable whole-file read buffer (see
+	// ReadWholeFileIntoReuseBuffer in ImageLoadThread.cpp). Grow-only
+	// capacity; one buffer per load thread, never shared (R-01).
+	char* m_pReadBuffer;
+	size_t m_nReadBufferCapacity;
+
 	virtual void ProcessRequest(CRequestBase& request);
 	virtual void AfterFinishProcess(CRequestBase& request);
 	void DeleteCachedGDIBitmap();
@@ -152,6 +159,7 @@ private:
 	void ProcessReadPPMRequest(CRequest * request);
 	void ProcessReadHDRRequest(CRequest * request);
 	void ProcessReadPBMRequest(CRequest * request);
+	void ProcessReadPAMRequest(CRequest * request);
 	void ProcessReadJP2Request(CRequest * request);
 	void ProcessReadEXRRequest(CRequest * request);
 	void ProcessReadSVGRequest(CRequest * request);
@@ -159,6 +167,9 @@ private:
 	void ProcessReadRAWRequest(CRequest * request);
 	void ProcessReadGDIPlusRequest(CRequest * request, void* pEXIFData = NULL, __int64 nJPEGFileHash = 0);
 	void ProcessReadWICRequest(CRequest* request);
+	// E8: read a whole file into m_pReadBuffer (grows it if needed).
+	// Returns false only when the buffer cannot be grown.
+	bool ReadWholeFileIntoReuseBuffer(HANDLE hFile, long long nFileSize, char*& pBufferOut, unsigned int& nBytesReadOut);
 
 	static void SetFileDependentProcessParams(CRequest * request);
 	// P2-6: ProcessImageAfterLoad is tri-state now. OK = image processed and

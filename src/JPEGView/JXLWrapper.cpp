@@ -45,9 +45,26 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 	bool bCountThisCall = (cache.decoder == NULL);
 
 	if (cache.decoder == NULL) {
+		// R-20: take ownership of the file buffer BEFORE the fallible
+		// setup below. The caller (ProcessReadJXLRequest) hands pBuffer
+		// to this reader and only releases it through
+		// DeleteCachedJxlDecoder() -> DeleteCache() -> delete[] cache.data,
+		// so any return false before the old cache.data assignment (at
+		// the end of this block) leaked one file buffer per failed open
+		// (up to MAX_JXL_FILE_SIZE). With the assignment first, every
+		// early return is cleaned up by the caller's DeleteCachedJxlDecoder.
+		// A stale cache.data here (no decoder, so no decode can own it)
+		// is freed first so a re-assignment cannot leak the old buffer;
+		// on the normal path it is NULL (DeleteCache resets the cache).
+		delete[] cache.data;
+		cache.data = (uint8_t*)jxl;
+		cache.data_size = size;
 		cache.runner = JxlResizableParallelRunnerMake(nullptr).release();
 
 		cache.decoder = JxlDecoderMake(nullptr).release();
+		if (cache.decoder == NULL) {
+			return false;
+		}
 		if (JXL_DEC_SUCCESS !=
 			JxlDecoderSubscribeEvents(cache.decoder, JXL_DEC_BASIC_INFO |
 				JXL_DEC_COLOR_ENCODING |
@@ -69,8 +86,8 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 
 		JxlDecoderSetInput(cache.decoder, jxl, size);
 		JxlDecoderCloseInput(cache.decoder);
-		cache.data = (uint8_t*)jxl;
-		cache.data_size = size;
+		// (R-20: cache.data was already assigned at the top of this
+		// block, so the early-failure paths above cannot leak the buffer.)
 	}
 
 	JxlBasicInfo info;
@@ -97,7 +114,10 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			if (cache.info.xsize > MAX_IMAGE_DIMENSION || cache.info.ysize > MAX_IMAGE_DIMENSION)
 				return false;
 			// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-			if (abs((double)cache.info.xsize * cache.info.ysize) > (double)CSettingsProvider::This().MaxImagePixels()) {
+			// No abs(): xsize/ysize are unsigned and proven <= MAX_IMAGE_DIMENSION
+			// above; unqualified abs(double) resolves to ::abs(int), and a product
+			// over INT_MAX would narrow to a negative int (abs(INT_MIN) is UB).
+			if ((double)cache.info.xsize * (double)cache.info.ysize > (double)CSettingsProvider::This().MaxImagePixels()) {
 				isSizeLimitExceeded = true;
 				return false;
 			}

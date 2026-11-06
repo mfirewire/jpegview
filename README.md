@@ -15,9 +15,9 @@ JPEGView is a lean, fast and highly configurable image viewer/editor with a mini
 JPEGView has built-in support the following formats:
 
 * Popular: JPEG (including JPS, MPO), GIF
-* Lossless: BMP, PNG (including APNG), TIFF, PSD, PPM (including PGM, PNM, PBM), HDR (including RGBE), JPEG 2000 (including J2K, J2C), OpenEXR
+* Lossless: BMP, PNG (including APNG), TIFF, PSD, PPM (including PGM, PNM, PBM, PAM), HDR (including RGBE), JPEG 2000 (including J2K, J2C), OpenEXR
 * Web: WEBP, JXL, HEIF/HEIC, AVIF (including AVIFS, AVIS), SVG
-* Legacy: TGA (including ICB, VDA, VST), WDP, HDP, JXR
+* Legacy: TGA (including ICB, VDA, VST), WDP, HDP, JXR, Windows icon/cursor (ICO, CUR)
 * Camera RAW formats:
   * Adobe (DNG), Canon (CRW, CR2, CR3), Nikon (NEF, NRW), Sony (ARW, SR2, SRF)
   * Olympus (ORF), Panasonic (RW2), Fujifilm (RAF)

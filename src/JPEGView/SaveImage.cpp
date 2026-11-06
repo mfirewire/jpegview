@@ -231,10 +231,12 @@ bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut, HANDLE& hFileO
 	return false;
 }
 bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut) {
-	// Kept for callers that need the path, not the handle: SaveGDIPlus
-	// below (GDI+ saves by file name) and JPEGLosslessTransform.cpp.
-	// The TOCTOU window remains for those two paths; they open the
-	// CREATE_NEW-reserved name immediately after creation.
+	// Kept for the callers that need the path, not the handle:
+	// SaveGDIPlus below and SaveJP2.cpp: both save through filename-only
+	// APIs (GDI+ Bitmap::Save, OpenJPEG's default file stream), so they
+	// cannot use the overload above; see their own comments for the
+	// remaining TOCTOU window. The reserved name is opened immediately
+	// after creation, so the window is minimal.
 	HANDLE hFile = INVALID_HANDLE_VALUE;
 	if (!CreateAtomicTempFileName(sTarget, sTempOut, hFile)) {
 		return false;
@@ -263,7 +265,8 @@ bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp) {
 // FILE* so the existing fwrite/fclose call sites are unchanged. fclose
 // closes the underlying handle. On failure the handle is closed here and
 // the caller deletes the (empty) temp file.
-static FILE* OpenTempFileForWriting(HANDLE hFile) {
+// Exported via SaveImage.h for SaveEXR.cpp (P3-1).
+FILE* OpenTempFileForWriting(HANDLE hFile) {
 	if (hFile == INVALID_HANDLE_VALUE) {
 		return NULL;
 	}
@@ -353,17 +356,27 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		TurboJpeg::Free(pTargetStream);
 		return NULL;
 	}
+	// R-11: the EXIF/comment helpers below allocate with throwing new
+	// (and GetThumbnailDIB can throw), all after the temp file was
+	// created. Without the catch below, a bad_alloc left the TurboJPEG
+	// stream allocated, the temp FILE* open and the temp file orphaned;
+	// the outer CSaveImage::SaveImage catch only frees the 24bpp buffer.
+	// pEXIFStream is hoisted so the catch can free the EXIF buffer when
+	// the throw happens after it was allocated but before it was handed
+	// to pTargetStream (it is NULled on transfer, so no double free).
+	unsigned char* pEXIFStream = NULL;
+	try {
 
 	// If EXIF data is present, replace any JFIF block by this EXIF block to preserve the EXIF information
 	if (pImage->GetEXIFData() != NULL && bCopyEXIF) {
 		const int cnAdditionalThumbBytes = 32000;
 		int nEXIFBlockLenCorrection = 0;
-		unsigned char* pNewStream = new unsigned char[nJPEGStreamLen + pImage->GetEXIFDataLength() + cnAdditionalThumbBytes];
-		memcpy(pNewStream, pTargetStream, 2); // copy SOI block
-		memcpy(pNewStream + 2, pImage->GetEXIFData(), pImage->GetEXIFDataLength()); // copy EXIF block
+		pEXIFStream = new unsigned char[nJPEGStreamLen + pImage->GetEXIFDataLength() + cnAdditionalThumbBytes];
+		memcpy(pEXIFStream, pTargetStream, 2); // copy SOI block
+		memcpy(pEXIFStream + 2, pImage->GetEXIFData(), pImage->GetEXIFDataLength()); // copy EXIF block
 		
 		// Set image orientation back to normal orientation, we save the pixels as displayed
-		CEXIFReader exifReader(pNewStream + 2, IF_JPEG);
+		CEXIFReader exifReader(pEXIFStream + 2, IF_JPEG);
 		exifReader.WriteImageOrientation(1); // 1 means default orientation (unrotated)
 		if (bDeleteThumbnail) {
 			exifReader.DeleteThumbnail();
@@ -389,9 +402,10 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		}
 
 		int nJFIFLength = GetJFIFBlockLength(pTargetStream);
-		memcpy(pNewStream + 2 + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection, pTargetStream + 2 + nJFIFLength, nJPEGStreamLen - 2 - nJFIFLength);
+		memcpy(pEXIFStream + 2 + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection, pTargetStream + 2 + nJFIFLength, nJPEGStreamLen - 2 - nJFIFLength);
 		TurboJpeg::Free(pTargetStream);
-		pTargetStream = pNewStream;
+		pTargetStream = pEXIFStream;
+		pEXIFStream = NULL; // ownership moved to pTargetStream
 		tjFreeNeeded = false;
 		nJPEGStreamLen = nJPEGStreamLen - nJFIFLength + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection;
 	}
@@ -419,6 +433,7 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 	// run even when fwrite failed, otherwise the temp file stays open
 	// and its deletion below fails.
 	bool bCloseOk = (fclose(fptr) == 0);
+	fptr = NULL; // closed: the R-11 catch below must not close it again
 	bool bSuccess = bWriteOk && bCloseOk;
 
 	// delete partial temp file if no success; the target is untouched
@@ -436,6 +451,25 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		return NULL;
 	}
 
+	} catch (...) {
+		// R-11: a throwing new in the EXIF/comment helpers above (or in
+		// GetThumbnailDIB) used to leak the TurboJPEG stream, leave the
+		// temp FILE* open and orphan the temp file; the outer
+		// CSaveImage::SaveImage catch only frees the 24bpp buffer. Free
+		// the stream (whichever side owns it now), close the temp file
+		// and delete it, so the save fails like any other write failure
+		// and the target stays untouched.
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
+		if (pEXIFStream != NULL) {
+			delete[] pEXIFStream;
+		}
+		if (tjFreeNeeded) TurboJpeg::Free(pTargetStream); else delete[] pTargetStream;
+		DeleteAtomicTempFile(sTempFile);
+		return NULL;
+	}
 	// Success, return compressed JPEG stream
 	return pTargetStream;
 }
@@ -901,6 +935,13 @@ static bool SaveGDIPlus(LPCTSTR sFileName, EImageFormat eFileFormat, void* pData
 	// F-H11, same class as F-B01: GDI+ used to save straight to the
 	// target, leaving a partial file there on failure. Save to a temp
 	// file in the same directory instead, then swap it in.
+	// P3-1 residual: GDI+ Bitmap::Save takes a file name, not a handle,
+	// so this path cannot use the handle overload above and keeps the
+	// create-close-reopen sequence. The name is CREATE_NEW-reserved and
+	// opened immediately, so the window is the microseconds between the
+	// close and GDI+'s open, winnable only by a same-directory actor
+	// that predicts the ~jv<pid>_<n>.tmp name; closing it would need an
+	// in-memory stream copy of the whole encoded image. Accepted.
 	CString sTempFile;
 	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
 		delete pBitmap;

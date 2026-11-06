@@ -11,8 +11,10 @@ class CJPEGImage;
 // place; on any failure the caller deletes the temp file and the
 // target is left untouched.
 bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut);
+bool CreateAtomicTempFileName(LPCTSTR sTarget, CString& sTempOut, HANDLE& hFileOut); // P3-1: hands out the CREATE_NEW handle; the caller owns it from here on.
 void DeleteAtomicTempFile(LPCTSTR sTemp);
 bool CommitAtomicTempFile(LPCTSTR sTarget, LPCTSTR sTemp);
+FILE* OpenTempFileForWriting(HANDLE hFile); // P3-1: wraps a CREATE_NEW handle in a FILE* (fclose closes the handle); shared with SaveEXR.cpp.
 
 // Class that enables to save a processed image to a one of the supported file formats
 class CSaveImage

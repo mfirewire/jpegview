@@ -112,7 +112,15 @@ bool CPrintImage::DoPrint(HDC hPrinterDC, CPrintParameters* pPrintParameters, CJ
 			CPoint offset = pPrintParameters->ScaleByPrinterDriver ? CPoint(0, 0) : CPoint(max(0, printableRect.left - imageRect.left), max(0, printableRect.top - imageRect.top));
 
 			pImage->EnableDimming(false);
-			void* pDIBData = pImage->GetDIB(fullTargetSize, dibSize, offset, procParams, eFlags);
+			// R-10: GetDIB can throw on allocation failure; this runs on
+			// the UI thread (print) with no try/catch above. A failed DIB
+			// prints nothing, as in the NULL case below.
+			void* pDIBData = NULL;
+			try {
+				pDIBData = pImage->GetDIB(fullTargetSize, dibSize, offset, procParams, eFlags);
+			} catch (...) {
+				pDIBData = NULL;
+			}
 			pImage->EnableDimming(true);
 
 			if (pDIBData != NULL) {

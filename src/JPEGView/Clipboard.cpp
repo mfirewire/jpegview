@@ -58,7 +58,16 @@ void CClipboard::CopyFullImageToClipboard(HWND hWnd, CJPEGImage * pImage, const 
 	clipRect.bottom = min(pImage->OrigHeight(), clipRect.bottom);
 
 	pImage->EnableDimming(false);
-	void* pDIB = pImage->GetDIB(pImage->OrigSize(), clipRect.Size(), clipRect.TopLeft(), procParams, eFlags);
+	void* pDIB = NULL;
+	try {
+		pDIB = pImage->GetDIB(pImage->OrigSize(), clipRect.Size(), clipRect.TopLeft(), procParams, eFlags);
+	} catch (...) {
+		// R-10: allocation failure inside GetDIB must not kill the UI thread
+		// (called from MainDlg IDM_COPY_FULL); skip the copy, as in the
+		// pImage == NULL case above.
+		pImage->EnableDimming(true);
+		return;
+	}
 	DoCopy(hWnd, clipRect.Width(), clipRect.Height(), pDIB, pImage->IsClipboardImage() ? NULL : fileName);
 	pImage->EnableDimming(true);
 }
@@ -93,14 +102,31 @@ CJPEGImage* CClipboard::PasteImageFromClipboard(HWND hWnd, const CImageProcessin
 			char* pDIBBits = (char*)pbmInfo + pbmInfo->bmiHeader.biSize + nNumColors*sizeof(RGBQUAD);
 
 			if (pbmInfo->bmiHeader.biWidth <= MAX_IMAGE_DIMENSION && abs(pbmInfo->bmiHeader.biHeight) <= MAX_IMAGE_DIMENSION) {
-				Gdiplus::Bitmap* pBitmap = new Gdiplus::Bitmap(pbmInfo, pDIBBits);
-				if (pBitmap->GetLastStatus() == Gdiplus::Ok) {
+				// R-10: 'new Gdiplus::Bitmap' and 'new CJPEGImage' below (its
+				// CLocalDensityCorr member) can throw on allocation failure;
+				// this runs on the UI thread (GotoImage, no try/catch above).
+				// On failure the paste returns NULL, which the caller already
+				// maps to PasteFromClipboardFailed.
+				Gdiplus::Bitmap* pBitmap = NULL;
+				try {
+					pBitmap = new Gdiplus::Bitmap(pbmInfo, pDIBBits);
+				} catch (...) {
+					pBitmap = NULL;
+				}
+				if (pBitmap != NULL && pBitmap->GetLastStatus() == Gdiplus::Ok) {
 					Gdiplus::Rect bmRect(0, 0, pBitmap->GetWidth(), pBitmap->GetHeight());
 					Gdiplus::BitmapData bmData;
 					if (pBitmap->LockBits(&bmRect, Gdiplus::ImageLockModeRead, PixelFormat32bppRGB, &bmData) == Gdiplus::Ok) {
 						assert(bmData.PixelFormat == PixelFormat32bppRGB);
 						void* pDIB = CBasicProcessing::ConvertGdiplus32bppRGB(bmRect.Width, bmRect.Height, bmData.Stride, bmData.Scan0);
-						pImage = (pDIB == NULL) ? NULL : new CJPEGImage(bmRect.Width, bmRect.Height, pDIB, NULL, 4, 0, IF_CLIPBOARD, false, 0, 1, 0);
+						try {
+							pImage = (pDIB == NULL) ? NULL : new CJPEGImage(bmRect.Width, bmRect.Height, pDIB, NULL, 4, 0, IF_CLIPBOARD, false, 0, 1, 0);
+						} catch (...) {
+							// R-10: the constructor threw (CLocalDensityCorr);
+							// the converted DIB was never adopted, free it.
+							delete[] (uint32*)pDIB;
+							pImage = NULL;
+						}
 						pBitmap->UnlockBits(&bmData);
 					}
 				}

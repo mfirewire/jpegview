@@ -38,7 +38,9 @@ void * TurboJpeg::ReadImage(int &width,
 		const int colorSpace = tj3Get(hDecoder, TJPARAM_COLORSPACE);
 		const bool bCMYK = (colorSpace == TJCS_CMYK || colorSpace == TJCS_YCCK);
 		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-		if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		// No abs(): libjpeg-turbo only returns non-negative dimensions for
+		// a parsed header; unqualified abs(double) resolves to ::abs(int).
+		if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels()) {
 			isSizeLimitExceeded = true;
 		} else if (width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION && (chromoSubsampling != TJSAMP_UNKNOWN || bCMYK)) {
 			// TJPAD is int arithmetic, but width <= 65535 keeps width*bytesPerPixel

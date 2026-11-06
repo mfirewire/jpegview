@@ -516,20 +516,28 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 		CSize clippedSize(min(m_clientRect.Width(), newSize.cx), min(m_clientRect.Height(), newSize.cy));
 		CPoint offsetsInImage = m_pCurrentImage->ConvertOffset(newSize, clippedSize, m_offsets);
 
-		void* pDIBData;
-		if (m_pUnsharpMaskPanelCtl->IsVisible()) {
-			pDIBData = m_pUnsharpMaskPanelCtl->GetUSMDIBForPreview(clippedSize, offsetsInImage, 
-				*m_pImageProcParams, CreateProcessingFlags(m_bHQResampling && !m_bTemporaryLowQ && !m_bZoomMode, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
-		} else if (m_pRotationPanelCtl->IsVisible()) {
-			pDIBData = m_pRotationPanelCtl->GetDIBForPreview(newSize, clippedSize, offsetsInImage, 
-				*m_pImageProcParams, CreateProcessingFlags(false, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
-		} else if (m_pTiltCorrectionPanelCtl->IsVisible()) {
-			pDIBData = m_pTiltCorrectionPanelCtl->GetDIBForPreview(newSize, clippedSize, offsetsInImage, 
-				*m_pImageProcParams, CreateProcessingFlags(false, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
-		} else {
-			pDIBData = m_pCurrentImage->GetDIB(newSize, clippedSize, offsetsInImage, 
-				*m_pImageProcParams, 
-				CreateProcessingFlags(m_bHQResampling && !m_bTemporaryLowQ && !m_bZoomMode, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
+		void* pDIBData = NULL;
+		try {
+			if (m_pUnsharpMaskPanelCtl->IsVisible()) {
+				pDIBData = m_pUnsharpMaskPanelCtl->GetUSMDIBForPreview(clippedSize, offsetsInImage, 
+					*m_pImageProcParams, CreateProcessingFlags(m_bHQResampling && !m_bTemporaryLowQ && !m_bZoomMode, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
+			} else if (m_pRotationPanelCtl->IsVisible()) {
+				pDIBData = m_pRotationPanelCtl->GetDIBForPreview(newSize, clippedSize, offsetsInImage, 
+					*m_pImageProcParams, CreateProcessingFlags(false, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
+			} else if (m_pTiltCorrectionPanelCtl->IsVisible()) {
+				pDIBData = m_pTiltCorrectionPanelCtl->GetDIBForPreview(newSize, clippedSize, offsetsInImage, 
+					*m_pImageProcParams, CreateProcessingFlags(false, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
+			} else {
+				pDIBData = m_pCurrentImage->GetDIB(newSize, clippedSize, offsetsInImage, 
+					*m_pImageProcParams, 
+					CreateProcessingFlags(m_bHQResampling && !m_bTemporaryLowQ && !m_bZoomMode, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
+			}
+		} catch (...) {
+			// R-10: a throwing allocation inside the DIB path (LUTs,
+			// resampling, LDC, ...) must not kill the UI thread: no caller
+			// above this paint handler catches. A failed DIB is painted as
+			// "no image", exactly like the NULL return handled below.
+			pDIBData = NULL;
 		}
 
 		// Zoom navigator - check if visible and create exclusion rectangle
@@ -628,9 +636,15 @@ void CMainDlg::PaintToDC(CDC& dc) {
 		CSize clippedSize(min(m_clientRect.Width(), newSize.cx), min(m_clientRect.Height(), newSize.cy));
 		CPoint offsetsInImage = pCurrentImage->ConvertOffset(newSize, clippedSize, offsets);
 
-		void* pDIBData = pCurrentImage->GetDIB(newSize, clippedSize, offsetsInImage, 
-				*GetImageProcessingParams(),
-				CreateDefaultProcessingFlags());
+		void* pDIBData = NULL;
+		try {
+			pDIBData = pCurrentImage->GetDIB(newSize, clippedSize, offsetsInImage, 
+					*GetImageProcessingParams(),
+					CreateDefaultProcessingFlags());
+		} catch (...) {
+			// R-10: see OnPaint above; NULL is already handled below.
+			pDIBData = NULL;
+		}
 		if (pDIBData != NULL) {
 			BITMAPINFO bmInfo{ 0 };
 			CPoint ptDIBStart = HelpersGUI::DrawDIB32bppWithBlackBorders(dc, bmInfo, pDIBData, backBrush, m_clientRect, clippedSize, CPoint(0, 0));
@@ -1454,7 +1468,12 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			ReloadImage(false);
 			break;
 		case IDM_RELOAD_FULLSIZE:
-			ReloadImageFullSize();
+			// O-08(e): no image, no reload. The menu already grays this item
+			// when there is no image, but the Ctrl+Shift+R shortcut still
+			// reaches here; ReloadImageFullSize itself has no NULL guard.
+			if (m_pCurrentImage != NULL) {
+				ReloadImageFullSize();
+			}
 			break;
 		case IDM_PRINT:
 			if (m_pCurrentImage != NULL) {
@@ -3511,7 +3530,13 @@ void CMainDlg::PrefetchDIB(const CRect& clientRect) {
 	CSize newSize = Helpers::GetVirtualImageSize(m_pCurrentImage->OrigSize(), clientRect.Size(), GetAutoZoomMode(), m_dZoom);
 	CSize clippedSize(min(clientRect.Width(), newSize.cx), min(clientRect.Height(), newSize.cy));
 	CPoint offsetsInImage = m_pCurrentImage->ConvertOffset(newSize, clippedSize, Helpers::LimitOffsets(m_offsets, clientRect.Size(), newSize));
-	m_pCurrentImage->GetDIB(newSize, clippedSize, offsetsInImage, *m_pImageProcParams, CreateDefaultProcessingFlags());
+	// R-10: the prefetch result is discarded; an allocation failure
+	// inside GetDIB must not kill the UI thread. The next paint simply
+	// retries the DIB request.
+	try {
+		m_pCurrentImage->GetDIB(newSize, clippedSize, offsetsInImage, *m_pImageProcParams, CreateDefaultProcessingFlags());
+	} catch (...) {
+	}
 }
 
 double CMainDlg::GetZoomMultiplier(CJPEGImage* pImage, const CRect& clientRect) {

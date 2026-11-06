@@ -108,13 +108,14 @@ static bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int n
 	// memory by _DoTransformation, so input and output may be the same
 	// file; CommitAtomicTempFile handles both cases (ReplaceFile for an
 	// existing target, MoveFile for a brand-new one).
+	// P3-1: take the CREATE_NEW handle straight from
+	// CreateAtomicTempFileName instead of closing it and reopening the
+	// temp file by name (the old create-close-reopen sequence had a
+	// TOCTOU window). The handle has the same access/share as the
+	// reopened one (GENERIC_WRITE, no sharing).
 	CString sTempFile;
-	if (!CreateAtomicTempFileName(sFileName, sTempFile)) {
-		return false;
-	}
-	HANDLE hFile = ::CreateFile(sTempFile, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hFile == INVALID_HANDLE_VALUE) {
-		DeleteAtomicTempFile(sTempFile);
+	HANDLE hFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hFile)) {
 		return false;
 	}
 

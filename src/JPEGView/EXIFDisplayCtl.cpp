@@ -92,7 +92,15 @@ void CEXIFDisplayCtl::OnPrePaintMainDlg(HDC hPaintDC) {
 	m_pEXIFDisplay->SetPosition(CPoint(m_pImageProcPanel->PanelRect().left, m_pMainDlg->IsShowFileName() ? m_nFileNameHeight + 6 : 0));
 	FillEXIFDataDisplay();
 	if (CurrentImage() != NULL && m_pEXIFDisplay->GetShowHistogram()) {
-		m_pEXIFDisplay->SetHistogram(CurrentImage()->GetProcessedHistogram());
+		// R-10: GetProcessedHistogram() can throw on allocation failure
+		// (CreateThumbnailImage); this runs on the UI thread from
+		// PaintToDC with no try/catch above. On failure show no
+		// histogram, as in AfterNewImageLoaded().
+		try {
+			m_pEXIFDisplay->SetHistogram(CurrentImage()->GetProcessedHistogram());
+		} catch (...) {
+			m_pEXIFDisplay->SetHistogram(NULL);
+		}
 	}
 }
 

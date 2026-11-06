@@ -167,23 +167,40 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 				// wait a short time, otherwise the file may can not be read yet
 				::WaitForSingleObject(thisPtr->m_terminateEvent, 250);
 
+				// R-23: same fix as SetCurrentFile above (E18): reading the
+				// file time opens the file, which can stall on a slow or
+				// network drive. The lock now only snapshots the file name
+				// + last known time; the GetLastModificationTime calls run
+				// outside the lock, so the UI thread's SetCurrentFile is
+				// never stuck behind file I/O. Retry semantics are
+				// unchanged: one retry after a 250 ms wait on failure.
+				// (Snapshot-once also fixes a small race in the old code,
+				// which re-read m_sCurrentFile on retry and could compare
+				// the new file's time against the old file's stored time.)
 				bool sendMessage = false;
 
+				CString sCurrentFile;
+				FILETIME lastKnownTime = { 0 };
+				bool bTimeValid = false;
 				::EnterCriticalSection(&thisPtr->m_lock);
-				FILETIME fileTime;
 				if (thisPtr->m_bModificationTimeValid) {
+					sCurrentFile = thisPtr->m_sCurrentFile;
+					lastKnownTime = thisPtr->m_modificationTimeCurrentFile;
+					bTimeValid = true;
+				}
+				::LeaveCriticalSection(&thisPtr->m_lock);
+
+				if (bTimeValid) {
+					FILETIME fileTime;
 					bool canReadModificationTime = true;
-					if (!GetLastModificationTime(thisPtr->m_sCurrentFile, fileTime)) {
-						::LeaveCriticalSection(&thisPtr->m_lock);
+					if (!GetLastModificationTime(sCurrentFile, fileTime)) {
 						::WaitForSingleObject(thisPtr->m_terminateEvent, 250);
-						::EnterCriticalSection(&thisPtr->m_lock);
-						if (!GetLastModificationTime(thisPtr->m_sCurrentFile, fileTime)) {
+						if (!GetLastModificationTime(sCurrentFile, fileTime)) {
 							canReadModificationTime = false;
 						}
 					}
-					sendMessage = canReadModificationTime && ::memcmp(&fileTime, &thisPtr->m_modificationTimeCurrentFile, sizeof(FILETIME)) != 0;
+					sendMessage = canReadModificationTime && ::memcmp(&fileTime, &lastKnownTime, sizeof(FILETIME)) != 0;
 				}
-				::LeaveCriticalSection(&thisPtr->m_lock);
 
 				if (sendMessage) {
 					// H7b trailing-edge debounce: arm (or re-arm) the pending

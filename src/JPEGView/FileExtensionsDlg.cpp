@@ -295,10 +295,12 @@ void CFileExtensionsDlg::FillFileExtensionsList() {
 	InsertExtension(_T("*.ppm;*.pgm;*.pnm"), FormatHint(CNLS::GetString(_T("%s images")), _T("PPM")));
 	InsertExtension(_T("*.hdr;*.rgbe"), FormatHint(CNLS::GetString(_T("%s images")), _T("HDR")));
 	InsertExtension(_T("*.pbm"), FormatHint(CNLS::GetString(_T("%s images")), _T("PBM")));
+	InsertExtension(_T("*.pam"), FormatHint(CNLS::GetString(_T("%s images")), _T("PAM")));
 	InsertExtension(_T("*.jp2;*.j2k;*.j2c"), FormatHint(CNLS::GetString(_T("%s images")), _T("JPEG 2000")));
 	InsertExtension(_T("*.exr"), FormatHint(CNLS::GetString(_T("%s images")), _T("OpenEXR")));
 	InsertExtension(_T("*.svg"), FormatHint(CNLS::GetString(_T("%s images")), _T("Scalable Vector Graphics")));
 	InsertExtension(_T("*.ico"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows icon")));
+	InsertExtension(_T("*.cur"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows cursor")));
 	InsertExtension(_T("*.wmf;*.emf"), FormatHint(CNLS::GetString(_T("%s images")), _T("Windows metafile")));
 	InsertExtensions(CSettingsProvider::This().FilesProcessedByWIC(), CNLS::GetString(_T("%s images (processed by Window Imaging Component - WIC)")));
 	InsertExtensions(CSettingsProvider::This().FileEndingsRAW(), CNLS::GetString(_T("%s camera raw images (embedded JPEGs only)")));

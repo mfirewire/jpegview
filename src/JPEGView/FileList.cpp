@@ -5,6 +5,7 @@
 #include "DirectoryWatcher.h"
 #include "Shlwapi.h"
 #include <stdlib.h>
+#include <new> // ST-10: std::nothrow
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -136,15 +137,15 @@ void CFileDesc::SetModificationDate(const FILETIME& lastModDate) {
 
 // image file types supported internally (there are additional endings for RAW, WIC and Extra - these come from INI file)
 // NOTE: when adding more supported filetypes, update installer to add another extension for "SupportedTypes"
-static const int cnNumEndingsInternal = 43;
+static const int cnNumEndingsInternal = 45;
 static const TCHAR* csFileEndingsInternal[cnNumEndingsInternal] = {_T("jpg"), _T("jpeg"), _T("jpe"), _T("jfif"), _T("jps"), _T("jfi"), _T("jif"), _T("mpo"), _T("bmp"), _T("png"), _T("apng"),
 	_T("tif"), _T("tiff"), _T("gif"), _T("webp"), _T("jxl"), _T("avif"), _T("avifs"), _T("avis"), _T("heif"), _T("heic"), _T("hif"), _T("tga"), _T("icb"), _T("vda"), _T("vst"), _T("qoi"), _T("psd"), _T("psb"), _T("ppm"), _T("pgm"), _T("pnm"), 
-	_T("ico"), _T("wmf"), _T("emf"), _T("hdr"), _T("rgbe"), _T("pbm"), _T("jp2"), _T("j2k"), _T("j2c"), _T("exr"), _T("svg") };
+	_T("ico"), _T("cur"), _T("wmf"), _T("emf"), _T("hdr"), _T("rgbe"), _T("pbm"), _T("pam"), _T("jp2"), _T("j2k"), _T("j2c"), _T("exr"), _T("svg") };
 // supported camera RAW formats
 static const TCHAR* csFileEndingsRAW = _T("*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.srf;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw");
 
 
-static const int MAX_ENDINGS = 128; // 43 internal + 5 WIC + 25 RAW = 73, plus room for FileEndingsExtra
+static const int MAX_ENDINGS = 128; // 45 internal + 5 WIC + 25 RAW = 75, plus room for FileEndingsExtra
 static int nNumEndings;
 static LPCTSTR* sFileEndings;
 
@@ -245,10 +246,19 @@ static int __cdecl CompareFileEndings(const void* pA, const void* pB) {
 	return _tcsicmp(((const SFileEndingEntry*)pA)->pszEnding, ((const SFileEndingEntry*)pB)->pszEnding);
 }
 
-static void EnsureSortedFileEndings() {
+// ST-10: returns false when the sorted index cannot be built (out of
+// memory). The old plain new threw bad_alloc to the UI thread; with
+// nothrow the caller fails closed instead (FindSupportedEndingRun
+// reports "no match", so FindFiles lists nothing and IsImageFile
+// returns false) and retries the allocation on the next call, since
+// s_nSortedFileEndings stays -1.
+static bool EnsureSortedFileEndings() {
 	LPCTSTR* allFileEndings = GetSupportedFileEndingList();
 	if (sSortedFileEndings == NULL) {
-		sSortedFileEndings = new SFileEndingEntry[MAX_ENDINGS];
+		sSortedFileEndings = new(std::nothrow) SFileEndingEntry[MAX_ENDINGS];
+		if (sSortedFileEndings == NULL) {
+			return false;
+		}
 	}
 	if (s_nSortedFileEndings != nNumEndings) {
 		for (int i = 0; i < nNumEndings; i++) {
@@ -258,6 +268,7 @@ static void EnsureSortedFileEndings() {
 		qsort(sSortedFileEndings, nNumEndings, sizeof(SFileEndingEntry), CompareFileEndings);
 		s_nSortedFileEndings = nNumEndings;
 	}
+	return true;
 }
 
 // Compares an ending against a (pointer, length) extension run, as used by
@@ -284,7 +295,9 @@ static int CompareEndingToRun(LPCTSTR pszEnding, LPCTSTR pRun, size_t nRunLen) {
 // Binary search over the sorted index for an extension run (E9) or a
 // NUL-terminated extension (E4). Returns the entry, or NULL.
 static const SFileEndingEntry* FindSupportedEndingRun(LPCTSTR pRun, size_t nRunLen) {
-	EnsureSortedFileEndings();
+	if (!EnsureSortedFileEndings()) {
+		return NULL; // ST-10: no index (OOM) -> no match, fail closed
+	}
 	int nLow = 0;
 	int nHigh = s_nSortedFileEndings - 1;
 	while (nLow <= nHigh) {

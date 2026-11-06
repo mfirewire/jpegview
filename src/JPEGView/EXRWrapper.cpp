@@ -68,16 +68,23 @@ void* EXRReader::ReadImage(int& width,
 		FreeEXRHeader(&header);
 		return NULL;
 	}
-	width = header.data_window.max_x - header.data_window.min_x + 1;
-	height = header.data_window.max_y - header.data_window.min_y + 1;
-	// Size gate BEFORE decode (F-06/F-07 lesson): refuse absurd dimensions
-	// before tinyexr allocates a decode buffer for them.
-	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+	// F-22: both operands are int, so min_x=INT_MIN, max_x=INT_MAX
+	// overflowed the subtraction. Compute in 64 bits first; the
+	// size gate below (F-06/F-07: refuse absurd dimensions before
+	// tinyexr allocates a decode buffer for them) still applies.
+	__int64 nDataWidth = (__int64)header.data_window.max_x - (__int64)header.data_window.min_x + 1;
+	__int64 nDataHeight = (__int64)header.data_window.max_y - (__int64)header.data_window.min_y + 1;
+	if (nDataWidth <= 0 || nDataHeight <= 0 || nDataWidth > MAX_IMAGE_DIMENSION || nDataHeight > MAX_IMAGE_DIMENSION) {
 		FreeEXRHeader(&header);
 		return NULL;
 	}
+	width = (int)nDataWidth;
+	height = (int)nDataHeight;
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+	// No abs() here: width/height are proven > 0 above, and unqualified
+	// abs(double) resolves to ::abs(int) - a product over INT_MAX narrows to
+	// a negative int and abs(INT_MIN) is UB (same latent idiom as PBM/PPM).
+	if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels()) {
 		isSizeLimitExceeded = true;
 		FreeEXRHeader(&header);
 		return NULL;
@@ -160,7 +167,9 @@ void* EXRReader::ReadImage(int& width,
 			// Only composite when the file has a real A channel (see the
 			// bHasAlpha note above); otherwise the pixel is opaque.
 			float a = bHasAlpha ? pRGBA[srcIdx + 3] : 1.0f;
-			if (a < 0.0f) a = 0.0f;
+			// R-12: !(a >= 0) is also true for NaN, unlike a < 0; a NaN
+			// alpha would otherwise poison the composite below.
+			if (!(a >= 0.0f)) a = 0.0f;
 			if (a > 1.0f) a = 1.0f;
 			// Composite over white, then gamma-map each channel.
 			float rw = r * a + (1.0f - a);
@@ -176,6 +185,13 @@ void* EXRReader::ReadImage(int& width,
 			if (rf > 255.0f) rf = 255.0f;
 			if (gf > 255.0f) gf = 255.0f;
 			if (bf > 255.0f) bf = 255.0f;
+			// R-12: NaN passes every comparison above (NaN < 0 and
+			// NaN > 255 are both false), so a NaN channel would reach
+			// the (unsigned char) cast below, which is UB. !(x >= 0)
+			// is true for NaN as well as negatives.
+			if (!(rf >= 0.0f)) rf = 0.0f;
+			if (!(gf >= 0.0f)) gf = 0.0f;
+			if (!(bf >= 0.0f)) bf = 0.0f;
 			// JPEGView pixels are BGR.
 			pPixelData[dstIdx] = (unsigned char)(bf + 0.5f);
 			pPixelData[dstIdx + 1] = (unsigned char)(gf + 0.5f);

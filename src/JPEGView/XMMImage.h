@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ImageProcessingTypes.h"
+#include <stddef.h> // size_t: R-09, buffer sizes must not wrap in 32-bit int
 
 // Represents an image with line interleaving and padding rows to 2^x bytes (16 for SSE, 32 for AVX) optimal for
 // SIMD processing. Each pixel has 16 bits per channel, channel order is B, G, R, x stands for padding:
@@ -35,8 +36,12 @@ public:
 	void* ConvertToDIBRGBA() const;
 
 private:
-	int GetLineSize() const { return m_nPaddedWidth*2; }
-	int GetMemSize() const { return GetLineSize()*3*m_nPaddedHeight; }
+	// R-09: sizes are size_t, computed in size_t. The old int versions wrapped:
+	// padded width 65536, height 10923 is really 4,295,098,368 bytes but
+	// wrapped to 131,072, so VirtualAlloc committed 128 KB and the filters
+	// then wrote gigabytes past it. Callers already check AlignedPtr() == NULL.
+	size_t GetLineSize() const { return (size_t)m_nPaddedWidth*2; }
+	size_t GetMemSize() const { return GetLineSize()*3*(size_t)m_nPaddedHeight; }
 	void Init(int nWidth, int nHeight, bool bPadHeight, int padding);
 
 	void* m_pMemory;

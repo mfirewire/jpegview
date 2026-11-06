@@ -4,6 +4,7 @@
 #include "Helpers.h"
 #include "SettingsProvider.h"
 #include "KeyMap.h"
+#include "WorkThread.h" // D: WaitForEventWithPaintOnlyPump for the wait below
 #include <shlobj.h>
 #include <shellapi.h>
 
@@ -308,7 +309,18 @@ bool CUserCommand::Execute(HWND hWnd, LPCTSTR sFileName, const CRect& selectionR
 			NULL, &startupInfo, &processInfo)) {
 			sCommandLine.ReleaseBuffer();
 			if (m_bWaitForProcess) {
-				::WaitForSingleObject(processInfo.hProcess, INFINITE);
+				// D: this wait is unbounded (external process lifetime)
+				// and runs on the UI thread (MainDlg::ExecuteUserCommand),
+				// so the old unpumped INFINITE wait froze the UI exactly
+				// like ST-07. Pump repaint messages only, like the
+				// provider waits (CWorkThread::WaitForEventWithPaintOnlyPump):
+				// keys/commands/close stay queued (ST-08), and a paint
+				// during the wait draws the current image, which holds no
+				// in-flight state here. A process handle is a waitable
+				// HANDLE, so the pump applies. Its return is ignored on
+				// purpose: both handles must be closed either way, and the
+				// process handle cannot be closed concurrently.
+				CWorkThread::WaitForEventWithPaintOnlyPump(processInfo.hProcess);
 			}
 			::CloseHandle(processInfo.hProcess);
 			::CloseHandle(processInfo.hThread);

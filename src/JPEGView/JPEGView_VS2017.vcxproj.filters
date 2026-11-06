@@ -225,6 +225,9 @@
     <ClCompile Include="PPMWrapper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PAMWrapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ICCProfileTransform.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -534,6 +537,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PPMWrapper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PAMWrapper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ICCProfileTransform.h">

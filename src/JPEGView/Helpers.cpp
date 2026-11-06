@@ -926,6 +926,12 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_WindowsBMP;
 		} else if (_tcsicmp(sEnding, _T("PNG")) == 0 || _tcsicmp(sEnding, _T("APNG")) == 0) {
 			return IF_PNG;
+		} else if (_tcsicmp(sEnding, _T("ICO")) == 0) {
+			// No dedicated decoder case in ImageLoadThread (falls through
+			// to GDI+ like IF_Unknown); the branch exists so a .ico file
+			// routes by extension even when its magic cannot be read,
+			// matching the .cur branch below.
+			return IF_ICO;
 		} else if (_tcsicmp(sEnding, _T("GIF")) == 0) {
 			// No dedicated decoder case in ImageLoadThread (falls through
 			// to GDI+ like IF_Unknown); the branch exists so SaveImage
@@ -951,6 +957,17 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_HDR;
 		} else if (_tcsicmp(sEnding, _T("PBM")) == 0) {
 			return IF_PBM;
+		} else if (_tcsicmp(sEnding, _T("PAM")) == 0) {
+			return IF_PAM;
+		} else if (_tcsicmp(sEnding, _T("CUR")) == 0) {
+			// F-10: a cursor file decodes through GDI+ like an icon: there
+			// is no IF_ICO case in the load dispatch, it falls through to
+			// the GDI+ default. (.ico itself reaches IF_ICO through the
+			// 00 00 01 00 sniffer branch, not through this function; the
+			// 00 00 02 00 sniffer branch routes real .cur files the same
+			// way, this extension branch covers files whose header could
+			// not be read.)
+			return IF_ICO;
 		} else if (_tcsicmp(sEnding, _T("JP2")) == 0 || _tcsicmp(sEnding, _T("J2K")) == 0 || _tcsicmp(sEnding, _T("J2C")) == 0) {
 			return IF_JP2;
 		} else if (_tcsicmp(sEnding, _T("EXR")) == 0) {

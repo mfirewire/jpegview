@@ -51,7 +51,7 @@ void* PBMReader::ReadImage(int& width,
 		if (c < '0' || c > '9') { bParseOk = false; break; }
 		int v = 0;
 		while (c >= '0' && c <= '9') {
-			if (v > 214748364) { bParseOk = false; break; }
+			if (v > 214748364 || (v == 214748364 && (c - '0') > 7)) { bParseOk = false; break; }
 			v = v * 10 + (c - '0');
 			if (pos >= (size_t)sizebytes) { bParseOk = false; break; }
 			c = pMagic[pos++];
@@ -66,7 +66,9 @@ void* PBMReader::ReadImage(int& width,
 	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION)
 		return NULL;
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+	// No abs(): width/height are proven > 0 by the check above;
+	// unqualified abs(double) resolves to ::abs(int) (abs(INT_MIN) is UB).
+	if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels())
 		isSizeLimitExceeded = true;
 	if (isSizeLimitExceeded)
 		return NULL;

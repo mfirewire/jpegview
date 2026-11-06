@@ -15,6 +15,7 @@
 #include "SettingsProvider.h"
 #include "Helpers.h"
 #include <new>
+#include <float.h> // _finite: R-13, reject non-finite SVG sizes
 
 namespace {
 
@@ -204,7 +205,17 @@ bool ParseSvgSize(const char* buf, size_t len, float& width, float& height) {
 // Unlike the raster wrappers, an oversized SVG is CAPPED (rendered
 // smaller), not rejected: vector art has no "real" pixel size, so
 // scaling down loses nothing but resolution the viewer cannot use.
-void CapRenderSize(float& w, float& h) {
+// R-13: returns false when the size is not finite, or does not stay
+// finite after scaling. ThorVG parses the full SVG number syntax, so
+// <svg width="1e999" ...> makes tvg_picture_get_size return Inf, which
+// passes the tvgW == tvgW check; the old code then computed
+// scale = maxDim / Inf = 0, w = Inf * 0 = NaN, and the w < 1.0f floor is
+// false for NaN, so (int)(NaN + 0.5f) was UB (MSVC yields INT_MIN, only
+// caught by luck by the width <= 0 check). Returning false fails closed
+// on the existing NULL path instead.
+bool CapRenderSize(float& w, float& h) {
+	if (!_finite((double)w) || !_finite((double)h))
+		return false;
 	double maxDim = (double)MAX_IMAGE_DIMENSION;
 	// R-04/P2-5: the cap is the live MaxImagePixelsMP setting; the downscale-instead-of-reject semantics are unchanged.
 	double maxPixels = (double)CSettingsProvider::This().MaxImagePixels();
@@ -227,6 +238,12 @@ void CapRenderSize(float& w, float& h) {
 		w = 1.0f;
 	if (h < 1.0f)
 		h = 1.0f;
+	// R-13: the arithmetic above cannot produce a non-finite result from
+	// finite inputs, but check anyway so a future change cannot reopen
+	// the float -> int UB at the width = (int)(fWidth + 0.5f) site.
+	if (!_finite((double)w) || !_finite((double)h))
+		return false;
+	return true;
 }
 
 #ifdef _WIN32
@@ -257,6 +274,34 @@ bool LoadSystemFont() {
 }
 #endif
 
+// R-14: ThorVG's init/term refcount thread-safety is NOT documented in
+// the vendored headers (thorvg_capi.h only says init/term are
+// reference-counted and must pair on the same thread) and the upstream
+// tvgInitializer.cpp source could not be confirmed from the public
+// documentation (no thread-safety statement found; the implementation
+// was not retrievable). Concurrent SVG decodes on different load
+// threads are reachable in this app (CJPEGProvider spawns one
+// CImageLoadThread per worker), so a plain-int refcount would risk a
+// lost update: double real-init, or a term dropping the count to zero
+// while another thread is still rendering. This narrow process-wide
+// lock serializes only init/term (+ the font load, which must happen
+// while the engine is up); rendering itself is NOT serialized, because
+// the refcount keeps the engine alive while any thread is inside its
+// init/term pair. This is DEFENSIVE HARDENING for an unconfirmed risk,
+// not a fix for a proven defect: if ThorVG's refcount is already
+// atomic/locked, the lock changes no behavior. The lock is only ever
+// held for a single call and never nested, so it cannot deadlock.
+struct SvgEngineLock {
+	CRITICAL_SECTION cs;
+	SvgEngineLock() { ::InitializeCriticalSection(&cs); }
+	~SvgEngineLock() { ::DeleteCriticalSection(&cs); }
+};
+
+CRITICAL_SECTION& GetSvgEngineLock() {
+	static SvgEngineLock lock; // thread-safe magic static (VS2015+)
+	return lock.cs;
+}
+
 } // namespace
 
 void* SVGReader::ReadImage(int& width,
@@ -280,13 +325,27 @@ void* SVGReader::ReadImage(int& width,
 	float fWidth = 0.0f, fHeight = 0.0f;
 	if (!ParseSvgSize(pText, (size_t)sizebytes, fWidth, fHeight))
 		return NULL;
-	CapRenderSize(fWidth, fHeight);
+	// R-13: a non-finite size (e.g. a huge digit string that overflows
+	// strtod to Inf) fails closed here, before the engine is started.
+	if (!CapRenderSize(fWidth, fHeight))
+		return NULL;
 
 	// ThorVG engine: init(0) = no worker threads, rendering happens on
 	// the calling (load) thread. init/term are reference-counted and must
 	// pair on the same thread, so every exit path below goes through the
-	// single cleanup block.
-	if (tvg_engine_init(0) != TVG_RESULT_SUCCESS)
+	// single cleanup block. R-14: init (+ the font load, which must happen
+	// while the engine is up) runs under the narrow engine lock; the
+	// matching term at the cleanup block takes the same lock.
+	bool bEngineInit = false;
+	::EnterCriticalSection(&GetSvgEngineLock());
+	bEngineInit = (tvg_engine_init(0) == TVG_RESULT_SUCCESS);
+	if (bEngineInit) {
+#ifdef _WIN32
+		LoadSystemFont();
+#endif
+	}
+	::LeaveCriticalSection(&GetSvgEngineLock());
+	if (!bEngineInit)
 		return NULL;
 	Tvg_Canvas canvas = NULL;
 	Tvg_Paint picture = NULL;
@@ -294,9 +353,6 @@ void* SVGReader::ReadImage(int& width,
 	void* pPixelData = NULL;
 	bool ok = false;
 	do {
-#ifdef _WIN32
-		LoadSystemFont();
-#endif
 		picture = tvg_picture_new();
 		if (picture == NULL)
 			break;
@@ -315,7 +371,11 @@ void* SVGReader::ReadImage(int& width,
 			tvgW > 0.0f && tvgH > 0.0f && tvgW == tvgW && tvgH == tvgH) {
 			fWidth = tvgW;
 			fHeight = tvgH;
-			CapRenderSize(fWidth, fHeight);
+			// R-13: ThorVG's own size can be Inf (e.g. width="1e999");
+			// a non-finite size breaks out to the cleanup block, which
+			// releases the engine and returns NULL.
+			if (!CapRenderSize(fWidth, fHeight))
+				break;
 		}
 		width = (int)(fWidth + 0.5f);
 		height = (int)(fHeight + 0.5f);
@@ -414,7 +474,10 @@ void* SVGReader::ReadImage(int& width,
 	if (canvas != NULL)
 		tvg_canvas_destroy(canvas);
 	delete[] pArgb;
+	// R-14: paired with the init above, under the same narrow lock.
+	::EnterCriticalSection(&GetSvgEngineLock());
 	tvg_engine_term();
+	::LeaveCriticalSection(&GetSvgEngineLock());
 	if (!ok) {
 		delete[] (unsigned char*)pPixelData;
 		return NULL;

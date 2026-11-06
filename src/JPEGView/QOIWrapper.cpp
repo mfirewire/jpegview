@@ -35,7 +35,9 @@ void* QoiReaderWriter::ReadImage(int& width,
 	if (nHdrChannels != 3 && nHdrChannels != 4)
 		return NULL;
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)nHdrWidth * nHdrHeight) > (double)CSettingsProvider::This().MaxImagePixels()) {
+	// No abs(): nHdrWidth/nHdrHeight are proven > 0 by the check above;
+	// unqualified abs(double) resolves to ::abs(int) (abs(INT_MIN) is UB).
+	if ((double)nHdrWidth * (double)nHdrHeight > (double)CSettingsProvider::This().MaxImagePixels()) {
 		isSizeLimitExceeded = true;
 		return NULL;
 	}
@@ -52,7 +54,9 @@ void* QoiReaderWriter::ReadImage(int& width,
 	height = desc.height;
 	nchannels = desc.channels;
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+	// No abs(): desc.width/desc.height are unsigned (header gate above
+	// bounds them); unqualified abs(double) resolves to ::abs(int).
+	if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels())
 		isSizeLimitExceeded = true;
 	if (isSizeLimitExceeded || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		QOI_FREE(pDecodedPixels);
