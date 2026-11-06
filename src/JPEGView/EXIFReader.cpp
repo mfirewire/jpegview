@@ -522,7 +522,7 @@ void CEXIFReader::WriteImageOrientation(int nOrientation) {
 
 void CEXIFReader::DeleteThumbnail() {
 	if (m_pLastIFD0 != NULL) {
-		*m_pLastIFD0 = 0;
+		WriteUInt(m_pLastIFD0, 0, m_bLittleEndian);
 	}
 }
 

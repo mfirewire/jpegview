@@ -84,14 +84,14 @@ public:
 					CSize(ClippedTargetSize.cx, sizeY),
 					SourceSize, SourcePixels,
 					Channels,
-					(uint8*)TargetPixels + ClippedTargetSize.cx * 4 * offsetY);
+					(uint8*)TargetPixels + (size_t)ClippedTargetSize.cx * 4 * offsetY);
 			else
 				return NULL != SampleUp_HQ_MMX_SSE_Core(FullTargetSize,
 					CPoint(FullTargetOffset.x, FullTargetOffset.y + offsetY),
 					CSize(ClippedTargetSize.cx, sizeY),
 					SourceSize, SourcePixels,
 					Channels, SIMD == CBasicProcessing::SSE,
-					(uint8*)TargetPixels + ClippedTargetSize.cx * 4 * offsetY);
+					(uint8*)TargetPixels + (size_t)ClippedTargetSize.cx * 4 * offsetY);
 		}
 		else if (SIMD == CBasicProcessing::AVX2)
 			return NULL != SampleDown_HQ_AVX_Core(FullTargetSize,
@@ -100,7 +100,7 @@ public:
 				SourceSize, SourcePixels,
 				Channels, Sharpen,
 				Filter,
-				(uint8*)TargetPixels + ClippedTargetSize.cx * 4 * offsetY);
+				(uint8*)TargetPixels + (size_t)ClippedTargetSize.cx * 4 * offsetY);
 		else
 			return NULL != SampleDown_HQ_MMX_SSE_Core(FullTargetSize,
 				CPoint(FullTargetOffset.x, FullTargetOffset.y + offsetY),
@@ -108,7 +108,7 @@ public:
 				SourceSize, SourcePixels,
 				Channels, Sharpen,
 				Filter, SIMD == CBasicProcessing::SSE,
-				(uint8*)TargetPixels + ClippedTargetSize.cx * 4 * offsetY);
+				(uint8*)TargetPixels + (size_t)ClippedTargetSize.cx * 4 * offsetY);
 	}
 
 	int Channels;
@@ -217,7 +217,7 @@ public:
 	virtual bool ProcessStrip(int offsetY, int sizeY) {
 		return NULL != RotateHQ_Core(CPoint(FullTargetOffset.x, FullTargetOffset.y + offsetY),
 			CSize(FullTargetSize.cx, sizeY), Rotation, SourceSize, SourcePixels,
-			(uint8*)TargetPixels + FullTargetSize.cx * 4 * offsetY, Channels, BackColor);
+			(uint8*)TargetPixels + (size_t)FullTargetSize.cx * 4 * offsetY, Channels, BackColor);
 	}
 
 	double Rotation;
@@ -238,7 +238,7 @@ public:
 	virtual bool ProcessStrip(int offsetY, int sizeY) {
 		return NULL != TrapezoidHQ_Core(CPoint(FullTargetOffset.x, FullTargetOffset.y + offsetY),
 			CSize(FullTargetSize.cx, sizeY), Trapezoid, SourceSize, SourcePixels,
-			(uint8*)TargetPixels + FullTargetSize.cx * 4 * offsetY, Channels, BackColor);
+			(uint8*)TargetPixels + (size_t)FullTargetSize.cx * 4 * offsetY, Channels, BackColor);
 	}
 
 	CTrapezoid Trapezoid;
@@ -701,8 +701,8 @@ void CBasicProcessing::MirrorVInplace(int nWidth, int nHeight, int nStride, void
 				pTgt++; pSource++;
 			}
 		} else {
-			uint8* pSource = (uint8*)pDIBPixels + (nHeight - 1 - j) * nStride;
-			uint8* pTgt = (uint8*)pDIBPixels + j * nStride;
+			uint8* pSource = (uint8*)pDIBPixels + (size_t)(nHeight - 1 - j) * nStride;
+			uint8* pTgt = (uint8*)pDIBPixels + (size_t)j * nStride;
 			for (int i = 0; i < nStride; i++) {
 				uint8 t = *pTgt;
 				*pTgt = *pSource;
@@ -989,7 +989,7 @@ void* CBasicProcessing::PointSampleWithRotation(CSize fullTargetSize, CPoint ful
 				int32 nCurRealX = nCurX >> 16;
 				int32 nCurRealY = nCurY >> 16;
 				if (nCurRealX >= 0 && nCurRealX < sourceSize.cx && nCurRealY >= 0 && nCurRealY < sourceSize.cy) {
-					pSrc = (uint8*)pPixels + nPaddedSourceWidth * nCurRealY + nCurRealX * 3;
+					pSrc = (uint8*)pPixels + (size_t)nPaddedSourceWidth * nCurRealY + nCurRealX * 3;
 					uint32 d = i*4;
 					pDst[d] = pSrc[0];
 					pDst[d+1] = pSrc[1];
@@ -1006,7 +1006,7 @@ void* CBasicProcessing::PointSampleWithRotation(CSize fullTargetSize, CPoint ful
 				int32 nCurRealX = nCurX >> 16;
 				int32 nCurRealY = nCurY >> 16;
 				if (nCurRealX >= 0 && nCurRealX < sourceSize.cx && nCurRealY >= 0 && nCurRealY < sourceSize.cy) {
-					pSrc = (uint8*)pPixels + nPaddedSourceWidth * nCurRealY + nCurRealX * 4;
+					pSrc = (uint8*)pPixels + (size_t)nPaddedSourceWidth * nCurRealY + nCurRealX * 4;
 					*((uint32*)pDst + i) = *((uint32*)pSrc);
 				} else {
 					*((uint32*)pDst + i) = nBackColor;
@@ -1122,7 +1122,7 @@ void* CBasicProcessing::PointSampleTrapezoid(CSize fullTargetSize, const CTrapez
 	fTx2 = fTx2 + fullTargetOffset.y*fIncrementTx2;
 	int nSourceSizeXFP16 = sourceSize.cx << 16;
 	for (int j = 0; j < clippedTargetSize.cy; j++) {
-		pSrc = (uint8*)pPixels + nPaddedSourceWidth * (pTableY[j] >> 16);
+		pSrc = (uint8*)pPixels + (size_t)nPaddedSourceWidth * (pTableY[j] >> 16);
 		int nIncrementX = (int)(nSourceSizeXFP16/(fTx2 - fTx1 + 1)) + 1;
 		int nStartX = (int)((fullTargetOffset.x - fTx1)*nIncrementX);
 		int nCurX = nStartX;
@@ -1295,7 +1295,7 @@ void* RotateHQ_Core(CPoint targetOffset, CSize targetSize, double dRotation, CSi
 			int32 nFracX = nCurX & 0xFFFF;
 			int32 nFracY = nCurY & 0xFFFF;
 			if (nCurRealX >= -1 && nCurRealX <= sourceSize.cx && nCurRealY >= -1 && nCurRealY <= sourceSize.cy) {
-				pSrc = (uint8*)pSourcePixels + nPaddedSourceWidth * nCurRealY + nCurRealX * nChannels;
+				pSrc = (uint8*)pSourcePixels + (size_t)nPaddedSourceWidth * nCurRealY + nCurRealX * nChannels;
 				if (nCurRealX > 0 && nCurRealX < sourceSize.cx - 2 && nCurRealY > 0 && nCurRealY < sourceSize.cy - 2) {
 					InterpolateBicubic(pSrc, pDst + i*4, pKernels, nFracX, nFracY, nPaddedSourceWidth, nChannels);
 				} else {
@@ -1439,7 +1439,7 @@ void* TrapezoidHQ_Core(CPoint targetOffset, CSize targetSize, const CTrapezoid& 
 		int nCurX = nStartX;
 		int nCurY = pTableY[j] >> 16;
 		int nCurYFrac = pTableY[j] & 0xFFFF;
-		InterpolateBicubicY((uint8*)pSourcePixels + nPaddedSourceWidth * nCurY, nChannels, nPaddedSourceWidth, pLine, sourceSize.cx,
+		InterpolateBicubicY((uint8*)pSourcePixels + (size_t)nPaddedSourceWidth * nCurY, nChannels, nPaddedSourceWidth, pLine, sourceSize.cx,
 			pKernels, nCurY, nCurYFrac, trapezoid.Height() + 1);
 		for (int i = 0; i < targetSize.cx; i++) {
 			int nCurXInt = nCurX >> 16;
@@ -1525,7 +1525,7 @@ static uint8* ApplyFilter(int nSourceWidth, int nTargetWidth, int nHeight,
 	uint8* pTargetPixelLine = NULL;
 	const int FP_05 = 255; // rounding correction because in filter 1.0 is 16383 but we shift by 14 what is a division by 16384
 	for (int j = 0; j < nHeight; j++) {
-		pSourcePixelLine = ((uint8*) pSource) + nPaddedSourceWidth * (j + nStartY);
+		pSourcePixelLine = ((uint8*) pSource) + (size_t)nPaddedSourceWidth * (j + nStartY);
 		pTargetPixelLine = pTarget + 4*j;
 		uint8* pTargetPixel = pTargetPixelLine;
 		uint32 nX = nStartX_FP;
@@ -1821,7 +1821,7 @@ static void RotateBlockToDIB(const int16* pSrc, uint8* pTgt, int nWidth, int nHe
 	int nIncTargetLine = nHeight * 4;
 	int nIncSource = nPaddedWidth * 3 - nBlockWidth * 3;
 	const int16* pSource = pSrc + nPaddedWidth * 3 * nYStart + nXStart * 3;
-	uint8* pTarget = pTgt + nHeight * 4 * nXStart + nYStart * 4;
+	uint8* pTarget = pTgt + (size_t)nHeight * 4 * nXStart + (size_t)nYStart * 4;
 	uint8* pStartYPtr = pTarget;
 	int nLoopX = Helpers::DoPadding(nBlockWidth, simdPixelsPerRegister) / simdPixelsPerRegister;
 	int nTargetIncrement = simdPixelsPerRegister * nIncTargetLine - 2;
@@ -1961,7 +1961,7 @@ static CXMMImage* ApplyFilter_SSE(int nSourceHeight, int nTargetHeight, int nWid
 		int filterLen = pKernel->FilterLen;
 		int filterOffset = pKernel->FilterOffset;
 		const __m128i* pFilterStart = (__m128i*)&(pKernel->Kernel);
-		const __m128i* pSourceRow = (const __m128i*)(pSourceStart + ((int)nCurYInt - filterOffset) * nRowLenBytes);
+		const __m128i* pSourceRow = (const __m128i*)(pSourceStart + (size_t)((int)nCurYInt - filterOffset) * nRowLenBytes);
 
 		for (int x = 0; x < nNumberOfBlocksX; x++) {
 			const __m128i* pSource = pSourceRow;
@@ -2658,7 +2658,7 @@ void* UnsharpMask_Core(CSize fullSize, CPoint offset, CSize rect, double dAmount
 		const int16* pGrayPtr = pGrayImage + nStartOffsetGray;
 		const int16* pSmoothPtr = pSmoothedGrayImage + nStartOffsetGray;
 
-		int nStartOffsetDIB = offset.x * nChannels + (offset.y + j)* nDIBLineLen;
+		size_t nStartOffsetDIB = (size_t)offset.x * nChannels + (size_t)(offset.y + j) * nDIBLineLen;
 		uint8* pTargetPixelLine = (uint8*)pTargetPixels + nStartOffsetDIB;
 		uint8* pSourcePixelLine = (uint8*)pSourcePixels + nStartOffsetDIB;
 

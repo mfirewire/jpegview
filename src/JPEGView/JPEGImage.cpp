@@ -1258,7 +1258,7 @@ void* CJPEGImage::ApplyCorrectionLUTandLDC(const CImageProcessingParams & imageP
 		// no LUTs, no LDC but dimming --> make copy of original pixels
 		pCachedTargetDIB = new(std::nothrow) uint32[dibSize.cx*dibSize.cy];
 		if (pCachedTargetDIB != NULL) {
-			memcpy(pCachedTargetDIB, pSourceDIB, dibSize.cx*dibSize.cy*4);
+			memcpy(pCachedTargetDIB, pSourceDIB, (size_t)dibSize.cx*dibSize.cy*4);
 		}
 	}
 

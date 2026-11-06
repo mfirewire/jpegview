@@ -189,7 +189,11 @@ CSettingsProvider::CSettingsProvider(void) {
 	// Win32 MAX_IMAGE_PIXELS); 1..4096 MP covers up to the old x64 cap of
 	// 65535*65535 pixels. The byte cap (MAX_IMAGE_BYTES) still bounds the
 	// allocation whatever this is set to.
-	m_nMaxImagePixels = (size_t)GetInt(_T("MaxImagePixelsMP"), 100, 1, 4096) * 1024 * 1024;
+	// A1-5: compute in 64-bit, then clamp to SIZE_MAX. On Win32 size_t is
+	// 32-bit, so 4096*1024*1024 (= 2^32) used to wrap to 0 and every image
+	// was wrongly rejected as over the size limit.
+	unsigned __int64 v = (unsigned __int64)GetInt(_T("MaxImagePixelsMP"), 100, 1, 4096) * 1024 * 1024;
+	m_nMaxImagePixels = (v > (size_t)-1) ? (size_t)-1 : (size_t)v;
 
 	CString sDownSampling = GetString(_T("DownSamplingFilter"), _T("BestQuality"));
 	if (sDownSampling.CompareNoCase(_T("NoAliasing")) == 0) {

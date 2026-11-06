@@ -68,6 +68,13 @@ void CClipboard::CopyFullImageToClipboard(HWND hWnd, CJPEGImage * pImage, const 
 		pImage->EnableDimming(true);
 		return;
 	}
+	if (pDIB == NULL) {
+		// GetDIB returned NULL without throwing: skip the copy, as in the
+		// catch branch above -- otherwise DoCopy would empty the clipboard
+		// and write a fake black image.
+		pImage->EnableDimming(true);
+		return;
+	}
 	DoCopy(hWnd, clipRect.Width(), clipRect.Height(), pDIB, pImage->IsClipboardImage() ? NULL : fileName);
 	pImage->EnableDimming(true);
 }

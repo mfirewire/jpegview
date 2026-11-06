@@ -1073,6 +1073,10 @@ __int64 GetFileSize(HANDLE hFile) {
 
 // Gets the frame index of the next frame, depending on the index of the last image (relevant if the image is a multiframe image)
 int GetFrameIndex(CJPEGImage* pImage, bool bNext, bool bPlayAnimation, bool & switchImage) {
+	if (pImage == NULL) {
+		switchImage = !bPlayAnimation;
+		return 0;
+	}
 	bool isMultiFrame = pImage != NULL && pImage->NumberOfFrames() > 1;
 	bool isAnimation = pImage != NULL && pImage->IsAnimation();
 	int nFrameIndex = 0;

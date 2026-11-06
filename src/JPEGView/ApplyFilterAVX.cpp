@@ -52,7 +52,7 @@ CXMMImage* ApplyFilter_AVX(int nSourceHeight, int nTargetHeight, int nWidth,
 		int filterLen = pKernel->FilterLen;
 		int filterOffset = pKernel->FilterOffset;
 		const __m256i* pFilterStart = (__m256i*)&(pKernel->Kernel);
-		const __m256i* pSourceRow = (const __m256i*)(pSourceStart + ((int)nCurYInt - filterOffset) * nRowLenBytes);
+		const __m256i* pSourceRow = (const __m256i*)(pSourceStart + (size_t)((int)nCurYInt - filterOffset) * nRowLenBytes);
 
 		for (int x = 0; x < nNumberOfBlocksX; x++) {
 			const __m256i* pSource = pSourceRow;

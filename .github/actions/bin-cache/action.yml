@@ -18,10 +18,42 @@ runs:
   using: composite
   steps:
 
-    - name: Remove all pre-built libs and dlls
+    # Only delete the libs/dlls this action rebuilds (the 8 families in the
+    # cache `path:` block below). The vendored openjp2/thorvg binaries
+    # (src/JPEGView/libopenjpeg/{lib,lib64,bin,bin64} and
+    # src/JPEGView/libthorvg/{lib,lib64,bin,bin64}) have no rebuild script
+    # and are NOT in the cache, so a blanket `del /s *.lib *.dll` would
+    # delete them with no way back (LNK1104 on the next link).
+    - name: Remove rebuildable pre-built libs and dlls
       if: ${{ inputs.delete-first }}
       shell: cmd
-      run: del /s *.lib *.dll
+      run: |
+        del /q src\JPEGView\libwebp\lib\*.lib
+        del /q src\JPEGView\libwebp\lib64\*.lib
+        del /q src\JPEGView\libjpeg-turbo\lib\*.lib
+        del /q src\JPEGView\libjpeg-turbo\lib64\*.lib
+        del /q src\JPEGView\libpng-apng\lib\*.lib
+        del /q src\JPEGView\libpng-apng\lib64\*.lib
+        del /q src\JPEGView\lcms2\bin\*.dll
+        del /q src\JPEGView\lcms2\bin64\*.dll
+        del /q src\JPEGView\lcms2\lib\*.lib
+        del /q src\JPEGView\lcms2\lib64\*.lib
+        del /q src\JPEGView\libheif\bin\*.dll
+        del /q src\JPEGView\libheif\bin64\*.dll
+        del /q src\JPEGView\libheif\lib\*.lib
+        del /q src\JPEGView\libheif\lib64\*.lib
+        del /q src\JPEGView\libavif\bin\*.dll
+        del /q src\JPEGView\libavif\bin64\*.dll
+        del /q src\JPEGView\libavif\lib\*.lib
+        del /q src\JPEGView\libavif\lib64\*.lib
+        del /q src\JPEGView\libjxl\bin\*.dll
+        del /q src\JPEGView\libjxl\bin64\*.dll
+        del /q src\JPEGView\libjxl\lib\*.lib
+        del /q src\JPEGView\libjxl\lib64\*.lib
+        del /q src\JPEGView\libraw\bin\*.dll
+        del /q src\JPEGView\libraw\bin64\*.dll
+        del /q src\JPEGView\libraw\lib\*.lib
+        del /q src\JPEGView\libraw\lib64\*.lib
 
     - name: Setup Python (for dav1d build)
       uses: actions/setup-python@v4
@@ -96,15 +128,15 @@ runs:
       shell: cmd
       run: call extras\scripts\build-libwebp.bat
 
-    - name: libjpeg-turbo
-      if: ${{ steps.cache-bin.outputs.cache-hit != 'true' }}
-      shell: cmd
-      run: call extras\scripts\build-libjpegturbo.bat
-
     - name: libpng
       if: ${{ steps.cache-bin.outputs.cache-hit != 'true' }}
       shell: cmd
       run: call extras\scripts\build-libpng-apng.bat
+
+    - name: libjpeg-turbo
+      if: ${{ steps.cache-bin.outputs.cache-hit != 'true' }}
+      shell: cmd
+      run: call extras\scripts\build-libjpegturbo.bat
 
     - name: lcms2
       if: ${{ steps.cache-bin.outputs.cache-hit != 'true' }}
