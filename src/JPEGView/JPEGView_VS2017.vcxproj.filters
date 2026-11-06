@@ -96,6 +96,9 @@
     <ClCompile Include="SaveImage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SaveEXR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SettingsProvider.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -214,6 +217,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="QOIWrapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SaveJP2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="PPMWrapper.cpp">
@@ -339,6 +345,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SaveImage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SaveEXR.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SettingsProvider.h">
@@ -519,6 +528,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="QOIWrapper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SaveJP2.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PPMWrapper.h">

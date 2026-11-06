@@ -538,6 +538,36 @@
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.jxl\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.qoi\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
 						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.qoi\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.gif\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.gif\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.ppm\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.ppm\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.pgm\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.pgm\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.pnm\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.pnm\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.hdr\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.hdr\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.rgbe\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.rgbe\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.tga\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.tga\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.icb\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.icb\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.vda\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.vda\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.vst\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.vst\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.pbm\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.pbm\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.jp2\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.jp2\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.j2k\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.j2k\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.j2c\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.j2c\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.exr\shell\edit.JPEGView.exe" Value="!(loc.ExplorerMenuEditREG)" Type="string" />
+						<RegistryValue Root="HKLM" Key="SOFTWARE\Classes\SystemFileAssociations\.exr\shell\edit.JPEGView.exe\command" Value="&quot;[APPLICATIONFOLDER]JPEGView.exe&quot; &quot;%1&quot;" Type="string" />
 					</Component>
 
 					<!-- DLLs required for JXL support -->

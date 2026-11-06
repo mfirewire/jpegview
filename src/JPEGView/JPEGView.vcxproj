@@ -344,6 +344,7 @@
     <ClCompile Include="HDRWrapper.cpp" />
     <ClCompile Include="PBMWrapper.cpp" />
     <ClCompile Include="JP2Wrapper.cpp" />
+    <ClCompile Include="SaveJP2.cpp" />
     <ClCompile Include="EXRWrapper.cpp" />
     <ClCompile Include="SVGWrapper.cpp" />
     <ClCompile Include="tinyexr\miniz.c">
@@ -361,6 +362,7 @@
     <ClCompile Include="ResizeDlg.cpp" />
     <ClCompile Include="ResizeFilter.cpp" />
     <ClCompile Include="SaveImage.cpp" />
+    <ClCompile Include="SaveEXR.cpp" />
     <ClCompile Include="SettingsProvider.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -456,6 +458,7 @@
     <ClInclude Include="HDRWrapper.h" />
     <ClInclude Include="PBMWrapper.h" />
     <ClInclude Include="JP2Wrapper.h" />
+    <ClInclude Include="SaveJP2.h" />
     <ClInclude Include="EXRWrapper.h" />
     <ClInclude Include="SVGWrapper.h" />
     <ClInclude Include="RawMetadata.h" />
@@ -465,6 +468,7 @@
     <ClInclude Include="ResizeDlg.h" />
     <ClInclude Include="ResizeFilter.h" />
     <ClInclude Include="SaveImage.h" />
+    <ClInclude Include="SaveEXR.h" />
     <ClInclude Include="SettingsProvider.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="TiltCorrectionPanel.h" />

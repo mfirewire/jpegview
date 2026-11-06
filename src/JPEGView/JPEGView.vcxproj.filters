@@ -99,6 +99,9 @@
     <ClCompile Include="SaveImage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SaveEXR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SettingsProvider.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -294,6 +297,9 @@
     <ClCompile Include="JP2Wrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
+    <ClCompile Include="SaveJP2.cpp">
+      <Filter>Source Files\Image Types</Filter>
+    </ClCompile>
     <ClCompile Include="EXRWrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
@@ -384,6 +390,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SaveImage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SaveEXR.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SettingsProvider.h">
@@ -591,6 +600,9 @@
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="JP2Wrapper.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
+    <ClInclude Include="SaveJP2.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="EXRWrapper.h">

@@ -93,14 +93,15 @@ void* PBMReader::ReadImage(int& width,
 	}
 	// Zero the row padding so no uninitialised bytes reach the DIB.
 	memset(pPixelData, 0, allocSize);
-	// PBM: 1 bit per pixel, MSB first, 1 = white, 0 = black. Rows are
+	// PBM: 1 bit per pixel, MSB first, 1 = black, 0 = white (PBM spec).
+	// Rows are
 	// padded to a byte boundary; the padding bits are ignored.
 	for (int y = 0; y < height; y++) {
 		const unsigned char* pRow = pMagic + pos + (size_t)y * rowBytes;
 		unsigned char* pDst = pPixelData + (size_t)y * padded_stride;
 		for (int x = 0; x < width; x++) {
 			unsigned char bit = (unsigned char)((pRow[x / 8] >> (7 - (x % 8))) & 1);
-			unsigned char gray = bit ? 255 : 0;
+			unsigned char gray = bit ? 0 : 255;
 			pDst[x * 3] = gray;
 			pDst[x * 3 + 1] = gray;
 			pDst[x * 3 + 2] = gray;

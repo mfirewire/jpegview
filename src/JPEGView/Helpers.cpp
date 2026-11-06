@@ -926,6 +926,11 @@ EImageFormat GetImageFormat(LPCTSTR sFileName) {
 			return IF_WindowsBMP;
 		} else if (_tcsicmp(sEnding, _T("PNG")) == 0 || _tcsicmp(sEnding, _T("APNG")) == 0) {
 			return IF_PNG;
+		} else if (_tcsicmp(sEnding, _T("GIF")) == 0) {
+			// No dedicated decoder case in ImageLoadThread (falls through
+			// to GDI+ like IF_Unknown); the branch exists so SaveImage
+			// can route .gif to the GDI+ GIF encoder.
+			return IF_GIF;
 		} else if (_tcsicmp(sEnding, _T("TIF")) == 0 || _tcsicmp(sEnding, _T("TIFF")) == 0) {
 			return IF_TIFF;
 		} else if (_tcsicmp(sEnding, _T("WEBP")) == 0) {

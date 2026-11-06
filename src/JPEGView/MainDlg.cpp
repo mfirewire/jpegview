@@ -2360,7 +2360,7 @@ bool CMainDlg::SaveImage(bool bFullSize, bool bJxlTranscode) {
 	// NOTE: this list is used in the "Edit with" registry entry in JPEGView.Setup, update that when this updates
 	LPCWSTR sFileTypes;
 	if (!bJxlTranscode) {
-		sFileTypes = _T("JPEG (*.jpg;*.jpeg)|*.jpg;*.jpeg|BMP (*.bmp)|*.bmp|PNG (*.png)|*.png|TIFF (*.tiff;*.tif)|*.tiff;*.tif|WEBP (*.webp)|*.webp|WEBP lossless (*.webp)|*.webp|JPEG XL (*.jxl)|*.jxl|JPEG XL lossless (*.jxl)|*.jxl|QOI (*.qoi)|*.qoi|");
+		sFileTypes = _T("JPEG (*.jpg;*.jpeg)|*.jpg;*.jpeg|BMP (*.bmp)|*.bmp|PNG (*.png)|*.png|TIFF (*.tiff;*.tif)|*.tiff;*.tif|WEBP (*.webp)|*.webp|WEBP lossless (*.webp)|*.webp|JPEG XL (*.jxl)|*.jxl|JPEG XL lossless (*.jxl)|*.jxl|QOI (*.qoi)|*.qoi|GIF (*.gif)|*.gif|PNM (*.ppm;*.pgm;*.pnm)|*.ppm;*.pgm;*.pnm|HDR (*.hdr;*.rgbe)|*.hdr;*.rgbe|TGA (*.tga;*.icb;*.vda;*.vst)|*.tga;*.icb;*.vda;*.vst|PBM (*.pbm)|*.pbm|JPEG 2000 (*.jp2;*.j2k;*.j2c)|*.jp2;*.j2k;*.j2c|JPEG 2000 lossless (*.jp2;*.j2k;*.j2c)|*.jp2;*.j2k;*.j2c|EXR (*.exr)|*.exr|");
 	} else {
 		sFileTypes = _T("JPEG XL lossless transcode (*.jxl)|*.jxl|");
 	}
@@ -2383,13 +2383,27 @@ bool CMainDlg::SaveImage(bool bFullSize, bool bJxlTranscode) {
 		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessWEBP ? 8 : 7;
 	} else if (sExtension.CompareNoCase(_T("qoi")) == 0) {
 		fileDlg.m_ofn.nFilterIndex = 9;
+	} else if (sExtension.CompareNoCase(_T("gif")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = 10;
+	} else if (sExtension.CompareNoCase(_T("ppm")) == 0 || sExtension.CompareNoCase(_T("pgm")) == 0 || sExtension.CompareNoCase(_T("pnm")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = 11;
+	} else if (sExtension.CompareNoCase(_T("hdr")) == 0 || sExtension.CompareNoCase(_T("rgbe")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = 12;
+	} else if (sExtension.CompareNoCase(_T("tga")) == 0 || sExtension.CompareNoCase(_T("icb")) == 0 || sExtension.CompareNoCase(_T("vda")) == 0 || sExtension.CompareNoCase(_T("vst")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = 13;
+	} else if (sExtension.CompareNoCase(_T("pbm")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = 14;
+	} else if (sExtension.CompareNoCase(_T("jp2")) == 0 || sExtension.CompareNoCase(_T("j2k")) == 0 || sExtension.CompareNoCase(_T("j2c")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessWEBP ? 16 : 15;
+	} else if (sExtension.CompareNoCase(_T("exr")) == 0) {
+		fileDlg.m_ofn.nFilterIndex = 17;
 	}
 	if (!bFullSize) {
 		fileDlg.m_ofn.lpstrTitle = CNLS::GetString(_T("Save as (in screen size/resolution)"));
 	}
 	if (IDOK == fileDlg.DoModal(m_hWnd)) {
 		m_sSaveDirectory = fileDlg.m_szFileName;
-		m_bUseLosslessWEBP = fileDlg.m_ofn.nFilterIndex == 6 || fileDlg.m_ofn.nFilterIndex == 8;
+		m_bUseLosslessWEBP = fileDlg.m_ofn.nFilterIndex == 6 || fileDlg.m_ofn.nFilterIndex == 8 || fileDlg.m_ofn.nFilterIndex == 16;
 		m_sSaveExtension = m_sSaveDirectory.Right(m_sSaveDirectory.GetLength() - m_sSaveDirectory.ReverseFind(_T('.')) - 1);
 		m_sSaveDirectory = m_sSaveDirectory.Left(m_sSaveDirectory.ReverseFind(_T('\\')) + 1);
 		return SaveImageNoPrompt(fileDlg.m_szFileName, bFullSize, bJxlTranscode);

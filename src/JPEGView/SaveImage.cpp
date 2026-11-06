@@ -10,6 +10,18 @@
 #include "WEBPWrapper.h"
 #include "JXLWrapper.h"
 #include "QOIWrapper.h"
+#include "SaveJP2.h"
+#include "SaveEXR.h"
+#include <math.h> // pow (SaveHDR: sRGB -> linear light)
+
+// stb_image_write (batch 5, save only): HDR + TGA. The implementation
+// lives in this translation unit only, mirroring PPMWrapper.cpp's
+// STB_IMAGE_IMPLEMENTATION for stb_image.h. PNM/PBM are hand-written
+// below: stb_image_write v1.16 has no PNM/PBM writer (it writes
+// PNG/BMP/TGA/HDR/JPEG only). Vendored file: stb/stb_image_write.h
+// (v1.16, see the provenance note at its top).
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image_write.h"
 #include "MaxImageDef.h"
 #include <gdiplus.h>
 #include <io.h> // _open_osfhandle, _fdopen (P3-1)
@@ -268,6 +280,54 @@ static FILE* OpenTempFileForWriting(HANDLE hFile) {
 	return fptr;
 }
 
+// Batch 5: stb_image_write callback context. stb's *_to_func writers
+// report only their own success; a short fwrite inside the callback
+// would otherwise be invisible, so the callback records it and the
+// caller ANDs it into the save result. (Same rule as SaveWebP: a
+// fclose failure is a save failure too.)
+struct StbiWriteFileContext {
+	FILE* fptr;
+	bool bOk;
+	StbiWriteFileContext(FILE* f) : fptr(f), bOk(true) {}
+};
+static void StbiWriteToFile(void* context, void* data, int size) {
+	StbiWriteFileContext* pCtx = (StbiWriteFileContext*)context;
+	if (size > 0 && fwrite(data, 1, (size_t)size, pCtx->fptr) != (size_t)size) {
+		pCtx->bOk = false;
+	}
+}
+
+// Returns true when the file name (basename only, same dot rule as
+// Helpers::GetImageFormat) ends in the given extension, case-insensitive.
+// Used for .pgm (P5 vs P6 in SavePNM).
+static bool HasFileExtension(LPCTSTR sFileName, LPCTSTR sExtension) {
+	LPCTSTR sBase = _tcsrchr(sFileName, _T('\\'));
+	LPCTSTR sBaseAlt = _tcsrchr(sFileName, _T('/'));
+	if (sBaseAlt != NULL && (sBase == NULL || sBaseAlt > sBase)) sBase = sBaseAlt;
+	sBase = (sBase == NULL) ? sFileName : (sBase + 1);
+	LPCTSTR sEnding = _tcsrchr(sBase, _T('.'));
+	if (sEnding == NULL) {
+		return false;
+	}
+	return _tcsicmp(sEnding + 1, sExtension) == 0;
+}
+
+// Rec.601 luma, integer, rounded. One rule for both the PGM grey value
+// and the PBM black/white decision, so a .pgm and a .pbm of one image agree.
+static unsigned char LuminanceFromBGR(unsigned char b, unsigned char g, unsigned char r) {
+	return (unsigned char)((299 * r + 587 * g + 114 * b + 500) / 1000);
+}
+
+// sRGB (8-bit, display-referred) -> linear light, for HDR storage.
+// This is the exact inverse of the gamma stb_image applies when
+// loading HDR as 8-bit (stbi__hdr_to_ldr: pow(v, 1/2.2) * 255, the
+// defaults), so a file saved here reloads in JPEGView with the same
+// pixels; it is also the correct value for a Radiance file, which
+// stores scene-referred linear light.
+static float LinearFromSRGB(unsigned char v) {
+	return (float)pow((double)v / 255.0, 2.2);
+}
+
 // Returns the compressed JPEG stream that must be freed by the caller. NULL in case of error.
 static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage, 
 							 void* pData, int nWidth, int nHeight, int nQuality, int& nJPEGStreamLen, 
@@ -523,6 +583,263 @@ static bool SaveQOI(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 	return true;
 }
 
+// pData must point to 24 bit BGR DIB (top-down, rows padded to 4 bytes,
+// same layout SaveWebP/SaveQOI receive).
+// PNM is hand-written: stb_image_write has no PNM writer. Binary P6
+// (RGB, maxval 255) for .ppm/.pnm, binary P5 (grey, maxval 255) for
+// .pgm; the reader side (PPMWrapper) accepts P5/P6, so both round-trip
+// through JPEGView. Rows are stored top-down, tightly packed.
+static bool SavePNM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
+	CString sTempFile;
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
+		return false;
+	}
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
+	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	bool bSuccess = false;
+	try {
+		bool bGray = HasFileExtension(sFileName, _T("PGM"));
+		int nChannels = bGray ? 1 : 3;
+		int nPaddedStride = Helpers::DoPadding(nWidth * 3, 4);
+		unsigned char* pSourcePixels = (unsigned char*)pData;
+		// Tight buffer, like QOIWrapper::Compress: strip the 4-byte row
+		// padding and swap BGR to RGB (grey: single luma channel).
+		size_t nSize = (size_t)nWidth * (size_t)nHeight * (size_t)nChannels;
+		unsigned char* pPixelData = new unsigned char[nSize];
+		for (int y = 0; y < nHeight; y++) {
+			for (int x = 0; x < nWidth; x++) {
+				size_t nSrc = (size_t)y * (size_t)nPaddedStride + (size_t)x * 3;
+				size_t nDst = ((size_t)y * (size_t)nWidth + (size_t)x) * (size_t)nChannels;
+				if (bGray) {
+					pPixelData[nDst] = LuminanceFromBGR(pSourcePixels[nSrc], pSourcePixels[nSrc + 1], pSourcePixels[nSrc + 2]);
+				} else {
+					pPixelData[nDst] = pSourcePixels[nSrc + 2];
+					pPixelData[nDst + 1] = pSourcePixels[nSrc + 1];
+					pPixelData[nDst + 2] = pSourcePixels[nSrc];
+				}
+			}
+		}
+		CStringA sHeader;
+		sHeader.Format(bGray ? "P5\n%d %d\n255\n" : "P6\n%d %d\n255\n", nWidth, nHeight);
+		bool bWriteOk = fwrite(sHeader, 1, (size_t)sHeader.GetLength(), fptr) == (size_t)sHeader.GetLength() &&
+			fwrite(pPixelData, 1, nSize, fptr) == nSize;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bWriteOk && bCloseOk;
+		fptr = NULL;
+		delete[] pPixelData;
+	}
+	catch (...) {
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
+	}
+
+	// delete partial temp file if no success; the target is untouched
+	if (!bSuccess) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	return true;
+}
+
+// pData must point to 24 bit BGR DIB (top-down, rows padded to 4 bytes,
+// same layout SaveWebP/SaveQOI receive).
+// Radiance RGBE via stb_image_write. The float input is linear light
+// (see LinearFromSRGB); stb stores it as-is, top-down, no gamma of
+// its own. stb's HDR writer reports only its own success, so the
+// callback's write flag is part of the result.
+static bool SaveHDR(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
+	CString sTempFile;
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
+		return false;
+	}
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
+	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	bool bSuccess = false;
+	try {
+		int nPaddedStride = Helpers::DoPadding(nWidth * 3, 4);
+		unsigned char* pSourcePixels = (unsigned char*)pData;
+		// Tight top-down float RGB buffer: stb takes no stride.
+		size_t nPixels = (size_t)nWidth * (size_t)nHeight;
+		float* pFloatData = new float[nPixels * 3];
+		for (size_t i = 0; i < nPixels; i++) {
+			size_t nSrc = (i / (size_t)nWidth) * (size_t)nPaddedStride + (i % (size_t)nWidth) * 3;
+			pFloatData[i * 3] = LinearFromSRGB(pSourcePixels[nSrc + 2]);
+			pFloatData[i * 3 + 1] = LinearFromSRGB(pSourcePixels[nSrc + 1]);
+			pFloatData[i * 3 + 2] = LinearFromSRGB(pSourcePixels[nSrc]);
+		}
+		StbiWriteFileContext ctx(fptr);
+		bool bStbiOk = stbi_write_hdr_to_func(StbiWriteToFile, &ctx, nWidth, nHeight, 3, pFloatData) != 0;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bStbiOk && ctx.bOk && bCloseOk;
+		fptr = NULL;
+		delete[] pFloatData;
+	}
+	catch (...) {
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
+	}
+
+	// delete partial temp file if no success; the target is untouched
+	if (!bSuccess) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	return true;
+}
+
+// pData must point to 24 bit BGR DIB (top-down, rows padded to 4 bytes,
+// same layout SaveWebP/SaveQOI receive).
+// True-colour TGA via stb_image_write (RLE on, the header's default;
+// ReaderTGA accepts RLE RGB). stb takes top-down RGB and stores it
+// bottom-up with a bottom-left origin (descriptor 0); ReaderTGA flips
+// back when bit 5 is clear, so the round-trip is upright.
+static bool SaveTGA(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
+	CString sTempFile;
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
+		return false;
+	}
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
+	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	bool bSuccess = false;
+	try {
+		int nChannels = 3;
+		int nPaddedStride = Helpers::DoPadding(nWidth * 3, 4);
+		unsigned char* pSourcePixels = (unsigned char*)pData;
+		// Tight top-down RGB buffer, like QOIWrapper::Compress.
+		size_t nSize = (size_t)nWidth * (size_t)nHeight * (size_t)nChannels;
+		unsigned char* pPixelData = new unsigned char[nSize];
+		for (size_t i = 0; i < nSize; i += (size_t)nChannels) {
+			size_t j = i / ((size_t)nWidth * (size_t)nChannels) * (size_t)nPaddedStride + i % ((size_t)nWidth * (size_t)nChannels);
+			pPixelData[i] = pSourcePixels[j + 2];
+			pPixelData[i + 1] = pSourcePixels[j + 1];
+			pPixelData[i + 2] = pSourcePixels[j];
+		}
+		StbiWriteFileContext ctx(fptr);
+		bool bStbiOk = stbi_write_tga_to_func(StbiWriteToFile, &ctx, nWidth, nHeight, 3, pPixelData) != 0;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bStbiOk && ctx.bOk && bCloseOk;
+		fptr = NULL;
+		delete[] pPixelData;
+	}
+	catch (...) {
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
+	}
+
+	// delete partial temp file if no success; the target is untouched
+	if (!bSuccess) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	return true;
+}
+
+// pData must point to 24 bit BGR DIB (top-down, rows padded to 4 bytes,
+// same layout SaveWebP/SaveQOI receive).
+// Binary PBM (P4), hand-written: stb_image_write has no PBM writer.
+// Header "P4\n<w> <h>\n", then one bit per pixel, MSB first, rows
+// padded to whole bytes with 0 bits. Per the PBM spec 1 = black,
+// 0 = white; a pixel is black when its Rec.601 luminance is < 128
+// (same luminance rule as SavePNM's PGM grey, threshold 128).
+// P4 files reopen through JPEGView's own PBM reader (PBMWrapper,
+// IF_PBM); the save/reopen round-trip is pixel-exact.
+static bool SavePBM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
+	CString sTempFile;
+	HANDLE hTempFile = INVALID_HANDLE_VALUE;
+	if (!CreateAtomicTempFileName(sFileName, sTempFile, hTempFile)) {
+		return false;
+	}
+	FILE* fptr = OpenTempFileForWriting(hTempFile);
+	if (fptr == NULL) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	bool bSuccess = false;
+	try {
+		int nPaddedStride = Helpers::DoPadding(nWidth * 3, 4);
+		unsigned char* pSourcePixels = (unsigned char*)pData;
+		int nRowBytes = (nWidth + 7) / 8;
+		size_t nSize = (size_t)nRowBytes * (size_t)nHeight;
+		unsigned char* pBits = new unsigned char[nSize];
+		memset(pBits, 0, nSize);
+		for (int y = 0; y < nHeight; y++) {
+			for (int x = 0; x < nWidth; x++) {
+				size_t nSrc = (size_t)y * (size_t)nPaddedStride + (size_t)x * 3;
+				if (LuminanceFromBGR(pSourcePixels[nSrc], pSourcePixels[nSrc + 1], pSourcePixels[nSrc + 2]) < 128) {
+					pBits[(size_t)y * (size_t)nRowBytes + (size_t)(x / 8)] |= (unsigned char)(0x80 >> (x % 8));
+				}
+			}
+		}
+		CStringA sHeader;
+		sHeader.Format("P4\n%d %d\n", nWidth, nHeight);
+		bool bWriteOk = fwrite(sHeader, 1, (size_t)sHeader.GetLength(), fptr) == (size_t)sHeader.GetLength() &&
+			fwrite(pBits, 1, nSize, fptr) == nSize;
+		bool bCloseOk = (fclose(fptr) == 0);
+		bSuccess = bWriteOk && bCloseOk;
+		fptr = NULL;
+		delete[] pBits;
+	}
+	catch (...) {
+		if (fptr != NULL) {
+			fclose(fptr);
+			fptr = NULL;
+		}
+	}
+
+	// delete partial temp file if no success; the target is untouched
+	if (!bSuccess) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	if (!CommitAtomicTempFile(sFileName, sTempFile)) {
+		DeleteAtomicTempFile(sTempFile);
+		return false;
+	}
+
+	return true;
+}
+
 // Copied from MS sample
 static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
    UINT  num = 0;          // number of image encoders
@@ -566,6 +883,11 @@ static bool SaveGDIPlus(LPCTSTR sFileName, EImageFormat eFileFormat, void* pData
 			break;
 		case IF_TIFF:
 			sMIMEType = L"image/tiff";
+			break;
+		case IF_GIF:
+			// GDI+ saves GIF quantized to a 256-colour palette: that is
+			// the format, not a limitation of this code path.
+			sMIMEType = L"image/gif";
 			break;
 	}
 
@@ -660,6 +982,18 @@ bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, const CImageP
 			bSuccess = SaveQOI(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy);
 		} else if (eFileFormat == IF_JXL) {
 			bSuccess = SaveJXL(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy, bUseLosslessWEBP);
+		} else if (eFileFormat == IF_JP2) {
+			bSuccess = SaveJP2File(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy, bUseLosslessWEBP);
+		} else if (eFileFormat == IF_EXR) {
+			bSuccess = SaveEXRFile(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy);
+		} else if (eFileFormat == IF_PPM) {
+			bSuccess = SavePNM(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy);
+		} else if (eFileFormat == IF_HDR) {
+			bSuccess = SaveHDR(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy);
+		} else if (eFileFormat == IF_TGA) {
+			bSuccess = SaveTGA(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy);
+		} else if (eFileFormat == IF_PBM) {
+			bSuccess = SavePBM(sFileName, pDIB24bpp, imageSize.cx, imageSize.cy);
 		} else {
 			bSuccess = SaveGDIPlus(sFileName, eFileFormat, pDIB24bpp, imageSize.cx, imageSize.cy);
 		}

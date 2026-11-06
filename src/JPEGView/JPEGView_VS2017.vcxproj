@@ -341,12 +341,14 @@
     <ClCompile Include="PrintImage.cpp" />
     <ClCompile Include="ProcessingThreadPool.cpp" />
     <ClCompile Include="QOIWrapper.cpp" />
+    <ClCompile Include="SaveJP2.cpp" />
     <ClCompile Include="PPMWrapper.cpp" />
     <ClCompile Include="ReaderBMP.cpp" />
     <ClCompile Include="ReaderTGA.cpp" />
     <ClCompile Include="ResizeDlg.cpp" />
     <ClCompile Include="ResizeFilter.cpp" />
     <ClCompile Include="SaveImage.cpp" />
+    <ClCompile Include="SaveEXR.cpp" />
     <ClCompile Include="SettingsProvider.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -431,6 +433,7 @@
     <ClInclude Include="ProcessingThreadPool.h" />
     <ClInclude Include="ProcessParams.h" />
     <ClInclude Include="QOIWrapper.h" />
+    <ClInclude Include="SaveJP2.h" />
     <ClInclude Include="PPMWrapper.h" />
     <ClInclude Include="RawMetadata.h" />
     <ClInclude Include="ReaderBMP.h" />
@@ -438,6 +441,7 @@
     <ClInclude Include="ResizeDlg.h" />
     <ClInclude Include="ResizeFilter.h" />
     <ClInclude Include="SaveImage.h" />
+    <ClInclude Include="SaveEXR.h" />
     <ClInclude Include="SettingsProvider.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="TiltCorrectionPanel.h" />
