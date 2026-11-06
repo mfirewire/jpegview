@@ -3,7 +3,7 @@ description: Action to set up WTL includes by downloading and caching an officia
 
 # NOTE: although WTL is now a submodule, this is not reflected in this GH action
 #
-# While I would like to do a submodule clone with checkout@v4, there's no option
+# While I would like to do a submodule clone with checkout@v5, there's no option
 # to check out only ONE submodule.  There's a lot of submodules in this project
 # which are not directly required for building, and that seems fairly inefficient.
 #
