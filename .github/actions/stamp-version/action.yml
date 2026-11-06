@@ -21,11 +21,11 @@ runs:
         $TAG_VER = "${{ github.ref_name }}"
         $content = [System.IO.File]::ReadAllText("src/JPEGView/resource.h")
         $content = [regex]::Replace($content, '(#define JPEGVIEW_VERSION ")[^"]*\\0"', ('$1' + $TAG_VER + '\0"'))
-        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content)
+        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content, (New-Object System.Text.UTF8Encoding($false)))
         $rc = [System.IO.File]::ReadAllText("src/JPEGView/JPEGView.rc")
         $rc = [regex]::Replace($rc, '(VALUE "FileVersion", ")[^"]*(")', ('$1' + $TAG_VER + '$2'))
         $rc = [regex]::Replace($rc, '(VALUE "ProductVersion", ")[^"]*(")', ('$1' + $TAG_VER + '$2'))
-        [System.IO.File]::WriteAllText("src/JPEGView/JPEGView.rc", $rc)
+        [System.IO.File]::WriteAllText("src/JPEGView/JPEGView.rc", $rc, (New-Object System.Text.UTF8Encoding($false)))
         if (-not (Select-String -Path src/JPEGView/resource.h -Pattern ([regex]::Escape($TAG_VER)) -Quiet)) { throw "tag version stamp was not applied to src/JPEGView/resource.h" }
         if (-not (Select-String -Path src/JPEGView/JPEGView.rc -Pattern ([regex]::Escape($TAG_VER)) -Quiet)) { throw "tag version stamp was not applied to src/JPEGView/JPEGView.rc" }
         Write-Output "Stamped release version $TAG_VER"
@@ -42,6 +42,21 @@ runs:
         $content = [System.IO.File]::ReadAllText("src/JPEGView/resource.h")
         $content = [regex]::Replace($content, '(#define JPEGVIEW_VERSION ")([A-Za-z0-9., -]+)(\\0")', ('$1$2' + $APPEND_VER_STR + '$3'))
         $content = [regex]::Replace($content, '(#define JPEGVIEW_TITLE ")(JPEGView)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
-        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content)
-        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
+        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content, (New-Object System.Text.UTF8Encoding($false)))
+        # O-10: the dev stamp also updates the .rc version strings, so a dev
+        # build's Explorer FileVersion / About matches the resource.h dev
+        # version. Same restricted character class as resource.h, so a
+        # re-run cannot double-append (the stamped string contains '(' and
+        # '/', which the class excludes). Tag step above is untouched.
+        $rc = [System.IO.File]::ReadAllText("src/JPEGView/JPEGView.rc")
+        $rc = [regex]::Replace($rc, '(VALUE "FileVersion", ")([A-Za-z0-9., -]+)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        $rc = [regex]::Replace($rc, '(VALUE "ProductVersion", ")([A-Za-z0-9., -]+)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        [System.IO.File]::WriteAllText("src/JPEGView/JPEGView.rc", $rc, (New-Object System.Text.UTF8Encoding($false)))
+        # R-27: verify the full append string, not just the "GHdevtest"
+        # substring, so a stale stamp from another owner/SHA cannot pass.
+        # [regex]::Escape: $APPEND_VER_STR contains regex metacharacters
+        # '(' and ')' (and '/'), and Select-String -Pattern is a regex.
+        # Same Escape form as the tag-step check above.
+        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern ([regex]::Escape($APPEND_VER_STR)) -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
+        if (-not (Select-String -Path src/JPEGView/JPEGView.rc -Pattern ([regex]::Escape($APPEND_VER_STR)) -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/JPEGView.rc" }
         Write-Output "Stamped dev version $APPEND_VER_STR"

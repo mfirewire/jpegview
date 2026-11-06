@@ -73,10 +73,9 @@ static const double LDC_INC = 0.1; // increment for LDC (lighten shadows and dar
 // every image. CJPEGProvider/CImageLoadThread already support N threads
 // (per-thread request queue, cached decoders and COM init; only the
 // static handle counter is shared, via InterlockedIncrement), so this
-// is just the constant change. Follow-up (not in this file):
-// CJPEGProvider::ClearRequest releases the locked file only on
-// m_pWorkThreads[0]; with two threads a cached decoder on thread 1
-// survives a reload/clear - see the batch-3 report.
+// is just the constant change. (E2 follow-up, now done: ClearRequest
+// releases the locked file on every load thread - see the loop over
+// m_pWorkThreads in CJPEGProvider::ClearRequest, JPEGProvider.cpp.)
 static const int NUM_THREADS = 2; // number of readahead threads to use
 static const int READ_AHEAD_BUFFERS = 3; // number of readahead buffers to use (NUM_THREADS+1 is a good choice)
 static const int ZOOM_TIMEOUT = 200; // refinement done after this many milliseconds

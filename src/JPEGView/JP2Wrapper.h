@@ -13,7 +13,9 @@ public:
 	// supported, signed or unsigned; 1 (gray), 2 (gray+alpha, alpha dropped),
 	// 3 (RGB) and 4 (RGBA, alpha dropped) components are supported.
 	// YCbCr (SYCC/EYCC) codestreams are converted to RGB with BT.601;
-	// CMYK and palette images are rejected (clean failure, not wrong colors).
+	// CMYK images are rejected (clean failure, not wrong colors); palette
+	// images are left to OpenJPEG's default PCLR/CMAP/CDEF handling,
+	// unverified - see JP2Wrapper.cpp (R-21).
 	// Subsampled components (dx/dy > 1) are upsampled by nearest neighbour.
 	static void* ReadImage(int& width,   // width of the image loaded.
 		int& height,  // height of the image loaded.

@@ -150,8 +150,22 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 	::EmptyClipboard();
 
 	// get needed size of memory block
-	uint32 nSizeLinePadded = Helpers::DoPadding(nWidth*3, 4);
-	uint32 nSizeBytes = sizeof(BITMAPINFO) + nSizeLinePadded * nHeight;
+	// R-30: size_t + IsImageBufferSizeOk gate (was uint32: a future decoder
+	// bypassing the byte cap could wrap the size and heap-overflow in
+	// Convert32bppTo24bppDIB below). nWidth/nHeight are image dimensions,
+	// already bounded by MAX_IMAGE_DIMENSION, so nWidth*3 cannot overflow
+	// int before DoPadding; the gate still checks the real product.
+	size_t nSizeLinePadded = (size_t)Helpers::DoPadding(nWidth*3, 4);
+	size_t nSizeBytes = 0;
+	if (!IsImageBufferSizeOk(nSizeLinePadded, (size_t)nHeight, &nSizeBytes)) {
+		::CloseClipboard();
+		return;
+	}
+	nSizeBytes += sizeof(BITMAPINFO);
+	if (nSizeBytes > MAX_IMAGE_BYTES) { // header on top of a max-size image
+		::CloseClipboard();
+		return;
+	}
 	
 	// Allocate memory
 	HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, nSizeBytes);

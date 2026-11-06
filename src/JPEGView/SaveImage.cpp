@@ -155,8 +155,14 @@ static void* GetThumbnailDIB(CJPEGImage * pImage, CSize& sizeThumb) {
 	if (pDIB32bpp == NULL) {
 		return NULL;
 	}
-	uint32 nSizeLinePadded = Helpers::DoPadding(sizeThumb.cx*3, 4);
-	uint32 nSizeBytes = nSizeLinePadded*sizeThumb.cy;
+	// R-30 (review): same size_t + gate idiom as Clipboard::DoCopy and
+	// CSaveImage::SaveImage below; the thumbnail is capped at 160x160 so
+	// the gate cannot trip in practice, but the uint32 product must not wrap.
+	size_t nSizeLinePadded = (size_t)Helpers::DoPadding(sizeThumb.cx*3, 4);
+	size_t nSizeBytes = 0;
+	if (!IsImageBufferSizeOk(nSizeLinePadded, (size_t)sizeThumb.cy, &nSizeBytes)) {
+		return NULL;
+	}
 	char* pDIB24bpp = new char[nSizeBytes];
 	CBasicProcessing::Convert32bppTo24bppDIB(sizeThumb.cx, sizeThumb.cy, pDIB24bpp, pDIB32bpp, false);
 	return pDIB24bpp;
@@ -993,8 +999,16 @@ bool CSaveImage::SaveImage(LPCTSTR sFileName, CJPEGImage * pImage, const CImageP
 		return false;
 	}
 
-	uint32 nSizeLinePadded = Helpers::DoPadding(imageSize.cx*3, 4);
-	uint32 nSizeBytes = nSizeLinePadded*imageSize.cy;
+	// R-30: size_t + IsImageBufferSizeOk gate (was uint32: same wrap-then-
+	// heap-overflow shape as Clipboard::DoCopy). Dimensions are already
+	// bounded by MAX_IMAGE_DIMENSION, so imageSize.cx*3 cannot overflow
+	// int before DoPadding; the gate still checks the real product.
+	size_t nSizeLinePadded = (size_t)Helpers::DoPadding(imageSize.cx*3, 4);
+	size_t nSizeBytes = 0;
+	if (!IsImageBufferSizeOk(nSizeLinePadded, (size_t)imageSize.cy, &nSizeBytes)) {
+		pImage->EnableDimming(true);
+		return false;
+	}
 	pDIB24bpp = new char[nSizeBytes];
 	CBasicProcessing::Convert32bppTo24bppDIB(imageSize.cx, imageSize.cy, pDIB24bpp, pDIB32bpp, false);
 

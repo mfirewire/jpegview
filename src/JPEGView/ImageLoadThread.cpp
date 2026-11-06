@@ -1974,18 +1974,23 @@ void CImageLoadThread::ProcessReadSVGRequest(CRequest* request) {
 // dimensions against the file's real size. A DNG that declares 65535x21846 but
 // carries only a few KB reads past its buffer inside them and crashes
 // intermittently (observed: 2 crashes in 4 opens). Parse the TIFF IFDs here
-// (IFD0 plus SubIFDs), before either decoder runs, and compare the declared
-// data size with the file size using 64-bit arithmetic. Files that are not
-// TIFF-shaped are let through to the decoders rather than being mis-classified.
+// (IFD0, its SubIFDs and the next-IFD chain), before either decoder runs,
+// and compare the declared data size with the file size using 64-bit
+// arithmetic. Files that are not TIFF-shaped are let through to the
+// decoders rather than being mis-classified.
 // R-03/R-04/R-05: this gate is a 32-bit TIFF gate, not a general RAW gate.
-// It deliberately does NOT cover BigTIFF (magic 43, passed through below),
-// non-TIFF RAW formats (CRW/RAF/X3F and friends, passed through below), or
-// the "next IFD" chain after each IFD's entries. Those still rely on the
-// decoders' own protection. What it does cover: IFD0 plus SubIFDs (tag
-// 330, depth <= 2), strip (273/279) and tile (324/325) arrays, read by
-// seeking to their file offsets instead of from a 1 MB prefix, so an IFD
-// past 1 MB is no longer falsely rejected and external values past 1 MB
-// are no longer silently skipped. A width/height above JPEGView's
+// It deliberately does NOT cover BigTIFF (magic 43, passed through below)
+// or non-TIFF RAW formats (CRW/RAF/X3F and friends, passed through below).
+// Those still rely on the decoders' own protection. What it does cover:
+// IFD0 plus SubIFDs (tag 330, depth <= 2) AND the "next IFD" chain after
+// each IFD's entries (F-01): CollectIFDTree walks the chain iteratively
+// with no depth limit - dcraw_mod follows the chain too, so an absurd
+// chained IFD must not slip past - bounded instead by the 4096-node cap
+// and the visited-offset set (F-H05). Strip (273/279) and tile (324/325)
+// arrays are read by seeking to their file offsets instead of from a
+// 1 MB prefix, so an IFD past 1 MB is no longer falsely rejected and
+// external values past 1 MB are no longer silently skipped. A width/height
+// above JPEGView's
 // MAX_IMAGE_DIMENSION (65535) is rejected for every IFD visited: the
 // viewer cannot display such an image anyway, and the gate only returns a
 // bool, so "over the viewer limit" and "corrupt" are intentionally not
@@ -3056,6 +3061,17 @@ void CImageLoadThread::ProcessReadGDIPlusRequest(CRequest * request, void* pEXIF
 	// opening the file a second time. The probe leaves the handle at an
 	// arbitrary offset, so seek back to 0 before reading; if the seek fails
 	// the sanitized attempt is skipped and the filename path below runs.
+	// R-18: the sanitized copy below is deliberately a whole-file read
+	// (GlobalAlloc(fileSize) + one ReadFile, capped at 0x7FFFFFFF).
+	// TiffSanitizeChromaticity works on a whole in-memory buffer, and the
+	// original file must never be modified in place, so any sanitizing
+	// scheme needs one full copy somewhere. Streaming the file through a
+	// temp file into GDI+ would avoid holding the whole file in memory,
+	// but it needs a streaming sanitizer plus temp-file lifecycle on top
+	// of the atomic-save machinery - a bigger change than this polish
+	// batch. A GlobalAlloc failure here simply falls through to the plain
+	// filename decode below, so the worst case is a missed sanitization,
+	// never a missed image.
 	HANDLE hProbeFile = NULL;
 	if (Helpers::GetImageFormat(request->FileName) == IF_TIFF && TiffChromaticityNeedsSanitization(sFileName, hProbeFile)) {
 		DeleteCachedGDIBitmap();

@@ -156,8 +156,19 @@ void* JP2Reader::ReadImage(int& width,
 	if (image->numcomps < 1 || image->numcomps > 4) {
 		goto cleanup;
 	}
-	// CMYK is rejected rather than shown with wrong colors; palette images
-	// arrive as an index component and would need palette expansion.
+	// CMYK is rejected rather than shown with wrong colors. Palette images
+	// are NOT rejected here and NOT expanded here either: the wrapper calls
+	// opj_set_default_decoder_parameters() and never writes params.flags,
+	// so OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG (openjpeg.h, 0x0001 -
+	// set it to make the decoder ignore PCLR/CMAP/CDEF) is not set by us
+	// and any PCLR/CMAP/CDEF handling is left to OpenJPEG's default
+	// behaviour. That default is NOT verified against decoder source
+	// (not vendored), and no palette JP2 sample exists to test against:
+	// the only JP2 sample (samples/false/sample1.jp2) has jp2h boxes
+	// ihdr+colr only, no pclr/cmap. If OpenJPEG does not expand the
+	// palette, a palette image arrives here as a 1-component index and
+	// is rendered as grey by the isGray path below. Known limitation
+	// (R-21) until a palette sample is verified on a real machine.
 	if (image->color_space == OPJ_CLRSPC_CMYK) {
 		goto cleanup;
 	}

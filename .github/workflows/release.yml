@@ -17,7 +17,7 @@ jobs:
     # (the release job recomputes short_sha itself).
     steps:
     - name: Checkout code with submodules
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: recursive
     - name: Setup Git Short SHA
@@ -76,7 +76,7 @@ jobs:
     # O-07: see the Win32 job - same dead outputs block removed.
     steps:
     - name: Checkout code with submodules
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: recursive
     - name: Setup Git Short SHA
@@ -131,7 +131,7 @@ jobs:
     runs-on: windows-2022
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Setup Git Short SHA
       shell: powershell
       run: echo "short_sha=$(git rev-parse --short "${{ github.sha }}")" >> $env:GITHUB_ENV
@@ -162,7 +162,7 @@ jobs:
       shell: pwsh
       run: Compress-Archive -Path release-artifacts/x64/* -DestinationPath release-artifacts/JPEGView-x64-${{ github.ref_name }}.zip
     - name: Create Release and upload assets
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ github.ref_name }}
         name: "${{ github.ref_name }}"

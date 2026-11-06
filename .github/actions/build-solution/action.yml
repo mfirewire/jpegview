@@ -57,15 +57,30 @@ runs:
         $content = [System.IO.File]::ReadAllText("src/JPEGView/resource.h")
         $content = [regex]::Replace($content, '(#define JPEGVIEW_VERSION ")([A-Za-z0-9., -]+)(\\0")', ('$1$2' + $APPEND_VER_STR + '$3'))
         $content = [regex]::Replace($content, '(#define JPEGVIEW_TITLE ")(JPEGView)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
-        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content)
+        [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content, (New-Object System.Text.UTF8Encoding($false)))
         $wxs = [System.IO.File]::ReadAllText("src/JPEGView.Setup/Product.wxs")
         $wxs = [regex]::Replace($wxs, '(<Product.*ApplicationName\))', ('$1' + $APPEND_VER_STR))
-        [System.IO.File]::WriteAllText("src/JPEGView.Setup/Product.wxs", $wxs)
+        [System.IO.File]::WriteAllText("src/JPEGView.Setup/Product.wxs", $wxs, (New-Object System.Text.UTF8Encoding($false)))
+        # O-10: the dev stamp also updates the .rc version strings, so a dev
+        # build's Explorer FileVersion / About matches the resource.h dev
+        # version. Same restricted character class as resource.h, so a
+        # re-run cannot double-append (the stamped string contains '(' and
+        # '/', which the class excludes).
+        $rc = [System.IO.File]::ReadAllText("src/JPEGView/JPEGView.rc")
+        $rc = [regex]::Replace($rc, '(VALUE "FileVersion", ")([A-Za-z0-9., -]+)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        $rc = [regex]::Replace($rc, '(VALUE "ProductVersion", ")([A-Za-z0-9., -]+)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
+        [System.IO.File]::WriteAllText("src/JPEGView/JPEGView.rc", $rc, (New-Object System.Text.UTF8Encoding($false)))
         # O-03: verify the stamp actually landed (the old Select-String
         # only checked the lines exist, so a non-matching sed passed
-        # silently). Fail the step if either file is unstamped.
-        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
-        if (-not (Select-String -Path src/JPEGView.Setup/Product.wxs -Pattern "GHdevtest" -Quiet)) { throw "dev version stamp was not applied to src/JPEGView.Setup/Product.wxs" }
+        # silently). Fail the step if any file is unstamped.
+        # R-27: verify the full append string, not just the "GHdevtest"
+        # substring, so a stale stamp from another owner/SHA cannot pass.
+        # [regex]::Escape: $APPEND_VER_STR contains regex metacharacters
+        # '(' and ')' (and '/'), and Select-String -Pattern is a regex.
+        # Same Escape form as the tag-step check in stamp-version.
+        if (-not (Select-String -Path src/JPEGView/resource.h -Pattern ([regex]::Escape($APPEND_VER_STR)) -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/resource.h" }
+        if (-not (Select-String -Path src/JPEGView.Setup/Product.wxs -Pattern ([regex]::Escape($APPEND_VER_STR)) -Quiet)) { throw "dev version stamp was not applied to src/JPEGView.Setup/Product.wxs" }
+        if (-not (Select-String -Path src/JPEGView/JPEGView.rc -Pattern ([regex]::Escape($APPEND_VER_STR)) -Quiet)) { throw "dev version stamp was not applied to src/JPEGView/JPEGView.rc" }
 
 
     # R-06: regenerate the ThorVG import library with MSVC LIB.EXE from the
