@@ -145,7 +145,9 @@ void* JP2Reader::ReadImage(int& width,
 		goto cleanup;
 	}
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+	// No abs(): width/height are proven > 0 by the check above;
+	// unqualified abs(double) resolves to ::abs(int) (abs(INT_MIN) is UB).
+	if ((double)width * (double)height > (double)CSettingsProvider::This().MaxImagePixels()) {
 		isSizeLimitExceeded = true;
 		goto cleanup;
 	}

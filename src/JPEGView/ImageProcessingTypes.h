@@ -43,6 +43,7 @@ enum EImageFormat {
 	IF_PPM,
 	IF_HDR,
 	IF_PBM,
+	IF_PAM,
 	IF_JP2,
 	IF_EXR,
 	IF_SVG,
