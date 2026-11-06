@@ -6,6 +6,7 @@
 // success; on any failure the temp file is deleted and the target is left
 // untouched. Declared in SaveImage.h, defined in SaveImage.cpp.
 #include "SaveImage.h"
+#include "MaxImageDef.h" // IsImageBufferSizeOk
 // OpenJPEG 2.5, vendored under libopenjpeg/ (official Windows binaries,
 // v2.5.4): include/openjpeg-2.5/openjpeg.h, openjp2.lib in lib (Win32) /
 // lib64 (x64), openjp2.dll delay-loaded via the vcxproj DelayLoadDLLs entry,
@@ -54,6 +55,17 @@ bool SaveJP2File(LPCTSTR sFileName, void* pData24bppBGR, int nWidth, int nHeight
 
 	if (sFileName == NULL || sFileName[0] == 0 || pData24bppBGR == NULL || nWidth <= 0 || nHeight <= 0)
 		return false;
+	// A3-3: opj_image_create allocates 12 bytes/pixel (3 OPJ_INT32
+	// components). Gate the working set like SaveEXRFile does for its
+	// 12 bytes/pixel float buffer, before any allocation: the 24bpp
+	// DIB gate at the caller only bounds the input at 4 GiB, i.e. up
+	// to ~1.43G px / ~17 GB of JP2 working set. The gate also caps
+	// width*height below INT_MAX, so the (OPJ_UINT32) casts below
+	// cannot overflow. Failure returns false, target untouched.
+	size_t nJP2Bytes = 0;
+	if (!IsImageBufferSizeOk((size_t)nWidth * 12, (size_t)nHeight, &nJP2Bytes)) {
+		return false;
+	}
 	pSrc = (const unsigned char*)pData24bppBGR;
 	// R-05: byte offsets in size_t. The stride is computed in size_t
 	// rather than via the int Helpers::DoPadding.

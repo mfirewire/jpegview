@@ -50,6 +50,7 @@ public:
 	// received or the event has been signaled.
 	// The file to load is given by its filename (with path) and the frame index (for multiframe images). The
 	// frame index needs to be zero when the image only has one frame.
+	// Returns -1 when the load request itself could not be allocated (A2-9).
 	int AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, bool forceFullSizeRAW = false);
 
 	// Get loaded image, CImageData::Image is null if not (yet) available - use handle returned by AsyncLoad().

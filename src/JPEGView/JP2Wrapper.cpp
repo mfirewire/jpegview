@@ -216,8 +216,20 @@ void* JP2Reader::ReadImage(int& width,
 				unsigned char v[4] = { 0, 0, 0, 0 };
 				for (OPJ_UINT32 c = 0; c < image->numcomps; c++) {
 					opj_image_comp_t* comp = &image->comps[c];
-					int col = ((int)image->x0 + x - (int)comp->x0) / (int)comp->dx;
-					int row = ((int)image->y0 + y - (int)comp->y0) / (int)comp->dy;
+					// A1-2: x0/y0 and comp->x0/comp->y0 are OPJ_UINT32; casting
+					// them to int wraps at 2^31. Compute the sample index in
+					// __int64 and clamp BEFORE narrowing to int: casting first
+					// and clamping after would wrap a >= 2^31 index to a
+					// negative int and clamp it to the wrong edge (0 instead
+					// of w-1). The int clamps below stay as defence in depth.
+					__int64 col64 = ((__int64)image->x0 + x - (__int64)comp->x0) / (__int64)comp->dx;
+					__int64 row64 = ((__int64)image->y0 + y - (__int64)comp->y0) / (__int64)comp->dy;
+					if (col64 < 0) col64 = 0;
+					if (row64 < 0) row64 = 0;
+					if (col64 >= comp->w) col64 = (__int64)comp->w - 1;
+					if (row64 >= comp->h) row64 = (__int64)comp->h - 1;
+					int col = (int)col64;
+					int row = (int)row64;
 					if (col < 0) col = 0;
 					if (row < 0) row = 0;
 					if (col >= (int)comp->w) col = (int)comp->w - 1;

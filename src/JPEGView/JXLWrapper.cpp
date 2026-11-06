@@ -154,10 +154,12 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 				JxlDecoderImageOutBufferSize(cache.decoder, &format, &buffer_size)) {
 				return false;
 			}
-			if (buffer_size != cache.info.xsize * cache.info.ysize * 4) {
+			// A1-4: xsize/ysize are uint32_t; the product must be computed in
+			// size_t or it wraps above ~1073 MP and the image is mis-rejected.
+			if (buffer_size != (size_t)cache.info.xsize * cache.info.ysize * 4) {
 				return false;
 			}
-			pixels->resize(cache.info.xsize * cache.info.ysize * 4);
+			pixels->resize((size_t)cache.info.xsize * cache.info.ysize * 4);
 			void* pixels_buffer = (void*)pixels->data();
 			size_t pixels_buffer_size = pixels->size() * sizeof(uint8_t);
 			if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(cache.decoder, &format,

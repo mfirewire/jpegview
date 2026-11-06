@@ -13,6 +13,7 @@
 #include "libjpeg-turbo\include\turbojpeg.h"
 #include <math.h>
 #include <assert.h>
+#include <new> // std::nothrow
 
 // Hacky workaround.  Look at comment block in CJPEGImage::Resample()
 // undefine this flag to investigate which optimization might cause that particular failure (TODO)
@@ -224,6 +225,9 @@ void* CJPEGImage::GetThumbnailDIB(CSize fullTargetSize, CSize clippingSize, CPoi
 	if (m_pThumbnail == NULL) {
 		m_pThumbnail = CreateThumbnailImage();
 	}
+	if (m_pThumbnail == NULL) {
+		return NULL;
+	}
 	return m_pThumbnail->GetDIB(fullTargetSize, clippingSize, targetOffset, imageProcParams, eProcFlags);
 }
 
@@ -232,6 +236,9 @@ void* CJPEGImage::GetThumbnailDIBRotated(CSize size, const CImageProcessingParam
 	if (m_pThumbnail == NULL) {
 		m_pThumbnail = CreateThumbnailImage();
 	}
+	if (m_pThumbnail == NULL) {
+		return NULL;
+	}
 	return m_pThumbnail->GetDIBRotated(size, size, CPoint(0, 0), imageProcParams, eProcFlags, dRotation, false);
 }
 
@@ -239,6 +246,9 @@ void* CJPEGImage::GetThumbnailDIBTrapezoid(CSize size, const CImageProcessingPar
 	assert(!m_bIsThumbnailImage);
 	if (m_pThumbnail == NULL) {
 		m_pThumbnail = CreateThumbnailImage();
+	}
+	if (m_pThumbnail == NULL) {
+		return NULL;
 	}
 	return m_pThumbnail->GetDIBTrapezoid(size, size, CPoint(0, 0), imageProcParams, eProcFlags, &trapezoid, false);
 }
@@ -265,6 +275,9 @@ const CHistogram* CJPEGImage::GetProcessedHistogram() {
 	assert(!m_bIsThumbnailImage);
 	if (m_pHistogramThumbnail == NULL) {
 		m_pHistogramThumbnail = CreateThumbnailImage();
+	}
+	if (m_pHistogramThumbnail == NULL) {
+		return NULL;
 	}
 	return (m_imageProcParams.Contrast == -1) ? NULL : 
 		m_pHistogramThumbnail->GetHistogramOfProcessedDIB(
@@ -1492,15 +1505,26 @@ CJPEGImage* CJPEGImage::CreateThumbnailImage() {
 	}
 	void* pPixels = NULL;
 	int nWidth, nHeight;
-	if (m_nOrigWidth*m_nOrigHeight < 120000) {
+	// size_t arithmetic: the int product wraps negative above ~2.1G px
+	// and would take the copy branch with a wrapped byte size.
+	if ((size_t)m_nOrigWidth * (size_t)m_nOrigHeight < 120000) {
 		// take a copy of the original pixels
+		// No pixels to copy (e.g. a 1-channel image whose
+		// Convert1To4Channels failed in the constructor): report no
+		// thumbnail instead of memcpy from NULL.
+		if (m_pOrigPixels == NULL) {
+			return NULL;
+		}
 		nWidth = m_nOrigWidth;
 		nHeight = m_nOrigHeight;
 		if (m_nOriginalChannels == 3) {
 			pPixels = CBasicProcessing::Convert3To4Channels(m_nOrigWidth, m_nOrigHeight, m_pOrigPixels);
 		} else {
-			int nSizeBytes = m_nOrigWidth*m_nOrigHeight*4;
-			pPixels = new uint8[nSizeBytes];
+			size_t nSizeBytes = (size_t)m_nOrigWidth * (size_t)m_nOrigHeight * 4;
+			pPixels = new(std::nothrow) uint8[nSizeBytes];
+			if (pPixels == NULL) {
+				return NULL;
+			}
 			memcpy(pPixels, m_pOrigPixels, nSizeBytes);
 		}
 	} else {
@@ -1509,6 +1533,9 @@ CJPEGImage* CJPEGImage::CreateThumbnailImage() {
 		nWidth = psiSize.cx;
 		nHeight = psiSize.cy;
 		pPixels = m_pLDC->GetPSImageAsDIB();
+	}
+	if (pPixels == NULL) {
+		return NULL;
 	}
 	return new CJPEGImage(nWidth, nHeight, pPixels, NULL, 4, -1, IF_CLIPBOARD, false, 0, 1, 0, m_pLDC, true);
 }

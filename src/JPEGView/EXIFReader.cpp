@@ -195,6 +195,13 @@ static void WriteLongTag(uint8* ptr, uint32 nValue, bool bLittleEndian) {
 	}
 }
 
+// Absolute value of a uint32 holding a two's-complement int32, computed in
+// the unsigned domain: abs(INT_MIN) is UB, but 0u - 0x80000000u == 2^31,
+// which is exactly |INT_MIN|.
+static uint32 AbsInt32AsUInt32(uint32 u) {
+	return (u & 0x80000000u) != 0 ? 0u - u : u;
+}
+
 static int ReadRationalTag(Rational & rational, uint8* ptr, uint8* pTIFFHeader, const uint8* pTIFFEnd, int index, bool bLittleEndian) {
 	rational.Numerator = 0;
 	rational.Denominator = 0;
@@ -215,8 +222,11 @@ static int ReadRationalTag(Rational & rational, uint8* ptr, uint8* pTIFFHeader, 
 				if (rational.Numerator != 0 && rational.Denominator != 0) {
 					// Calculate the ggT
 					uint32 nModulo;
-					uint32 nA = (nType == 10) ? abs((int)rational.Numerator) : rational.Numerator;
-					uint32 nB = (nType == 10) ? abs((int)rational.Denominator) : rational.Denominator;
+					// A3-7: nType 10 is SRATIONAL; abs((int)...) is UB for
+					// 0x80000000 (INT_MIN), so take the absolute value in
+					// the unsigned domain instead (see AbsInt32AsUInt32).
+					uint32 nA = (nType == 10) ? AbsInt32AsUInt32(rational.Numerator) : rational.Numerator;
+					uint32 nB = (nType == 10) ? AbsInt32AsUInt32(rational.Denominator) : rational.Denominator;
 					do {
 						nModulo = nA % nB;
 						nA = nB;

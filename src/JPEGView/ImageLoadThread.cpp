@@ -511,7 +511,15 @@ CImageLoadThread::~CImageLoadThread(void) {
 }
 
 int CImageLoadThread::AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, bool forceFullSizeRAW) {
-	CRequest* pRequest = new CRequest(strFileName, nFrameIndex, targetWnd, processParams, eventFinished, forceFullSizeRAW);
+	// A2-9: 'new CRequest' can throw on allocation failure; AsyncLoad is
+	// reached from the UI thread via StartNewRequest with no try/catch
+	// above. Use nothrow and report -1 (never a valid handle: handles come
+	// from InterlockedIncrement on m_curHandle, starting at 0, so the first
+	// real handle is 1); StartNewRequest drops the request on -1.
+	CRequest* pRequest = new(std::nothrow) CRequest(strFileName, nFrameIndex, targetWnd, processParams, eventFinished, forceFullSizeRAW);
+	if (pRequest == NULL) {
+		return -1;
+	}
 
 	ProcessAsync(pRequest);
 
@@ -541,7 +549,16 @@ CImageData CImageLoadThread::GetLoadedImage(int nHandle) {
 }
 
 void CImageLoadThread::ReleaseFile(LPCTSTR strFileName) {
-	CReleaseFileRequest* pRequest = new CReleaseFileRequest(strFileName);
+	// A2-9: 'new CReleaseFileRequest' can throw on allocation failure;
+	// ReleaseFile runs on the UI thread via ClearRequest with no
+	// try/catch above. Use nothrow and skip the release on failure: the
+	// release is best-effort (a failed wait is already tolerated the same
+	// way in ProcessAndWait), the worst case is a stale cached decoder
+	// surviving until the next load of that file.
+	CReleaseFileRequest* pRequest = new(std::nothrow) CReleaseFileRequest(strFileName);
+	if (pRequest == NULL) {
+		return;
+	}
 	ProcessAndWait(pRequest);
 }
 

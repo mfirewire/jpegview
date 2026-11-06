@@ -59,7 +59,10 @@ runs:
         $content = [regex]::Replace($content, '(#define JPEGVIEW_TITLE ")(JPEGView)(")', ('$1$2' + $APPEND_VER_STR + '$3'))
         [System.IO.File]::WriteAllText("src/JPEGView/resource.h", $content, (New-Object System.Text.UTF8Encoding($false)))
         $wxs = [System.IO.File]::ReadAllText("src/JPEGView.Setup/Product.wxs")
-        $wxs = [regex]::Replace($wxs, '(<Product.*ApplicationName\))', ('$1' + $APPEND_VER_STR))
+        # A4-4: the stamp regex is anchored on the closing quote, so a
+        # re-run is a no-op (the stamped text puts ' (~GHdevtest ...'
+        # between ')' and '"', breaking the match) instead of appending twice.
+        $wxs = [regex]::Replace($wxs, '(<Product.*ApplicationName\))(")', ('$1' + $APPEND_VER_STR + '$2'))
         [System.IO.File]::WriteAllText("src/JPEGView.Setup/Product.wxs", $wxs, (New-Object System.Text.UTF8Encoding($false)))
         # O-10: the dev stamp also updates the .rc version strings, so a dev
         # build's Explorer FileVersion / About matches the resource.h dev

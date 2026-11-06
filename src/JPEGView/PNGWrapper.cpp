@@ -198,6 +198,12 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 	png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	png_infop   info_ptr = png_create_info_struct(png_ptr);
 
+	// A1-1: png_create_* returns NULL when the allocation fails; report it
+	// as out-of-memory (like the IsImageBufferSizeOk failure below), not as
+	// a plain decode failure, so the caller can free memory and retry.
+	if (png_ptr == NULL || info_ptr == NULL)
+		outOfMemory = true;
+
 	if (png_ptr && info_ptr)
 	{
 		// don't cache ptrs until image is valid or else causes a double-free later when destroying object in DeleteCacheInternal()
@@ -345,6 +351,13 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 			}
 			return false;
 		}
+		else
+		{
+			// A1-1: one of the five mallocs above failed; report it as
+			// out-of-memory (the frees below still run), not as a plain
+			// decode failure, so the caller can free memory and retry.
+			outOfMemory = true;
+		}
 		free(p_image);
 		free(rows_image);
 		free(rows_frame);
@@ -372,8 +385,12 @@ void* PngReader::ReadImage(int& width,
 		if (sizebytes < 8)
 			return NULL;
 		cache.buffer = malloc(sizebytes-8);
-		if (!cache.buffer)
+		if (!cache.buffer) {
+			// A1-1: the read-buffer allocation failed; report out-of-memory
+			// so the caller can free memory and retry, not a plain failure.
+			outOfMemory = true;
 			return NULL;
+		}
 		// copy everything except the PNG signature (first 8 bytes)
 		memcpy(cache.buffer, (char*)buffer+8, sizebytes-8);
 		cache.buffer_size = sizebytes-8;

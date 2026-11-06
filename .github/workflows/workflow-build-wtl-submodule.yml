@@ -34,7 +34,7 @@ jobs:
     - name: Setup msbuild
       id: setup-msbuild
       # https://github.com/marketplace/actions/setup-msbuild
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v3
       with:
         # Use any available VS 2022+ (runner may only have newer VS, not VS 2019)
         vs-version: '[17.0,]'

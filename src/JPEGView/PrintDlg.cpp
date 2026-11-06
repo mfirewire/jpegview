@@ -244,7 +244,15 @@ LRESULT CPrintDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, 
 	CSize clippedImageSize = clippedRect.Size();
 
 	CPoint offset = CPoint(max(0, printableRect.left - imageRect.left), max(0, printableRect.top - imageRect.top));
-	void* pDIBData = m_pImage->GetThumbnailDIB(imageSize, clippedImageSize, offset, m_procParams, m_eProcessingFlags);
+	void* pDIBData = NULL;
+	try {
+		pDIBData = m_pImage->GetThumbnailDIB(imageSize, clippedImageSize, offset, m_procParams, m_eProcessingFlags);
+	} catch (...) {
+		// A2-5 (R-10 leak): GetThumbnailDIB can throw on OOM
+		// (thumbnail allocation). Fall through to the existing
+		// pDIBData == NULL branch below, which paints no preview.
+		pDIBData = NULL;
+	}
 
 	dc.SelectStockPen(BLACK_PEN);
 

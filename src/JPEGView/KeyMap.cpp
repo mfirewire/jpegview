@@ -312,6 +312,21 @@ CKeyMap::CKeyMap() {
 			m_rejectedKeyMapLines.push_back(nThisLine);
 			continue;
 		}
+		// A2-10 (O-08(c) follow-up): Esc and the left mouse button carry
+		// basic interaction (leaving the current mode, panning, cropping)
+		// and double-click toggles fit-to-screen/100%. ApplyShortcutOverride
+		// already refuses this group for INI overrides; a KeyMap.txt line
+		// that takes them would trap the user in a mode with no
+		// conventional exit, so the parse loop refuses the same base keys
+		// (modifiers live in the high bits, so Ctrl+Esc is refused too)
+		// and records the line, which also comments it out of a user
+		// KeyMap.txt on rewrite, like any other rejected line.
+		int nBaseKeyCode = nKeyCode & 0xFF;
+		if (nBaseKeyCode == VK_ESCAPE || nBaseKeyCode == VK_LBUTTON || nBaseKeyCode == VK_LBUTTONDBLCLK) {
+			RecordRejectedShortcut(sRawLine, _T("Esc, the left mouse button and double-click carry basic interaction and cannot be rebound"), true);
+			m_rejectedKeyMapLines.push_back(nThisLine);
+			continue;
+		}
 		// A later line for the same key displaces the earlier command's
 		// binding; the earlier binding is the one that silently stops
 		// working, so report the displacement instead of overwriting quietly.
@@ -467,8 +482,13 @@ static void StoreShownRejectedShortcuts(const CString& sValue) {
 		CString sFile = CString(Helpers::JPEGViewAppDataPath()) + SHOWN_REJECTED_FILE;
 		FILE* f = _tfopen(sFile, _T("w"));
 		if (f != NULL) {
-			_fputts(sValue, f);
-			fclose(f);
+			// A2-6 follow-up: a failed write must not leave a truncated
+			// marker behind; fclose runs either way so the handle is not
+			// leaked, and a failed marker is removed (best-effort: the
+			// dialog then simply shows once more).
+			bool bOk = (_fputts(sValue, f) != _TEOF);
+			if (fclose(f) != 0) bOk = false;
+			if (!bOk) _tremove(sFile);
 		}
 	}
 }
@@ -627,7 +647,11 @@ void CKeyMap::CommentOutRejectedLines(LPCTSTR sPath) {
 		return;
 	}
 	bool bOk = out.empty() || fwrite(&out[0], 1, out.size(), fo) == out.size();
-	fclose(fo);
+	// A2-6: a small file sits entirely in the stdio buffer, so a full disk
+	// only surfaces when fclose flushes it. Ignoring its return value let
+	// a truncated temp file replace the original KeyMap.txt; a failed
+	// close now takes the existing _tremove path below instead.
+	if (fclose(fo) != 0) bOk = false;
 	if (!bOk) {
 		_tremove(sTempPath);
 		return;

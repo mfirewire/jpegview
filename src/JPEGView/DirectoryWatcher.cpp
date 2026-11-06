@@ -111,25 +111,49 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 	bool bTerminate = false;
 	bool bSetupNewDirectory = true;
 	bool bFileChangePending = false; // H7b: a displayed-file change was detected but not yet posted
+	CString sPendingFile; // A2-8: the file the pending notification was armed for (see WAIT_TIMEOUT)
 	HANDLE waitHandles[4]{ 0 };
 	do {
 		waitHandles[0] = thisPtr->m_terminateEvent;
 		waitHandles[1] = thisPtr->m_newDirectoryEvent;
 		int numHandles = bSetupNewDirectory ? 2 : 4;
 
+		// A2-7: as R-23 did for the mtime read, only snapshot the
+		// directory under the lock; the FindFirstChangeNotification
+		// calls run outside it, so the UI thread's SetCurrentFile is
+		// never stuck behind a slow/network drive. A directory change
+		// between snapshot and registration only costs one wait cycle:
+		// SetCurrentDirectory sets m_newDirectoryEvent, which re-arms
+		// setup and closes these handles at the bottom of the loop.
+		CString sDirectory;
 		::EnterCriticalSection(&thisPtr->m_lock);
-		if (bSetupNewDirectory && !thisPtr->m_sCurrentDirectory.IsEmpty()) {
-			waitHandles[2] = ::FindFirstChangeNotification(thisPtr->m_sCurrentDirectory, FALSE, FILE_NOTIFY_CHANGE_FILE_NAME);
+		if (bSetupNewDirectory) {
+			sDirectory = thisPtr->m_sCurrentDirectory;
+		}
+		::LeaveCriticalSection(&thisPtr->m_lock);
+		if (bSetupNewDirectory && !sDirectory.IsEmpty()) {
+			waitHandles[2] = NULL;
+			waitHandles[3] = NULL;
+			waitHandles[2] = ::FindFirstChangeNotification(sDirectory, FALSE, FILE_NOTIFY_CHANGE_FILE_NAME);
 			if (waitHandles[2] != NULL && waitHandles[2] != INVALID_HANDLE_VALUE)
 			{
 				numHandles++;
-				waitHandles[3] = ::FindFirstChangeNotification(thisPtr->m_sCurrentDirectory, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+				waitHandles[3] = ::FindFirstChangeNotification(sDirectory, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
 				if (waitHandles[3] != NULL && waitHandles[3] != INVALID_HANDLE_VALUE) {
 					numHandles++;
+				} else {
+					// The last-write watch failed: close the file-name
+					// watch again instead of leaving half a pair behind,
+					// so the next loop iteration retries both from scratch.
+					waitHandles[3] = NULL;
+					::FindCloseChangeNotification(waitHandles[2]);
+					waitHandles[2] = NULL;
+					numHandles--;
 				}
+			} else {
+				waitHandles[2] = NULL;
 			}
 		}
-		::LeaveCriticalSection(&thisPtr->m_lock);
 
 		// wait for events on file system or wakeup event. While a displayed-file
 		// change is pending (H7b), wait only until 800 ms after the most recent
@@ -210,6 +234,7 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 					// discarded any change within 800 ms of the last posted
 					// message, which lost exactly the tail change.
 					bFileChangePending = true;
+					sPendingFile = sCurrentFile;
 					thisPtr->m_lastFileChangedTick = ::GetTickCount();
 				}
 				break;
@@ -218,7 +243,23 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 				// 800 ms passed with no new change: deliver the pending notification.
 				if (bFileChangePending) {
 					bFileChangePending = false;
-					::PostMessage(thisPtr->m_hTargetWindow, WM_DISPLAYED_FILE_CHANGED_ON_DISK, 0, 0);
+					// A2-8: the snapshot was taken up to 800 ms ago. If the
+					// user flipped to another image in the meantime, the
+					// pending notification belongs to the old file: re-check
+					// under the lock that the displayed file is still the
+					// one the notification was armed for, and drop it if
+					// not -- otherwise MainDlg would reload the new image
+					// for a change to the old one. A flip away and back to
+					// the same file still delivers, which is correct: the
+					// file did change on disk and it is current again.
+					bool bStillCurrentFile = false;
+					::EnterCriticalSection(&thisPtr->m_lock);
+					bStillCurrentFile = (thisPtr->m_sCurrentFile == sPendingFile);
+					::LeaveCriticalSection(&thisPtr->m_lock);
+					sPendingFile.Empty();
+					if (bStillCurrentFile) {
+						::PostMessage(thisPtr->m_hTargetWindow, WM_DISPLAYED_FILE_CHANGED_ON_DISK, 0, 0);
+					}
 				}
 				break;
 			default:
@@ -233,6 +274,7 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 			// a stale change for a file that is no longer watched.
 			if (bSetupNewDirectory) {
 				bFileChangePending = false;
+				sPendingFile.Empty();
 			}
 			if (waitHandles[2] != NULL && waitHandles[2] != INVALID_HANDLE_VALUE) {
 				::FindCloseChangeNotification(waitHandles[2]);

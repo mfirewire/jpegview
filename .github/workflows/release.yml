@@ -25,7 +25,7 @@ jobs:
       run: echo "short_sha=$(git rev-parse --short "${{ github.sha }}")" >> $env:GITHUB_ENV
     - name: Setup msbuild
       id: setup-msbuild-win32
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v3
       with:
         # Use any available VS 2022+
         vs-version: '[17.0,]'
@@ -84,7 +84,7 @@ jobs:
       run: echo "short_sha=$(git rev-parse --short "${{ github.sha }}")" >> $env:GITHUB_ENV
     - name: Setup msbuild
       id: setup-msbuild-x64
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v3
       with:
         # Use any available VS 2022+
         vs-version: '[17.0,]'

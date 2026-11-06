@@ -312,6 +312,7 @@ IF ERRORLEVEL 1 exit /b 1
 
 REM libpng won't build, requires 2019
 REM build-libpng-apng.bat
+REM NOTE: libjpegturbo above uses the committed zlib.lib (libpng-apng\lib\zlib.lib), so this commented-out libpng step is not an A4-2-style ordering hazard.
 
 REM jxl builds, but uses a call InitializeCriticalSectionEx which isn't supported, likely also related to threads... i "could" investigate, but it's not worth it IMHO... who's on XP who needs to read JXL anyways?!
 REM build-libjxl.bat

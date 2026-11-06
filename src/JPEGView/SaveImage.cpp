@@ -401,7 +401,7 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 					} else {
 						nEXIFBlockLenCorrection = 0;
 					}
-					delete[] pJPEGThumb;
+					TurboJpeg::Free(pJPEGThumb);
 				}
 				delete[] pDIBThumb;
 			}
@@ -649,6 +649,11 @@ static bool SavePNM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 		unsigned char* pSourcePixels = (unsigned char*)pData;
 		// Tight buffer, like QOIWrapper::Compress: strip the 4-byte row
 		// padding and swap BGR to RGB (grey: single luma channel).
+		// A3-2: format the header before allocating the pixel buffer:
+		// CStringA::Format can throw on OOM, and the catch below only
+		// closes fptr, so formatting after new would leak the buffer.
+		CStringA sHeader;
+		sHeader.Format(bGray ? "P5\n%d %d\n255\n" : "P6\n%d %d\n255\n", nWidth, nHeight);
 		size_t nSize = (size_t)nWidth * (size_t)nHeight * (size_t)nChannels;
 		unsigned char* pPixelData = new unsigned char[nSize];
 		for (int y = 0; y < nHeight; y++) {
@@ -664,8 +669,6 @@ static bool SavePNM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 				}
 			}
 		}
-		CStringA sHeader;
-		sHeader.Format(bGray ? "P5\n%d %d\n255\n" : "P6\n%d %d\n255\n", nWidth, nHeight);
 		bool bWriteOk = fwrite(sHeader, 1, (size_t)sHeader.GetLength(), fptr) == (size_t)sHeader.GetLength() &&
 			fwrite(pPixelData, 1, nSize, fptr) == nSize;
 		bool bCloseOk = (fclose(fptr) == 0);
@@ -839,6 +842,11 @@ static bool SavePBM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 		int nPaddedStride = Helpers::DoPadding(nWidth * 3, 4);
 		unsigned char* pSourcePixels = (unsigned char*)pData;
 		int nRowBytes = (nWidth + 7) / 8;
+		// A3-2: format the header before allocating the bit buffer:
+		// CStringA::Format can throw on OOM, and the catch below only
+		// closes fptr, so formatting after new would leak the buffer.
+		CStringA sHeader;
+		sHeader.Format("P4\n%d %d\n", nWidth, nHeight);
 		size_t nSize = (size_t)nRowBytes * (size_t)nHeight;
 		unsigned char* pBits = new unsigned char[nSize];
 		memset(pBits, 0, nSize);
@@ -850,8 +858,6 @@ static bool SavePBM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 				}
 			}
 		}
-		CStringA sHeader;
-		sHeader.Format("P4\n%d %d\n", nWidth, nHeight);
 		bool bWriteOk = fwrite(sHeader, 1, (size_t)sHeader.GetLength(), fptr) == (size_t)sHeader.GetLength() &&
 			fwrite(pBits, 1, nSize, fptr) == nSize;
 		bool bCloseOk = (fclose(fptr) == 0);
@@ -890,6 +896,8 @@ static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
 	  return -1;  // Failure
 
    Gdiplus::ImageCodecInfo* pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+   if (pImageCodecInfo == NULL)
+	  return -1;  // Failure
 
    Gdiplus::GetImageEncoders(num, size, pImageCodecInfo);
 

@@ -25,11 +25,23 @@ bool CPrintImage::Print(HWND hWnd, CJPEGImage * pImage, const CImageProcessingPa
 	}
 
 	if (m_pPrintParameters == NULL) {
-		m_pPrintParameters = new CPrintParameters(m_defaultMargin, m_defaultPrintWidth);
+		// A2-9: 'new CPrintParameters' can throw on allocation failure;
+		// Print runs on the UI thread (IDM_PRINT) with no try/catch
+		// above. Use nothrow; without parameters there is nothing to
+		// print, so report failure and let the caller skip the refresh.
+		m_pPrintParameters = new(std::nothrow) CPrintParameters(m_defaultMargin, m_defaultPrintWidth);
+		if (m_pPrintParameters == NULL) {
+			return false;
+		}
 	}
 
 	if (m_pPrinterSelectionDlg == NULL) {
-		m_pPrinterSelectionDlg = new CPrintDialogEx(PD_ALLPAGES | PD_USEDEVMODECOPIES | PD_NOPAGENUMS | PD_NOSELECTION | PD_NOCURRENTPAGE, hWnd);
+		// A2-9: same as above for 'new CPrintDialogEx'; without a
+		// printer dialog the print cannot start.
+		m_pPrinterSelectionDlg = new(std::nothrow) CPrintDialogEx(PD_ALLPAGES | PD_USEDEVMODECOPIES | PD_NOPAGENUMS | PD_NOSELECTION | PD_NOCURRENTPAGE, hWnd);
+		if (m_pPrinterSelectionDlg == NULL) {
+			return false;
+		}
 		HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
 		HRESULT res = m_pPrinterSelectionDlg->GetDefaults();
 		::SetCursor(hOldCursor);

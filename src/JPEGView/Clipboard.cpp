@@ -32,12 +32,38 @@ static void CopyFileNameTextToClipboard(LPCWSTR filename) {
 }
 
 void CClipboard::CopyImageToClipboard(HWND hWnd, CJPEGImage * pImage, LPCTSTR fileName) {
-	if (pImage == NULL || pImage->DIBPixelsLastProcessed(true) == NULL) {
+	if (pImage == NULL) {
+		return;
+	}
+	// A2-3 (R-10 follow-up): DIBPixelsLastProcessed(true) calls GetDIB,
+	// which can throw on allocation failure; this runs on the UI thread
+	// (IDM_COPY) with no try/catch above. Skip the copy on failure, as
+	// CopyFullImageToClipboard does below.
+	void* pDIBPixels = NULL;
+	try {
+		pDIBPixels = pImage->DIBPixelsLastProcessed(true);
+	} catch (...) {
+		return;
+	}
+	if (pDIBPixels == NULL) {
 		return;
 	}
 
 	pImage->EnableDimming(false);
-	DoCopy(hWnd, pImage->DIBWidth(), pImage->DIBHeight(), pImage->DIBPixelsLastProcessed(true), pImage->IsClipboardImage() ? NULL : fileName);
+	// EnableDimming(false) drops the cached DIB when dim rects exist
+	// (JPEGImage.cpp), so the DIB is generated again here -- and can
+	// throw again. Restore dimming before returning on failure.
+	try {
+		pDIBPixels = pImage->DIBPixelsLastProcessed(true);
+	} catch (...) {
+		pImage->EnableDimming(true);
+		return;
+	}
+	if (pDIBPixels == NULL) {
+		pImage->EnableDimming(true);
+		return;
+	}
+	DoCopy(hWnd, pImage->DIBWidth(), pImage->DIBHeight(), pDIBPixels, pImage->IsClipboardImage() ? NULL : fileName);
 	pImage->EnableDimming(true);
 }
 
@@ -80,7 +106,19 @@ void CClipboard::CopyFullImageToClipboard(HWND hWnd, CJPEGImage * pImage, const 
 }
 
 void CClipboard::CopyPathToClipboard(HWND hWnd, CJPEGImage* pImage, LPCTSTR fileName) {
-	if (pImage == NULL || pImage->DIBPixelsLastProcessed(true) == NULL) {
+	if (pImage == NULL) {
+		return;
+	}
+	// A2-3 (R-10 follow-up): see CopyImageToClipboard above. The DIB is
+	// only a "processed image present" gate here, but generating it can
+	// still throw on allocation failure, so the check is guarded too.
+	bool bHasDIB = false;
+	try {
+		bHasDIB = pImage->DIBPixelsLastProcessed(true) != NULL;
+	} catch (...) {
+		return;
+	}
+	if (!bHasDIB) {
 		return;
 	}
 	pImage->EnableDimming(false);

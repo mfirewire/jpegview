@@ -88,6 +88,16 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 	if (pRequest == NULL) {
 		// no request pending for this file, add to request queue and start async
 		pRequest = StartNewRequest(strFileName, nFrameIndex, processParams, forceFullSizeRAW);
+		if (pRequest == NULL) {
+			// A2-9: the request object (or its load request) could not be
+			// allocated. Report out-of-memory like any other failed load:
+			// MainDlg maps it to the "out of memory" message and shows no
+			// image, instead of dereferencing NULL below.
+			bOutOfMemory = true;
+			bExceptionError = false;
+			if (pbSizeLimitExceeded != NULL) *pbSizeLimitExceeded = false;
+			return NULL;
+		}
 		// wait with read ahead when direction changed - maybe user just wants to re-see last image
 		if (!bDirectionChanged && eDirection != NONE) {
 			// start parallel if more than one thread
@@ -279,6 +289,12 @@ CJPEGProvider::CImageRequest* CJPEGProvider::FindRequest(LPCTSTR strFileName, in
 
 CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
 	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams, forceFullSizeRAW);
+	// A2-9: NULL when the request could not be allocated; the caller (the
+	// OOM retry in RequestImage) already checks for NULL before touching
+	// pRequest.
+	if (pRequest == NULL) {
+		return NULL;
+	}
 	// ST-08: NULL on a failed wait (WAIT_FAILED) - the caller (the OOM
 	// retry in RequestImage) must check for it before touching pRequest.
 	if (!CWorkThread::WaitForEventWithPaintOnlyPump(pRequest->EventFinished)) {
@@ -314,11 +330,34 @@ CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, 
 #ifdef DEBUG
 	::OutputDebugString(_T("Start new request: ")); ::OutputDebugString(sFileName); ::OutputDebugString(_T("\n"));
 #endif
-	CImageRequest* pRequest = new CImageRequest(sFileName, nFrameIndex);
-	m_requestList.push_back(pRequest);
+	// A2-9: 'new CImageRequest' can throw on allocation failure; this runs
+	// on the UI thread (RequestImage / StartRequestAndWaitUntilReady) with
+	// no try/catch above. Use nothrow and report NULL instead -- both
+	// callers already handle a NULL request (RequestImage above,
+	// StartRequestAndWaitUntilReady's wait-failure path).
+	CImageRequest* pRequest = new(std::nothrow) CImageRequest(sFileName, nFrameIndex);
+	if (pRequest == NULL) {
+		return NULL;
+	}
+	try {
+		m_requestList.push_back(pRequest);
+	} catch (...) {
+		// The list node allocation failed: nothing references the request yet.
+		delete pRequest;
+		return NULL;
+	}
 	pRequest->HandlingThread = SearchThreadForNewRequest();
+	// AsyncLoad returns -1 when its own 'new CRequest' fails (see
+	// ImageLoadThread.cpp): the request was never queued, so its event
+	// would never fire and RequestImage would wait forever. Drop the
+	// request and report NULL instead of leaving a dead entry behind.
 	pRequest->Handle = pRequest->HandlingThread->AsyncLoad(pRequest->FileName, nFrameIndex,
 		processParams, m_hHandlerWnd, pRequest->EventFinished, forceFullSizeRAW);
+	if (pRequest->Handle < 0) {
+		m_requestList.remove(pRequest);
+		delete pRequest;
+		return NULL;
+	}
 	return pRequest;
 }
 

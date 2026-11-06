@@ -122,10 +122,17 @@ bool CZoomNavigatorCtl::OnMouseMove(int nOldX, int nOldY) {
 void CZoomNavigatorCtl::OnPaint(CPaintDC& paintDC, CRectF visRectZoomNavigator, const CImageProcessingParams* pImageProcParams, 
 								EProcessingFlags eProcessingFlags, double dRotationAngle, const CTrapezoid* pTrapezoid) {
 	if (IsVisible()) {
-		m_zoomNavigator.PaintZoomNavigator(m_pMainDlg->GetCurrentImage(), visRectZoomNavigator,
-			CZoomNavigator::GetNavigatorRect(m_pMainDlg->GetCurrentImage(), m_pImageProcPanel->PanelRect(), m_pNavigationPanel->PanelRect()),
-			m_pMainDlg->GetMousePos(), *pImageProcParams, eProcessingFlags, 
-			dRotationAngle, pTrapezoid, paintDC);
+		try {
+			m_zoomNavigator.PaintZoomNavigator(m_pMainDlg->GetCurrentImage(), visRectZoomNavigator,
+				CZoomNavigator::GetNavigatorRect(m_pMainDlg->GetCurrentImage(), m_pImageProcPanel->PanelRect(), m_pNavigationPanel->PanelRect()),
+				m_pMainDlg->GetMousePos(), *pImageProcParams, eProcessingFlags, 
+				dRotationAngle, pTrapezoid, paintDC);
+		} catch (...) {
+			// A2-4 (R-10 leak): PaintZoomNavigator reaches
+			// GetThumbnailDIB*, whose thumbnail allocation can throw
+			// on OOM. Skip the navigator paint, like the main DIB
+			// paint above it does on failure (MainDlg.cpp).
+		}
 	} else {
 		m_zoomNavigator.ClearLastPanRectPoint();
 	}

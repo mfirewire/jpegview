@@ -129,33 +129,56 @@ bool ParseLengthAttr(const char* tag, size_t tagLen, const char* attrName, float
 }
 
 // Parse the viewBox="minx miny w h" attribute; returns the w/h pair.
+// A1-3: like ParseLengthAttr, scan every "viewBox" hit in the tag: a hit
+// only starts an attribute when the char before it is a space, quote,
+// '<' or the tag start (so "data-viewBox" is skipped), and a hit that
+// fails to parse (e.g. inside an attribute value, where '=' does not
+// follow) resumes the search at hit+1 instead of failing outright.
 bool ParseViewBox(const char* tag, size_t tagLen, float& w, float& h) {
 	const char* p = tag;
 	const char* end = tag + tagLen;
-	const char* hit = FindBytes(p, (size_t)(end - p), "viewBox", 7);
-	if (hit == NULL)
-		return false;
-	p = hit + 7;
-	while (p < end && IsSpace(*p))
-		p++;
-	if (p >= end || *p != '=')
-		return false;
-	p++;
-	while (p < end && IsSpace(*p))
-		p++;
-	if (p >= end || (*p != '"' && *p != '\''))
-		return false;
-	p++;
-	float vals[4];
-	for (int i = 0; i < 4; i++) {
-		while (p < end && (IsSpace(*p) || *p == ','))
-			p++;
-		if (!ParseFloat(p, end, vals[i]))
+	while (p < end) {
+		const char* hit = FindBytes(p, (size_t)(end - p), "viewBox", 7);
+		if (hit == NULL)
 			return false;
+		if (hit != tag && !IsSpace(hit[-1]) && hit[-1] != '"' && hit[-1] != '\'' && hit[-1] != '<') {
+			p = hit + 1;
+			continue;
+		}
+		const char* q = hit + 7;
+		while (q < end && IsSpace(*q))
+			q++;
+		if (q >= end || *q != '=') {
+			p = hit + 1;
+			continue;
+		}
+		q++;
+		while (q < end && IsSpace(*q))
+			q++;
+		if (q >= end || (*q != '"' && *q != '\'')) {
+			p = hit + 1;
+			continue;
+		}
+		q++;
+		float vals[4];
+		bool ok = true;
+		for (int i = 0; i < 4; i++) {
+			while (q < end && (IsSpace(*q) || *q == ','))
+				q++;
+			if (!ParseFloat(q, end, vals[i])) {
+				ok = false;
+				break;
+			}
+		}
+		if (!ok) {
+			p = hit + 1;
+			continue;
+		}
+		w = vals[2];
+		h = vals[3];
+		return true;
 	}
-	w = vals[2];
-	h = vals[3];
-	return true;
+	return false;
 }
 
 // Intrinsic size of the SVG, in pixels. width/height attributes win;
