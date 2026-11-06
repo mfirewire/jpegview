@@ -3,6 +3,7 @@
 #include "dcraw_mod.h"
 #include "TJPEGWrapper.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "RawMetadata.h"
 
 #define NODEPS
@@ -1379,7 +1380,8 @@ void CLASS ppm_thumb()
 void CLASS ppm_thumb (CJPEGImage** Image, bool& bOutOfMemory)
 {
     byte *thumb;
-    if ((double)thumb_width * thumb_height > MAX_IMAGE_PIXELS) {
+    // R-04/P2-5 (minimal sync): the threshold now follows MaxImagePixelsMP, but the dcraw thumb path has no size-limit channel (all thumb writers share one function-pointer type), so an over-cap thumbnail still reports as out-of-memory here. The LibRaw path in the same request reports the size-limit verdict.
+    if ((double)thumb_width * thumb_height > (double)CSettingsProvider::This().MaxImagePixels()) {
         bOutOfMemory = true;
         return;
     }
@@ -1442,7 +1444,8 @@ void CLASS ppm16_thumb(CJPEGImage** Image, bool& bOutOfMemory)
 {
     byte *thumb;
 
-    if ((double)thumb_width * thumb_height > MAX_IMAGE_PIXELS) {
+    // R-04/P2-5 (minimal sync): the threshold now follows MaxImagePixelsMP, but the dcraw thumb path has no size-limit channel (all thumb writers share one function-pointer type), so an over-cap thumbnail still reports as out-of-memory here. The LibRaw path in the same request reports the size-limit verdict.
+    if ((double)thumb_width * thumb_height > (double)CSettingsProvider::This().MaxImagePixels()) {
         bOutOfMemory = true;
         return;
     }
@@ -10653,7 +10656,9 @@ void CLASS jpeg_thumb(CJPEGImage** Image, bool& bOutOfMemory)
 
     int nWidth, nHeight, nBPP;
     TJSAMP eChromoSubSampling;
-    void* pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nBPP, eChromoSubSampling, bOutOfMemory, thumb, thumb_length);
+    // R-04/P2-5: TurboJpeg reports a pixel-cap rejection through its own flag; the dcraw thumb path has no channel to surface it, so a local dummy is passed here.
+    bool bThumbSizeLimit = false;
+    void* pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nBPP, eChromoSubSampling, bOutOfMemory, bThumbSizeLimit, thumb, thumb_length);
 
     if (pPixelData != NULL && (nBPP == 3 || nBPP == 1))
     {

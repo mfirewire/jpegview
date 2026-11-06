@@ -4,17 +4,8 @@
 #include "avif/avif.h"
 #include "BasicProcessing.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
-
-struct AvifReader::avif_cache {
-	avifDecoder* decoder;
-	avifRGBImage rgb;
-	uint8_t* data;
-	size_t data_size;
-	void* transform;
-};
-
-AvifReader::avif_cache AvifReader::cache = { 0 };
 
 void* AvifReader::ReadImage(int& width,
 	int& height,
@@ -25,6 +16,7 @@ void* AvifReader::ReadImage(int& width,
 	int& frame_time,
 	void*& exif_chunk,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -77,8 +69,13 @@ void* AvifReader::ReadImage(int& width,
 			uint32_t nHeaderHeight = cache.decoder->image->height;
 			if (nHeaderWidth < 1 || nHeaderHeight < 1 ||
 				nHeaderWidth > (uint32_t)MAX_IMAGE_DIMENSION || nHeaderHeight > (uint32_t)MAX_IMAGE_DIMENSION ||
-				(double)nHeaderWidth * nHeaderHeight > MAX_IMAGE_PIXELS ||
 				!IsImageBufferSizeOk((size_t)nHeaderWidth * nchannels, (size_t)nHeaderHeight)) {
+				DeleteCache();
+				return NULL;
+			}
+			// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory. The dimension/byte checks above stay plain rejections.
+			if ((double)nHeaderWidth * nHeaderHeight > (double)CSettingsProvider::This().MaxImagePixels()) {
+				isSizeLimitExceeded = true;
 				DeleteCache();
 				return NULL;
 			}
@@ -107,8 +104,13 @@ void* AvifReader::ReadImage(int& width,
 
 	// This file used to have no dimension or pixel check at all; libavif will hand
 	// back whatever the container declares.
-	if (width < 1 || height < 1 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION
-			|| (double)width * height > MAX_IMAGE_PIXELS) {
+	if (width < 1 || height < 1 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+		DeleteCache();
+		return NULL;
+	}
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if ((double)width * height > (double)CSettingsProvider::This().MaxImagePixels()) {
+		isSizeLimitExceeded = true;
 		DeleteCache();
 		return NULL;
 	}

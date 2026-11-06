@@ -12,6 +12,7 @@ public:
 						 int &frame_count, // number of top-level images
 					     void* &exif_chunk, // Pointer to Exif data (must be freed by caller)
 						 bool &outOfMemory, // set to true when no memory to read image
+						 bool &isSizeLimitExceeded, // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 						 int frame_index, // index of requested frame
 						 const void *buffer, // memory address containing heic compressed data.
 						 int sizebytes); // size of heic compressed data.

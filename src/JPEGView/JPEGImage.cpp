@@ -145,26 +145,14 @@ CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, 
 	m_dRotationLQ = 0.0;
 	m_bTrapezoidValid = false;
 
-	// E5: create the LDC object only partially constructed when the LDC
-	// feature is off (LocalDensityCorrection setting, default false). The
-	// partial ctor still builds the point-sampled image, the histogram and
-	// the pixel hash - all needed at load time for the parameter DB and
-	// auto-contrast - but it skips CreateLDCMap() (map, smoothing, sunset
-	// scan). The map is built on first real use by VerifyFullyConstructed()
-	// (see ApplyCorrectionLUTandLDC), so images that are never displayed
-	// with LDC never pay for it. With LDC on, construction is unchanged.
-	m_pLDC = (pLDC == NULL) ? (new CLocalDensityCorr(*this, CSettingsProvider::This().LocalDensityCorrection())) : pLDC;
+	// Create the LDC object on the image
+	m_pLDC = (pLDC == NULL) ? (new CLocalDensityCorr(*this, true)) : pLDC;
 	m_bLDCOwned = pLDC == NULL;
 	if (nJPEGHash == 0) {
 		// Use the decompressed pixel hash in this case
 		m_nPixelHash = m_pLDC->GetPixelHash();
 	}
-	// E5: the lighten-shadow factor needs the sunset score, which only exists
-	// once the LDC map is built, so it is no longer computed here. It starts
-	// neutral (1.0) and is computed on first use at the scaling sites below,
-	// only when LDC is actually enabled for this image (VerifyFullyConstructed
-	// runs first there). No reader runs between construction and those sites.
-	m_fLightenShadowFactor = 1.0f;
+	m_fLightenShadowFactor = (1.0f - m_pLDC->GetHistogram()->IsNightShot())*(1.0f - m_pLDC->IsSunset());
 
 	// Initialize to INI value, may be overriden later by parameter DB
 	memcpy(m_fColorCorrectionFactors, CSettingsProvider::This().ColorCorrectionAmounts(), sizeof(m_fColorCorrectionFactors));
@@ -268,8 +256,7 @@ void* CJPEGImage::GetDIBUnsharpMasked(CSize clippingSize, CPoint targetOffset,
 const CHistogram* CJPEGImage::GetOriginalHistogram() {
 	assert(!m_bIsThumbnailImage);
 	if (m_pLDC == NULL) {
-		// E5: partial construction is enough here - only the histogram is used.
-		m_pLDC = new CLocalDensityCorr(*this, false);
+		m_pLDC = new CLocalDensityCorr(*this, true);
 	}
 	return m_pLDC->GetHistogram();
 }
@@ -884,13 +871,6 @@ void CJPEGImage::RestoreInitialParameters(LPCTSTR sFileName, const CImageProcess
 		m_eProcFlagsInitial = bKeepParams ? procFlags : GetProcFlagsIncludeExcludeFolders(sFileName, procFlags);
 		procFlags = m_eProcFlagsInitial;
 		m_imageProcParamsInitial = imageProcParams;
-		// E5: lighten-shadow factor, computed on first use when LDC is enabled
-		// for this image (it needs the LDC map's sunset score). When LDC is off
-		// the factor stays neutral (1.0) and no map is built for it.
-		if (::GetProcessingFlag(m_eProcFlagsInitial, PFLAG_LDC) && m_pLDC != NULL) {
-			m_pLDC->VerifyFullyConstructed();
-			m_fLightenShadowFactor = (1.0f - m_pLDC->GetHistogram()->IsNightShot())*(1.0f - m_pLDC->IsSunset());
-		}
 		m_imageProcParamsInitial.LightenShadows *= m_fLightenShadowFactor;
 	}
 }
@@ -906,18 +886,10 @@ void CJPEGImage::GetFileParams(LPCTSTR sFileName, EProcessingFlags& eFlags, CIma
 			dbEntry->WriteToProcessParams(params, eFlags, notUsed);
 		}
 	} else {
+		params.LightenShadows *= m_fLightenShadowFactor;
 		if (!::GetProcessingFlag(eFlags, PFLAG_KeepParams)) {
 			eFlags = GetProcFlagsIncludeExcludeFolders(sFileName, eFlags);
 		}
-		// E5: as in RestoreInitialParameters, but this method is const so the
-		// factor is computed into a local (VerifyFullyConstructed on the
-		// pointee is allowed here; the member itself cannot be updated).
-		float fLightenShadowFactor = m_fLightenShadowFactor;
-		if (::GetProcessingFlag(eFlags, PFLAG_LDC) && m_pLDC != NULL) {
-			m_pLDC->VerifyFullyConstructed();
-			fLightenShadowFactor = (1.0f - m_pLDC->GetHistogram()->IsNightShot())*(1.0f - m_pLDC->IsSunset());
-		}
-		params.LightenShadows *= fLightenShadowFactor;
 	}
 }
 
@@ -932,27 +904,12 @@ void CJPEGImage::SetFileDependentProcessParams(LPCTSTR sFileName, CProcessParams
 			dbEntry->WriteToGeometricParams(pParams->Zoom, pParams->Offsets, SizeAfterRotation(pParams->RotationParams),
 				dbEntry->IsStoredRelativeToScreenSize() ? pParams->MonitorSize : CSize(pParams->TargetWidth, pParams->TargetHeight));
 		}
-		// E5: the factor is not applied to DB params, but MainDlg reads it
-		// (special-processing flag, landscape mode), so compute it here too
-		// when LDC is enabled for this image - exactly as the eager ctor
-		// computation did before. When LDC is off it stays neutral (1.0).
-		if (::GetProcessingFlag(pParams->ProcFlags, PFLAG_LDC) && m_pLDC != NULL) {
-			m_pLDC->VerifyFullyConstructed();
-			m_fLightenShadowFactor = (1.0f - m_pLDC->GetHistogram()->IsNightShot())*(1.0f - m_pLDC->IsSunset());
-		}
 	} else {
 		pParams->RotationParams.Rotation = GetRotationFromEXIF(pParams->RotationParams.Rotation);
+		pParams->ImageProcParams.LightenShadows *= m_fLightenShadowFactor;
 		if (!::GetProcessingFlag(pParams->ProcFlags, PFLAG_KeepParams)) {
 			pParams->ProcFlags = GetProcFlagsIncludeExcludeFolders(sFileName, pParams->ProcFlags);
 		}
-		// E5: lighten-shadow factor, computed on first use when LDC is enabled
-		// for this image (it needs the LDC map's sunset score). The flag
-		// adjustment above runs first so a folder-included LDC is honoured.
-		if (::GetProcessingFlag(pParams->ProcFlags, PFLAG_LDC) && m_pLDC != NULL) {
-			m_pLDC->VerifyFullyConstructed();
-			m_fLightenShadowFactor = (1.0f - m_pLDC->GetHistogram()->IsNightShot())*(1.0f - m_pLDC->IsSunset());
-		}
-		pParams->ImageProcParams.LightenShadows *= m_fLightenShadowFactor;
 	}
 
 	m_nInitialRotation = pParams->RotationParams.Rotation;
@@ -1224,9 +1181,7 @@ void* CJPEGImage::ApplyCorrectionLUTandLDC(const CImageProcessingParams & imageP
 
 	// Calculate LDC if needed
 	if (m_pLDC == NULL) {
-		// E5: partial construction; VerifyFullyConstructed() below builds the
-		// map when (and only when) LDC is actually applied to this DIB.
-		m_pLDC = new CLocalDensityCorr(*this, false);
+		m_pLDC = new CLocalDensityCorr(*this, true);
 		bLDCParametersChanged = true;
 	}
 	if (bLDC) {
@@ -1533,8 +1488,7 @@ void CJPEGImage::InvalidateAllCachedPixelData() {
 
 CJPEGImage* CJPEGImage::CreateThumbnailImage() {
 	if (m_pLDC == NULL) {
-		// E5: partial construction; only the point-sampled image is used here.
-		m_pLDC = new CLocalDensityCorr(*this, false);
+		m_pLDC = new CLocalDensityCorr(*this, true);
 	}
 	void* pPixels = NULL;
 	int nWidth, nHeight;

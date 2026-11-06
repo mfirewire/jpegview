@@ -1,0 +1,82 @@
+name: Action - Regenerate ThorVG import library with LIB.EXE (R-06)
+description: >
+  Regenerate src/JPEGView/libthorvg/lib{,64}/libthorvg-1.lib from the
+  checked-in .def files with MSVC LIB.EXE, before msbuild links
+  JPEGView.exe. The committed .lib files are dlltool-generated and carry
+  no SAFESEH info, so a Win32 link with /SAFESEH fails with LNK2026 /
+  LNK1281 against them; a LIB.EXE-generated import library contains
+  only thunks and is SAFESEH-compatible. The regenerated .lib is also
+  uploaded as an artifact so it can be committed back into the repo
+  (one-time fetch-and-commit; CI never commits by itself).
+
+inputs:
+  platform-arch:
+    description: Architecture for building (Win32 or x64, msbuild Platform names)
+    required: true
+    type: string
+
+  build-config:
+    description: Debug/Release, used only to name the uploaded artifact
+    required: false
+    type: string
+    default: Release
+
+
+runs:
+  using: composite
+  steps:
+    - name: Regenerate ThorVG import library with LIB.EXE (R-06)
+      shell: powershell
+      run: |
+        # R-06 (a): LIB.EXE from the DLL export table, via the checked-in .def.
+        # microsoft/setup-msbuild only puts msbuild on PATH, NOT lib.exe, so
+        # locate the VC tools through vswhere (same mechanism the build
+        # workflow already uses for ATL) instead of assuming PATH.
+        # Fail-loud throughout: no continue-on-error anywhere on this step.
+        # If LIB.EXE rejects the .def, STOP here and report - do NOT fall
+        # back to LoadLibrary/GetProcAddress (R-06 option (b) is unapproved).
+        $archMap = @{ "Win32" = "x86"; "x86" = "x86"; "x64" = "x64" }
+        $target = $archMap["${{ inputs.platform-arch }}"]
+        if (-not $target) { throw "regen-thorvg-lib: unsupported platform-arch '${{ inputs.platform-arch }}' (want Win32 or x64)" }
+        $defFile = "src\JPEGView\libthorvg\JPEGView-thorvg-$target.def"
+        if ($target -eq "x86") { $outLib = "src\JPEGView\libthorvg\lib\libthorvg-1.lib" } else { $outLib = "src\JPEGView\libthorvg\lib64\libthorvg-1.lib" }
+        if (-not (Test-Path $defFile)) { throw "regen-thorvg-lib: .def file not found: $defFile" }
+        $vsInstallDir = (vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
+        if (-not $vsInstallDir) { throw "regen-thorvg-lib: vswhere found no Visual Studio installation" }
+        $libExe = $null
+        foreach ($hostArch in @("Hostx64", "Hostx86")) {
+          $candidate = Get-ChildItem -Path "$vsInstallDir\VC\Tools\MSVC\*\bin\$hostArch\$target\lib.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($candidate) { $libExe = $candidate.FullName; break }
+        }
+        if (-not $libExe) { throw "regen-thorvg-lib: lib.exe for target $target not found under $vsInstallDir" }
+        Write-Output "regen-thorvg-lib: using $libExe"
+        & $libExe /def:$defFile /out:$outLib /machine:$target
+        if ($LASTEXITCODE -ne 0) { throw "regen-thorvg-lib: LIB.EXE failed with exit code $LASTEXITCODE - see the log above (LNK1281 / LIB error). Do NOT switch to the LoadLibrary fallback; stop and report." }
+        $libFile = Get-Item $outLib -ErrorAction SilentlyContinue
+        if (-not $libFile -or $libFile.Length -eq 0) { throw "regen-thorvg-lib: regenerated import library missing or empty: $outLib" }
+        Write-Output "regen-thorvg-lib: regenerated $outLib ($($libFile.Length) bytes)"
+        # Sanity check, warning-only (the link step is the real gate, and
+        # dumpbin's listing format must not spuriously fail the build):
+        # the .def lists 410 exports, 191 of them tvg_* C API symbols.
+        $dumpbin = Join-Path (Split-Path $libExe -Parent) "dumpbin.exe"
+        $exports = & $dumpbin /exports $outLib
+        if ($LASTEXITCODE -ne 0) { throw "regen-thorvg-lib: dumpbin /exports failed on $outLib (exit $LASTEXITCODE)" }
+        $tvgCount = @($exports | Select-String -Pattern "tvg_" -SimpleMatch).Count
+        Write-Output "regen-thorvg-lib: dumpbin /exports lists $tvgCount tvg_* symbols (expect 191)"
+        if ($tvgCount -ne 191) { Write-Output "::warning::regen-thorvg-lib: tvg_* count $tvgCount != 191 - .def/DLL drift? Investigate before trusting this .lib; the link step below is the deciding check." }
+
+    - name: Upload regenerated Win32 ThorVG import library
+      if: ${{ inputs.platform-arch == 'Win32' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: thorvg-importlib-Win32-${{ inputs.build-config }}
+        path: src/JPEGView/libthorvg/lib/libthorvg-1.lib
+        if-no-files-found: error
+
+    - name: Upload regenerated x64 ThorVG import library
+      if: ${{ inputs.platform-arch == 'x64' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: thorvg-importlib-x64-${{ inputs.build-config }}
+        path: src/JPEGView/libthorvg/lib64/libthorvg-1.lib
+        if-no-files-found: error

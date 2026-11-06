@@ -46,40 +46,6 @@
  *
  */
 
-struct PngReader::png_cache {
-	png_structp png_ptr;
-	png_infop info_ptr;
-	png_uint_32 w0;
-	png_uint_32 h0;
-	png_uint_32 x0;
-	png_uint_32 y0;
-	unsigned short delay_num;
-	unsigned short delay_den;
-	unsigned char dop;
-	unsigned char bop;
-	unsigned int first;
-	png_bytepp rows_image;
-	png_bytepp rows_frame;
-	unsigned char* p_image;
-	unsigned char* p_frame;
-	unsigned char* p_temp;
-	size_t size;
-	unsigned int width;
-	unsigned int height;
-	unsigned int channels;
-	unsigned int frame_index;
-	png_uint_32 frame_count;
-	void* buffer;
-	size_t buffer_size;
-	size_t buffer_offset;
-	// Transform from the iCCP profile this file carries to sRGB, NULL when the
-	// file has none, when it already is sRGB or when the setting is off. Built
-	// once per image: every frame of an APNG goes through the same transform.
-	void* icc_transform;
-};
-
-PngReader::png_cache PngReader::cache = { 0 };
-
 #ifdef PNG_APNG_SUPPORTED
 void BlendOver(unsigned char** rows_dst, unsigned char** rows_src, unsigned int x, unsigned int y, unsigned int w, unsigned int h)
 {
@@ -114,6 +80,22 @@ void BlendOver(unsigned char** rows_dst, unsigned char** rows_src, unsigned int 
 	}
 }
 #endif
+
+// libpng's read callback: a plain function, so it recovers the reader from the
+// io_ptr (see BeginReading) and reads through that thread's cache.
+void PngReader::ReadDataCallback(png_structp png_ptr, png_bytep outbuffer, png_size_t sizebytes)
+{
+	PngReader* pThis = (PngReader*)png_get_io_ptr(png_ptr);
+	if (pThis == NULL)
+		png_error(png_ptr, "png_get_io_ptr returned NULL");
+	else if (pThis->cache.buffer_offset + sizebytes > pThis->cache.buffer_size)
+		png_error(png_ptr, "Attempted to read out of bounds");
+	else
+	{
+		memcpy(outbuffer, (char*)pThis->cache.buffer + pThis->cache.buffer_offset, sizebytes);
+		pThis->cache.buffer_offset += sizebytes;
+	}
+}
 
 // The libpng calls that can raise a png_error live here so that setjmp and the
 // call that longjmps are in the same stack frame. Before this the setjmp sat in
@@ -202,7 +184,7 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 	return pixels;
 }
 
-bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
+bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, bool& isSizeLimitExceeded)
 {
 	unsigned int    width, height, channels, rowbytes, j;
 	size_t          size;
@@ -231,20 +213,9 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 		// skip png signature since we already checked it
 		png_set_sig_bytes(png_ptr, 8);
 		// custom read function so we can read from memory
-		png_rw_ptr read_data_fn = [](png_structp png_ptr, png_bytep outbuffer, png_size_t sizebytes)
-		{
-			png_voidp io_ptr = png_get_io_ptr(png_ptr);
-			if (io_ptr == NULL)
-				png_error(png_ptr, "png_get_io_ptr returned NULL");
-			else if (cache.buffer_offset + sizebytes > cache.buffer_size)
-				png_error(png_ptr, "Attempted to read out of bounds");
-			else
-			{
-				memcpy(outbuffer, (char*)io_ptr + cache.buffer_offset, sizebytes);
-				cache.buffer_offset += sizebytes;
-			}
-		};
-		png_set_read_fn(png_ptr, (char*)buffer, read_data_fn);
+		// The compressed bytes live in cache.buffer; the callback reaches them
+		// (and the read offset) through the reader passed as io_ptr.
+		png_set_read_fn(png_ptr, this, ReadDataCallback);
 		png_read_info(png_ptr, info_ptr);
 		png_set_expand(png_ptr);
 		png_set_strip_16(png_ptr);
@@ -279,9 +250,10 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory)
 			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 			return false;
 		}
-		if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
+		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+		if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
 			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-			outOfMemory = true;
+			isSizeLimitExceeded = true;
 			return false;
 		}
 		channels = png_get_channels(png_ptr, info_ptr);
@@ -389,6 +361,7 @@ void* PngReader::ReadImage(int& width,
 	int& frame_time,
 	void*& exif_chunk,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	void* buffer,
 	size_t sizebytes)
 {
@@ -407,7 +380,7 @@ void* PngReader::ReadImage(int& width,
 	sizebytes = cache.buffer_size;
 	if (!cache.png_ptr || cache.frame_index == 0) {
 		DeleteCacheInternal(false);
-		if (!buffer || !BeginReading(buffer, sizebytes, outOfMemory)) {
+		if (!buffer || !BeginReading(buffer, sizebytes, outOfMemory, isSizeLimitExceeded)) {
 			return NULL;
 		}
 

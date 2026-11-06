@@ -43,6 +43,17 @@ public:
 	// Aborts the thread immediately. Leaves an undefined state - only call on process termination.
 	void Abort();
 
+	// Waits for hEvent while pumping window messages, so the UI does not
+	// freeze when a decode is very slow. Only repaint messages (WM_PAINT)
+	// are dispatched: keys, timers, commands and close messages stay queued
+	// until the wait returns, so no GotoImage / CleanupAndTerminate can run
+	// re-entrantly while a provider method is waiting (ST-08/R-02). Sent
+	// messages are woken for (QS_SENDMESSAGE) and dispatched by PeekMessage
+	// as a side effect, so a SendMessage sender cannot deadlock on the wait.
+	// Returns true when the event was signaled, false on WAIT_FAILED (e.g.
+	// the event handle was closed while waiting) or a NULL handle. A false
+	// return must make the caller bail out without touching the request.
+	static bool WaitForEventWithPaintOnlyPump(HANDLE hEvent);
 protected:
 
 	// Posts the request on the request queue and waits until the request is processed.

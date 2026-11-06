@@ -111,7 +111,7 @@ static inline unsigned int TellFile(HANDLE file) {
 	return ret;
 }
 
-CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
+CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& bSizeLimitExceeded)
 {
 	HANDLE hFile;
 	hFile = ::CreateFile(strFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -150,10 +150,11 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 		// Read width and height
 		unsigned int nHeight = ReadUIntFromFile(hFile);
 		unsigned int nWidth = ReadUIntFromFile(hFile);
-		if ((double)nHeight * nWidth > MAX_IMAGE_PIXELS) {
-			bOutOfMemory = true;
+		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+		if ((double)nHeight * nWidth > (double)CSettingsProvider::This().MaxImagePixels()) {
+			bSizeLimitExceeded = true;
 		}
-		ThrowIf(bOutOfMemory || max(nHeight, nWidth) > MAX_IMAGE_DIMENSION || !min(nHeight, nWidth));
+		ThrowIf(bSizeLimitExceeded || max(nHeight, nWidth) > MAX_IMAGE_DIMENSION || !min(nHeight, nWidth));
 
 		// PSD can have bit depths of 1, 2, 4, 8, 16, 32
 		unsigned short nBitDepth = ReadUShortFromFile(hFile);
@@ -501,7 +502,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory)
 };
 
 
-CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory)
+CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& bSizeLimitExceeded)
 {
 	HANDLE hFile;
 	hFile = ::CreateFile(strFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -571,7 +572,7 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory)
 					SeekFile(hFile, -nResourceSize);
 
 
-					pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nChannels, eChromoSubSampling, bOutOfMemory, pBuffer, nJpegSize);
+					pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nChannels, eChromoSubSampling, bOutOfMemory, bSizeLimitExceeded, pBuffer, nJpegSize);
 					break;
 
 				case 0x0422: // 0x0422 1058 (Photoshop 7.0) EXIF data 1. See http://www.kodak.com/global/plugins/acrobat/en/service/digCam/exifStandard2.pdf

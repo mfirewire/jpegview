@@ -8,6 +8,7 @@ public:
 		int& height,  // height of the image loaded.
 		int& bpp,     // BYTES (not bits) PER PIXEL.
 		bool& outOfMemory, // set to true when no memory to read image
+		bool& isSizeLimitExceeded, // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 		const void* buffer, // memory address containing qoi compressed data.
 		int sizebytes); // size of qoi compressed data.
 

@@ -12,6 +12,7 @@ public:
 						 int &bpp,     // BYTES (not bits) PER PIXEL.
 						 TJSAMP &chromoSubsampling, // chromo subsampling of image
 						 bool &outOfMemory, // set to true when no memory to read image
+						 bool &isSizeLimitExceeded, // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 						 const void *buffer, // memory address containing jpeg compressed data.
 						 int sizebytes); // size of jpeg compressed data.
 

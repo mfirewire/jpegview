@@ -41,12 +41,53 @@ void CWorkThread::ProcessAndWait(CRequestBase* pRequest) {
 	}
 
 	ProcessAsync(pRequest);
-	::WaitForSingleObject(pRequest->EventFinished, INFINITE);
+	// ST-07/R-03: the only caller is CImageLoadThread::ReleaseFile, which
+	// runs on the UI thread via CJPEGProvider::ClearRequest, so the old
+	// unpumped INFINITE wait froze the UI whenever a slow decode was in
+	// progress. Pump repaint messages while waiting; the result is ignored
+	// (the release is best-effort - on a failed wait the request is still
+	// marked deleted below so the queue can drain).
+	WaitForEventWithPaintOnlyPump(pRequest->EventFinished);
 
 	if (bCreateEvent) {
 		::CloseHandle(pRequest->EventFinished);
 	}
 	pRequest->Deleted = true; // make sure the request is removed from the queue
+}
+
+// Shared by the UI-thread waits in CJPEGProvider (RequestImage,
+// StartRequestAndWaitUntilReady) and by ProcessAndWait above, so the three
+// wait points cannot drift apart again (ST-07/ST-08).
+bool CWorkThread::WaitForEventWithPaintOnlyPump(HANDLE hEvent) {
+	if (hEvent == NULL) {
+		return false;
+	}
+	for (;;) {
+		DWORD dwRet = ::MsgWaitForMultipleObjects(1, &hEvent, FALSE, INFINITE, QS_PAINT | QS_SENDMESSAGE);
+		if (dwRet == WAIT_OBJECT_0) {
+			return true;
+		}
+		if (dwRet == WAIT_OBJECT_0 + 1) {
+			MSG msg;
+			// ST-08/R-02: repaint only. The old QS_ALLINPUT + unfiltered
+			// PeekMessage dispatched keys, timers, commands and WM_CLOSE
+			// here, so a page key during a slow decode re-entered GotoImage
+			// and Esc/close deleted the provider under the waiting
+			// RequestImage. Those messages stay queued now and are handled
+			// by the main loop after the wait returns, with the provider
+			// still alive. WM_PAINT is safe to dispatch: OnPaint only draws
+			// m_pCurrentImage (NULL-safe) and never touches the provider.
+			while (::PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE)) {
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+			continue;
+		}
+		// WAIT_FAILED (e.g. the event handle was closed while waiting) or
+		// any other unexpected result: return instead of spinning. The
+		// caller must bail out without touching the request.
+		return false;
+	}
 }
 
 void CWorkThread::ProcessAsync(CRequestBase* pRequest) {

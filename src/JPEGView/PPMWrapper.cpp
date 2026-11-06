@@ -32,11 +32,13 @@
 #define STBI_NO_PIC
 #include "stb/stb_image.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 
 void* PPMReader::ReadImage(int& width,
 	int& height,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -133,7 +135,7 @@ void* PPMReader::ReadImage(int& width,
 	// F-07 size gate, before stbi_load_from_memory: the only allocation so
 	// far is a copy of the input file (bounded by the file size, not the
 	// header). The byte gate is the one that bites for 65535x65535: the
-	// pixel count alone sits exactly at MAX_IMAGE_PIXELS on x64.
+	// pixel count alone sits exactly at the default pixel cap (100 MP).
 	if (bHdrOk) {
 		// Gate on the padded 3-byte BGR output stride (as HDRWrapper does):
 		// it bounds both the stb raster and the output buffer, so even a
@@ -143,8 +145,9 @@ void* PPMReader::ReadImage(int& width,
 			delete[] pSwappedBuffer;
 			return NULL;
 		}
-		if (abs((double)nHdrWidth * nHdrHeight) > MAX_IMAGE_PIXELS) {
-			outOfMemory = true;
+		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+		if (abs((double)nHdrWidth * nHdrHeight) > (double)CSettingsProvider::This().MaxImagePixels()) {
+			isSizeLimitExceeded = true;
 			delete[] pSwappedBuffer;
 			return NULL;
 		}
@@ -169,9 +172,10 @@ void* PPMReader::ReadImage(int& width,
 		stbi_image_free(pDecoded);
 		return NULL;
 	}
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS)
-		outOfMemory = true;
-	if (outOfMemory || width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+		isSizeLimitExceeded = true;
+	if (isSizeLimitExceeded || width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		stbi_image_free(pDecoded);
 		return NULL;
 	}

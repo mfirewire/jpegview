@@ -743,10 +743,13 @@ void CBasicProcessing::Convert32bppTo24bppDIB(int nWidth, int nHeight, void* pDI
 	uint8* pTargetDIB = (uint8*)pDIBTarget;
 	for (int j = 0; j < nHeight; j++) {
 		const uint8* pSourceDIB;
+		// Row offsets are byte offsets: compute them in size_t, so a DIB
+		// over 2 GiB (32bpp, more than ~537M pixels) does not wrap the
+		// int arithmetic and read out of bounds. See R-05.
 		if (bFlip) {
-			pSourceDIB = (uint8*)pDIBSource + (nHeight - 1 - j)*nWidth*4;
+			pSourceDIB = (uint8*)pDIBSource + size_t(nHeight - 1 - j)*nWidth*4;
 		} else {
-			pSourceDIB = (uint8*)pDIBSource + j*nWidth*4;
+			pSourceDIB = (uint8*)pDIBSource + size_t(j)*nWidth*4;
 		}
 		for (int i = 0; i < nWidth; i++) {
 			*pTargetDIB++ = pSourceDIB[0];

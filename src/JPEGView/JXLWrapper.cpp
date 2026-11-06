@@ -11,42 +11,45 @@
 #include "jxl/resizable_parallel_runner_cxx.h"
 #include "Helpers.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
 
 static void* DoCompress(JxlEncoder* enc, size_t& len);
 
-struct JxlReader::jxl_cache {
-	JxlDecoderPtr decoder;
-	JxlResizableParallelRunnerPtr runner;
-	JxlBasicInfo info;
-	uint8_t* data;
-	size_t data_size;
-	int prev_frame_timestamp;
-	int total_frames; // F-16: frames counted on the first decode of this file (0 = not counted yet); JXL stores no frame count.
-	int width;
-	int height;
-	void* transform;
-	std::vector<uint8_t> exif;
-};
-
-JxlReader::jxl_cache JxlReader::cache = { 0 };
+// R-01: grow the Exif scratch buffer to new_size bytes. The allocation is never
+// shrunk: libjxl may still hold the buffer pointer from the last
+// JxlDecoderSetBoxBuffer call, and a shrinking realloc could move it. Returns
+// false on allocation failure; the old buffer is left intact.
+bool JxlReader::ExifReserve(size_t new_size) {
+	if (new_size <= cache.exif_capacity) {
+		cache.exif_size = new_size;
+		return true;
+	}
+	uint8_t* pNew = (uint8_t*)realloc(cache.exif, new_size);
+	if (pNew == NULL)
+		return false;
+	cache.exif = pNew;
+	cache.exif_capacity = new_size;
+	cache.exif_size = new_size;
+	return true;
+}
 
 // based on https://github.com/libjxl/libjxl/blob/main/examples/decode_oneshot.cc
 // and https://github.com/libjxl/libjxl/blob/main/examples/decode_exif_metadata.cc
 bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector<uint8_t>* pixels, int& xsize,
-	int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory) {
+	int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory, bool& isSizeLimitExceeded) {
 
 	// F-16: true only on the first decode of a file, when the decoder is
 	// created below; the total frame count is counted on that call (JXL
 	// stores no frame count) and cached for later frames.
-	bool bCountThisCall = (cache.decoder.get() == NULL);
+	bool bCountThisCall = (cache.decoder == NULL);
 
-	if (cache.decoder.get() == NULL) {
-		cache.runner = JxlResizableParallelRunnerMake(nullptr);
+	if (cache.decoder == NULL) {
+		cache.runner = JxlResizableParallelRunnerMake(nullptr).release();
 
-		cache.decoder = JxlDecoderMake(nullptr);
+		cache.decoder = JxlDecoderMake(nullptr).release();
 		if (JXL_DEC_SUCCESS !=
-			JxlDecoderSubscribeEvents(cache.decoder.get(), JXL_DEC_BASIC_INFO |
+			JxlDecoderSubscribeEvents(cache.decoder, JXL_DEC_BASIC_INFO |
 				JXL_DEC_COLOR_ENCODING |
 				JXL_DEC_BOX |
 				JXL_DEC_FRAME |
@@ -54,18 +57,18 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			return false;
 		}
 
-		if (JXL_DEC_SUCCESS != JxlDecoderSetDecompressBoxes(cache.decoder.get(), JXL_TRUE)) {
+		if (JXL_DEC_SUCCESS != JxlDecoderSetDecompressBoxes(cache.decoder, JXL_TRUE)) {
 			return false;
 		}
 
-		if (JXL_DEC_SUCCESS != JxlDecoderSetParallelRunner(cache.decoder.get(),
+		if (JXL_DEC_SUCCESS != JxlDecoderSetParallelRunner(cache.decoder,
 			JxlResizableParallelRunner,
-			cache.runner.get())) {
+			cache.runner)) {
 			return false;
 		}
 
-		JxlDecoderSetInput(cache.decoder.get(), jxl, size);
-		JxlDecoderCloseInput(cache.decoder.get());
+		JxlDecoderSetInput(cache.decoder, jxl, size);
+		JxlDecoderCloseInput(cache.decoder);
 		cache.data = (uint8_t*)jxl;
 		cache.data_size = size;
 	}
@@ -80,37 +83,38 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 	bool bCountingFrames = false; // F-16: first frame seen, counting the rest
 	bool bRewoundAfterCount = false; // F-16: decoder rewound after the counting pass
 	for (;;) {
-		JxlDecoderStatus status = JxlDecoderProcessInput(cache.decoder.get());
+		JxlDecoderStatus status = JxlDecoderProcessInput(cache.decoder);
 
 		if (status == JXL_DEC_ERROR) {
 			return false;
 		} else if (status == JXL_DEC_NEED_MORE_INPUT) {
 			return false;
 		} else if (status == JXL_DEC_BASIC_INFO) {
-			if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(cache.decoder.get(), &info)) {
+			if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(cache.decoder, &info)) {
 				return false;
 			}
 			cache.info = info;
 			if (cache.info.xsize > MAX_IMAGE_DIMENSION || cache.info.ysize > MAX_IMAGE_DIMENSION)
 				return false;
-			if (abs((double)cache.info.xsize * cache.info.ysize) > MAX_IMAGE_PIXELS) {
-				outOfMemory = true;
+			// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+			if (abs((double)cache.info.xsize * cache.info.ysize) > (double)CSettingsProvider::This().MaxImagePixels()) {
+				isSizeLimitExceeded = true;
 				return false;
 			}
 			JxlResizableParallelRunnerSetThreads(
-				cache.runner.get(),
+				cache.runner,
 				JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
 		} else if (status == JXL_DEC_COLOR_ENCODING) {
 			// Get the ICC color profile of the pixel data
 			size_t icc_size;
 			if (JXL_DEC_SUCCESS !=
 				JxlDecoderGetICCProfileSize(
-					cache.decoder.get(), JXL_COLOR_PROFILE_TARGET_DATA, &icc_size)) {
+					cache.decoder, JXL_COLOR_PROFILE_TARGET_DATA, &icc_size)) {
 				return false;
 			}
 			icc_profile->resize(icc_size);
 			if (JXL_DEC_SUCCESS != JxlDecoderGetColorAsICCProfile(
-				cache.decoder.get(),
+				cache.decoder,
 				JXL_COLOR_PROFILE_TARGET_DATA,
 				icc_profile->data(), icc_profile->size())) {
 				return false;
@@ -118,7 +122,7 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 		} else if (status == JXL_DEC_FRAME) {
 			nFrameEvents++; // F-16: count frames as they are decoded
 			JxlFrameHeader header;
-			JxlDecoderGetFrameHeader(cache.decoder.get(), &header);
+			JxlDecoderGetFrameHeader(cache.decoder, &header);
 			JxlAnimationHeader animation = cache.info.animation;
 			if (animation.tps_numerator)
 				frame_time = (int)(1000.0 * header.duration * animation.tps_denominator / animation.tps_numerator);
@@ -127,7 +131,7 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 		} else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
 			size_t buffer_size;
 			if (JXL_DEC_SUCCESS !=
-				JxlDecoderImageOutBufferSize(cache.decoder.get(), &format, &buffer_size)) {
+				JxlDecoderImageOutBufferSize(cache.decoder, &format, &buffer_size)) {
 				return false;
 			}
 			if (buffer_size != cache.info.xsize * cache.info.ysize * 4) {
@@ -136,7 +140,7 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			pixels->resize(cache.info.xsize * cache.info.ysize * 4);
 			void* pixels_buffer = (void*)pixels->data();
 			size_t pixels_buffer_size = pixels->size() * sizeof(uint8_t);
-			if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(cache.decoder.get(), &format,
+			if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(cache.decoder, &format,
 				pixels_buffer,
 				pixels_buffer_size)) {
 				return false;
@@ -186,30 +190,32 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 				cache.total_frames = nFrameEvents;
 			if (bCountingFrames)
 				bRewoundAfterCount = true;
-			JxlDecoderRewind(cache.decoder.get());
-			JxlDecoderSubscribeEvents(cache.decoder.get(), JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
-			JxlDecoderSetInput(cache.decoder.get(), cache.data, cache.data_size);
-			JxlDecoderCloseInput(cache.decoder.get());
+			JxlDecoderRewind(cache.decoder);
+			JxlDecoderSubscribeEvents(cache.decoder, JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
+			JxlDecoderSetInput(cache.decoder, cache.data, cache.data_size);
+			JxlDecoderCloseInput(cache.decoder);
 		} else if (status == JXL_DEC_BOX) {
-			if (!cache.exif.empty()) {
-				size_t remaining = JxlDecoderReleaseBoxBuffer(cache.decoder.get());
-				cache.exif.resize(cache.exif.size() - remaining);
+			if (cache.exif_size > 0) {
+				size_t remaining = JxlDecoderReleaseBoxBuffer(cache.decoder);
+				cache.exif_size -= remaining;
 			} else {
 				JxlBoxType type;
 				if (JXL_DEC_SUCCESS !=
-					JxlDecoderGetBoxType(cache.decoder.get(), type, true)) {
+					JxlDecoderGetBoxType(cache.decoder, type, true)) {
 					return false;
 				}
 				if (!memcmp(type, "Exif", 4)) {
-					cache.exif.resize(kChunkSize);
-					JxlDecoderSetBoxBuffer(cache.decoder.get(), cache.exif.data(), cache.exif.size());
+					if (!ExifReserve(kChunkSize))
+						return false;
+					JxlDecoderSetBoxBuffer(cache.decoder, cache.exif, cache.exif_size);
 				}
 			}
 		} else if (status == JXL_DEC_BOX_NEED_MORE_OUTPUT) {
-			size_t remaining = JxlDecoderReleaseBoxBuffer(cache.decoder.get());
+			size_t remaining = JxlDecoderReleaseBoxBuffer(cache.decoder);
 			output_pos += kChunkSize - remaining;
-			cache.exif.resize(cache.exif.size() + kChunkSize);
-			JxlDecoderSetBoxBuffer(cache.decoder.get(), cache.exif.data() + output_pos, cache.exif.size() - output_pos);
+			if (!ExifReserve(cache.exif_size + kChunkSize))
+				return false;
+			JxlDecoderSetBoxBuffer(cache.decoder, cache.exif + output_pos, cache.exif_size - output_pos);
 		} else {
 			return false;
 		}
@@ -224,6 +230,7 @@ void* JxlReader::ReadImage(int& width,
 	int& frame_time,
 	void*& exif_chunk,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -238,7 +245,7 @@ void* JxlReader::ReadImage(int& width,
 	std::vector<uint8_t> pixels;
 	std::vector<uint8_t> icc_profile;
 	if (!DecodeJpegXlOneShot((const uint8_t*)buffer, sizebytes, &pixels, width, height,
-		has_animation, frame_count, frame_time, &icc_profile, outOfMemory)) {
+		has_animation, frame_count, frame_time, &icc_profile, outOfMemory, isSizeLimitExceeded)) {
 		return NULL;
 	}
 	size_t size = (size_t)width * height * nchannels;
@@ -258,12 +265,12 @@ void* JxlReader::ReadImage(int& width,
 	}
 
 	// Copy Exif data into the format understood by CEXIFReader
-	if (!cache.exif.empty() && cache.exif.size() > 8 && cache.exif.size() < 65532) {
-		exif_chunk = malloc(cache.exif.size() + 6);
+	if (cache.exif_size > 8 && cache.exif_size < 65532) {
+		exif_chunk = malloc(cache.exif_size + 6);
 		if (exif_chunk != NULL) {
 			memcpy(exif_chunk, "\xFF\xE1\0\0Exif\0\0", 10);
-			*((unsigned short*)exif_chunk + 1) = _byteswap_ushort(cache.exif.size() + 4);
-			memcpy((uint8_t*)exif_chunk + 10, cache.exif.data() + 4, cache.exif.size() - 4);
+			*((unsigned short*)exif_chunk + 1) = _byteswap_ushort(cache.exif_size + 4);
+			memcpy((uint8_t*)exif_chunk + 10, cache.exif + 4, cache.exif_size - 4);
 		}
 	}
 
@@ -277,8 +284,19 @@ void JxlReader::DeleteCache() {
 	// The buffer is allocated with new[] in ProcessReadJXLRequest; freeing it with
 	// free() was undefined behaviour and asserts on the debug CRT.
 	delete[] cache.data;
+	free(cache.exif);
 	ICCProfileTransform::DeleteTransform(cache.transform);
-	// Setting the decoder and runner to 0 (NULL) will automatically destroy them
+	// R-01: explicit destroys, not smart pointers. The cache is an inert struct
+	// (see JXLWrapper.h): only this function releases its resources, so that
+	// CImageLoadThread's destructor can skip the release when Terminate() times
+	// out instead of destroying a decoder a still-running decode is using.
+	// The decoder is destroyed before its runner: it holds the runner pointer.
+	if (cache.decoder != NULL) {
+		JxlDecoderDestroy(cache.decoder);
+	}
+	if (cache.runner != NULL) {
+		JxlResizableParallelRunnerDestroy(cache.runner);
+	}
 	cache = { 0 };
 }
 

@@ -3,12 +3,14 @@
 #include "TJPEGWrapper.h"
 #include "libjpeg-turbo\include\turbojpeg.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 
 void * TurboJpeg::ReadImage(int &width,
 					   int &height,
 					   int &nchannels,
 					   TJSAMP &chromoSubsampling,
 					   bool &outOfMemory,
+					   bool &isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 					   const void *buffer,
 					   int sizebytes)
 {
@@ -35,8 +37,9 @@ void * TurboJpeg::ReadImage(int &width,
 		// to GDI+, whose colour management mis-renders them.
 		const int colorSpace = tj3Get(hDecoder, TJPARAM_COLORSPACE);
 		const bool bCMYK = (colorSpace == TJCS_CMYK || colorSpace == TJCS_YCCK);
-		if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
-			outOfMemory = true;
+		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+		if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+			isSizeLimitExceeded = true;
 		} else if (width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION && (chromoSubsampling != TJSAMP_UNKNOWN || bCMYK)) {
 			// TJPAD is int arithmetic, but width <= 65535 keeps width*bytesPerPixel
 			// (max 262140) inside int. The real risk is stride*height: 65535 rows of

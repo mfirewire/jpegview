@@ -9,11 +9,13 @@
 // not define STB_IMAGE_IMPLEMENTATION again.
 #include "stb/stb_image.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 
 void* HDRReader::ReadImage(int& width,
 	int& height,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -34,9 +36,10 @@ void* HDRReader::ReadImage(int& width,
 	int nChannels = 0;
 	if (!stbi_info_from_memory(pMagic, sizebytes, &width, &height, &nChannels))
 		return NULL;
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS)
-		outOfMemory = true;
-	if (outOfMemory || width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+		isSizeLimitExceeded = true;
+	if (isSizeLimitExceeded || width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		return NULL;
 	}
 	// HDR is RGB only; anything else means the content was not HDR.

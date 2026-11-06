@@ -27,12 +27,14 @@
 #include "tinyexr/tinyexr.h"
 #include <math.h>
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 #include <new>
 
 void* EXRReader::ReadImage(int& width,
 	int& height,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -74,8 +76,9 @@ void* EXRReader::ReadImage(int& width,
 		FreeEXRHeader(&header);
 		return NULL;
 	}
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
-		outOfMemory = true;
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		isSizeLimitExceeded = true;
 		FreeEXRHeader(&header);
 		return NULL;
 	}

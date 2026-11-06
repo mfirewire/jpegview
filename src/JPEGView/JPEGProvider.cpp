@@ -52,31 +52,21 @@ CJPEGProvider::~CJPEGProvider(void) {
 	}
 }
 
-// E1: wait for a load request while pumping window messages, so the UI
-// does not freeze when a decode is very slow or stuck. MsgWaitForMultipleObjects
-// returns when the event is set or when there is input to dispatch; the
-// messages are dispatched so the window repaints and stays responsive.
-// A stuck decode still has to finish (the decoders offer no cancel point),
-// so a hard cancel is out of scope; the pump at least lets the user
-// navigate away or close the window instead of facing a frozen UI.
-// (WorkThread::ProcessAndWait keeps its INFINITE wait on purpose: it runs
-// on the load thread, not the UI thread, and the sub-request result is
-// required before the load can proceed.)
-static void WaitForRequestWithMessagePump(HANDLE hEvent) {
-	for (;;) {
-		DWORD dwRet = ::MsgWaitForMultipleObjects(1, &hEvent, FALSE, INFINITE, QS_ALLINPUT);
-		if (dwRet == WAIT_OBJECT_0) {
-			return;
-		}
-		if (dwRet == WAIT_OBJECT_0 + 1) {
-			MSG msg;
-			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-				::TranslateMessage(&msg);
-				::DispatchMessage(&msg);
-			}
-		}
-	}
-}
+// ST-07/ST-08: the UI-thread waits (RequestImage,
+// StartRequestAndWaitUntilReady, and ReleaseFile via
+// CWorkThread::ProcessAndWait) share CWorkThread::
+// WaitForEventWithPaintOnlyPump (WorkThread.cpp). It pumps repaint
+// messages only, so the window repaints during a slow decode without
+// letting a page key, timer, command or close run re-entrantly, and it
+// returns false on WAIT_FAILED instead of spinning. A stuck decode still
+// has to finish (the decoders offer no cancel point), so a hard cancel is
+// out of scope; keys/close are deferred, not lost - they stay queued and
+// are handled by the main loop once the wait returns.
+// (The old comment here claimed ProcessAndWait kept its INFINITE wait on
+// purpose because it ran on the load thread. That was wrong: its only
+// caller is CImageLoadThread::ReleaseFile, reached from the UI thread via
+// CJPEGProvider::ClearRequest, so it froze the UI exactly like the waits
+// below. It pumps now, through the same helper.)
 
 CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirection eDirection,
                                         LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams,
@@ -110,7 +100,14 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 #ifdef DEBUG
 		::OutputDebugString(_T("Waiting for request: ")); ::OutputDebugString(pRequest->FileName); ::OutputDebugString(_T("\n"));
 #endif
-		WaitForRequestWithMessagePump(pRequest->EventFinished);
+		// ST-08: on a failed wait (WAIT_FAILED) the request may already be
+		// gone, so bail out without touching it or any provider member.
+		if (!CWorkThread::WaitForEventWithPaintOnlyPump(pRequest->EventFinished)) {
+			bOutOfMemory = false;
+			bExceptionError = false;
+			if (pbSizeLimitExceeded != NULL) *pbSizeLimitExceeded = false;
+			return NULL;
+		}
 		GetLoadedImageFromWorkThread(pRequest);
 	} else {
 		CJPEGImage* pImage = pRequest->Image;
@@ -140,6 +137,14 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 		if (FreeAllPossibleMemory()) {
 			DeleteElement(pRequest);
 			pRequest = StartRequestAndWaitUntilReady(strFileName, nFrameIndex, processParams, forceFullSizeRAW);
+			if (pRequest == NULL) {
+				// ST-08: the retry's wait failed; do not touch the (possibly
+				// already deleted) retried request.
+				bOutOfMemory = false;
+				bExceptionError = false;
+				if (pbSizeLimitExceeded != NULL) *pbSizeLimitExceeded = false;
+				return NULL;
+			}
 		}
 	}
 
@@ -274,7 +279,11 @@ CJPEGProvider::CImageRequest* CJPEGProvider::FindRequest(LPCTSTR strFileName, in
 
 CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
 	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams, forceFullSizeRAW);
-	WaitForRequestWithMessagePump(pRequest->EventFinished);
+	// ST-08: NULL on a failed wait (WAIT_FAILED) - the caller (the OOM
+	// retry in RequestImage) must check for it before touching pRequest.
+	if (!CWorkThread::WaitForEventWithPaintOnlyPump(pRequest->EventFinished)) {
+		return NULL;
+	}
 	GetLoadedImageFromWorkThread(pRequest);
 	return pRequest;
 }

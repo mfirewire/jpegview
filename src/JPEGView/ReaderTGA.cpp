@@ -4,6 +4,7 @@
 #include "Helpers.h"
 #include "BasicProcessing.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 
 // The TGA reader has been adapted and extended from the TGA reader used in an example of the BOINC project
 // http://www.filewatcher.com/p/boinc-server-maker_7.0.27+dfsg-5_armhf.deb.5191030/usr/share/doc/boinc-server-maker/examples/tgalib.h.html
@@ -33,7 +34,7 @@ static bool IsAlphaChannelValid(int width, int height, uint32* pImageData)
 }
 
 
-CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundColor, bool& bOutOfMemory) {
+CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundColor, bool& bOutOfMemory, bool& bSizeLimitExceeded) {
 
 	bOutOfMemory = false;
 
@@ -104,9 +105,10 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	size_t targetStride = (size_t)Helpers::DoPadding(width * targetChannels, 4);
 	size_t numberOfBytesRequired = 0;
 
-	if ((double)width * height > MAX_IMAGE_PIXELS)
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if ((double)width * height > (double)CSettingsProvider::This().MaxImagePixels())
 	{
-		bOutOfMemory = true;
+		bSizeLimitExceeded = true;
 		fclose(pFile);
 		return NULL;
 	}

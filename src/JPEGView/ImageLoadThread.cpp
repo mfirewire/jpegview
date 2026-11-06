@@ -755,20 +755,20 @@ void CImageLoadThread::DeleteCachedGDIBitmap() {
 }
 
 void CImageLoadThread::DeleteCachedWebpDecoder() {
-	WebpReaderWriter::DeleteCache();
+	m_webpReader.DeleteCache();
 	m_sLastWebpFileName.Empty();
 }
 
 void CImageLoadThread::DeleteCachedPngDecoder() {
 #ifndef WINXP
-	PngReader::DeleteCache();
+	m_pngReader.DeleteCache();
 	m_sLastPngFileName.Empty();
 #endif
 }
 
 void CImageLoadThread::DeleteCachedJxlDecoder() {
 #ifndef WINXP
-	JxlReader::DeleteCache();
+	m_jxlReader.DeleteCache();
 	m_sLastJxlFileName.Empty();
 #endif
 }
@@ -778,7 +778,7 @@ void CImageLoadThread::DeleteCachedAvifDecoder() {
 	// prevent crashing when libavif/dav1d fail or missing
 	CErrorModeGuard errorModeGuard;
 	try {
-		AvifReader::DeleteCache();
+		m_avifReader.DeleteCache();
 	} catch (...) {}
 	m_sLastAvifFileName.Empty();
 #endif
@@ -956,9 +956,10 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 				int nWidth, nHeight, nBPP;
 				TJSAMP eChromoSubSampling;
 				bool bOutOfMemory;
+				bool bSizeLimitExceeded = false;
 				// int nTicks = ::GetTickCount();
 
-				void* pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nBPP, eChromoSubSampling, bOutOfMemory, pBuffer, nFileSize);
+				void* pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nBPP, eChromoSubSampling, bOutOfMemory, bSizeLimitExceeded, pBuffer, nFileSize);
 				
 				/*
 				TCHAR buffer[20];
@@ -1027,6 +1028,10 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 					request->Image->SetJPEGChromoSampling(eChromoSubSampling);
 				} else if (bOutOfMemory) {
 					request->OutOfMemory = true;
+				} else if (bSizeLimitExceeded) {
+					// R-04/P2-5: TurboJpeg proved the file exceeds the pixel cap; the GDI+ fallback would reject it the same way after decoding the whole bitmap, so skip it. request->OutOfMemory may already be set from the earlier GDI+ attempt: clear it, a size-limit verdict must never trigger the provider's free-and-retry.
+					request->OutOfMemory = false;
+					request->SizeLimitExceeded = true;
 				} else {
 					// failed, try GDI+
 					delete[] pPixelData;
@@ -1047,8 +1052,12 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 
 void CImageLoadThread::ProcessReadBMPRequest(CRequest * request) {
 	bool bOutOfMemory;
-	request->Image = CReaderBMP::ReadBmpImage(request->FileName, bOutOfMemory);
-	if (bOutOfMemory) {
+	bool bSizeLimitExceeded = false;
+	request->Image = CReaderBMP::ReadBmpImage(request->FileName, bOutOfMemory, bSizeLimitExceeded);
+	if (bSizeLimitExceeded) {
+		// R-04/P2-5: pixel-cap rejection, not OOM; skip the GDI+ fallback, which would reject the same file the same way after decoding it.
+		request->SizeLimitExceeded = true;
+	} else if (bOutOfMemory) {
 		request->OutOfMemory = true;
 	} else if (request->Image == NULL) {
 		// probably one of the bitmap formats that can not be read directly, try with GDI+
@@ -1058,8 +1067,12 @@ void CImageLoadThread::ProcessReadBMPRequest(CRequest * request) {
 
 void CImageLoadThread::ProcessReadTGARequest(CRequest * request) {
 	bool bOutOfMemory;
-	request->Image = CReaderTGA::ReadTgaImage(request->FileName, CSettingsProvider::This().ColorTransparency(), bOutOfMemory);
-	if (bOutOfMemory) {
+	bool bSizeLimitExceeded = false;
+	request->Image = CReaderTGA::ReadTgaImage(request->FileName, CSettingsProvider::This().ColorTransparency(), bOutOfMemory, bSizeLimitExceeded);
+	if (bSizeLimitExceeded) {
+		// R-04/P2-5: pixel-cap rejection, not OOM.
+		request->SizeLimitExceeded = true;
+	} else if (bOutOfMemory) {
 		request->OutOfMemory = true;
 	}
 }
@@ -1109,7 +1122,7 @@ void CImageLoadThread::ProcessReadWEBPRequest(CRequest * request) {
 			int nFrameTimeMs = 0;
 			int nBPP;
 			void* pEXIFData;
-			uint8* pPixelData = (uint8*)WebpReaderWriter::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
+			uint8* pPixelData = (uint8*)m_webpReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData && nBPP == 4) {
 				// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
 				// the loop entirely when no pixel is transparent (see
@@ -1192,7 +1205,7 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			// that conversion; the only reason to take GDI+ would be ForceGDIPlus.
 			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseCachedDecoder || !bUseGDIPlus || PngReader::MustUseLibpng(pBuffer, nFileSize))
-				pPixelData = (uint8*)PngReader::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
+				pPixelData = (uint8*)m_pngReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 #endif
 
 			if (pPixelData != NULL) {
@@ -1207,18 +1220,21 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			} else {
 				DeleteCachedPngDecoder();
 				
-				IStream* pStream = NULL;
-				if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
-					Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
-					bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
-					pEXIFData = PngReader::GetEXIFBlock(pBuffer, nFileSize);
-					request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, pEXIFData, 0, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
-					request->OutOfMemory = request->Image == NULL && isOutOfMemory;
-					request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
-					pStream->Release();
-					delete pBitmap;
-				} else {
-					request->OutOfMemory = true;
+				// R-04/P2-5: libpng already proved the file exceeds the pixel cap; GDI+ would reject it the same way after decoding the whole bitmap, so skip the fallback and keep the verdict.
+				if (!request->SizeLimitExceeded) {
+					IStream* pStream = NULL;
+					if (::CreateStreamOnHGlobal(hFileBuffer, FALSE, &pStream) == S_OK) {
+						Gdiplus::Bitmap* pBitmap = Gdiplus::Bitmap::FromStream(pStream, CSettingsProvider::This().UseEmbeddedColorProfiles());
+						bool isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded;
+						pEXIFData = PngReader::GetEXIFBlock(pBuffer, nFileSize);
+						request->Image = ConvertGDIPlusBitmapToJPEGImage(pBitmap, 0, pEXIFData, 0, isOutOfMemory, isAnimatedGIF, isSizeLimitExceeded);
+						request->OutOfMemory = request->Image == NULL && isOutOfMemory;
+						request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
+						pStream->Release();
+						delete pBitmap;
+					} else {
+						request->OutOfMemory = true;
+					}
 				}
 			}
 			free(pEXIFData);
@@ -1280,7 +1296,7 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
 			bool bHasAnimation;
 			void* pEXIFData;
-			uint8* pPixelData = (uint8*)JxlReader::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
+			uint8* pPixelData = (uint8*)m_jxlReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastJxlFileName = sFileName;
@@ -1361,8 +1377,8 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
 			bool bHasAnimation;
 			void* pEXIFData;
-			uint8* pPixelData = (uint8*)AvifReader::ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, 
-				nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, pBuffer, nFileSize);
+			uint8* pPixelData = (uint8*)m_avifReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, 
+				nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastAvifFileName = sFileName;
@@ -1454,7 +1470,7 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request, const char* pBu
 		nFrameCount = 1;
 		nFrameTimeMs = 0;
 		void* pEXIFData;
-		uint8* pPixelData = (uint8*)HeifReader::ReadImage(nWidth, nHeight, nBPP, nFrameCount, pEXIFData, request->OutOfMemory, request->FrameIndex, pBuffer, nFileSize);
+		uint8* pPixelData = (uint8*)HeifReader::ReadImage(nWidth, nHeight, nBPP, nFrameCount, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, request->FrameIndex, pBuffer, nFileSize);
 		if (pPixelData != NULL) {
 			// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
 			// the loop entirely when no pixel is transparent (see
@@ -1476,9 +1492,10 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request, const char* pBu
 }
 
 void CImageLoadThread::ProcessReadPSDRequest(CRequest* request) {
-	request->Image = PsdReader::ReadImage(request->FileName, request->OutOfMemory);
-	if (request->Image == NULL && !request->OutOfMemory) {
-		request->Image = PsdReader::ReadThumb(request->FileName, request->OutOfMemory);
+	request->Image = PsdReader::ReadImage(request->FileName, request->OutOfMemory, request->SizeLimitExceeded);
+	// R-04/P2-5: a size-limit rejection must not fall through to the embedded-thumbnail reader the way a plain decode failure does.
+	if (request->Image == NULL && !request->OutOfMemory && !request->SizeLimitExceeded) {
+		request->Image = PsdReader::ReadThumb(request->FileName, request->OutOfMemory, request->SizeLimitExceeded);
 	}
 }
 
@@ -1509,7 +1526,7 @@ void CImageLoadThread::ProcessReadQOIRequest(CRequest* request) {
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
 			int nWidth, nHeight, nBPP;
-			void* pPixelData = QoiReaderWriter::ReadImage(nWidth, nHeight, nBPP, request->OutOfMemory, pBuffer, nFileSize);
+			void* pPixelData = QoiReaderWriter::ReadImage(nWidth, nHeight, nBPP, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
 				if (nBPP == 4) {
 					// F-14/E13: see AlphaBlendImageToBackground (size_t counter, LUTs,
@@ -1553,7 +1570,7 @@ void CImageLoadThread::ProcessReadPPMRequest(CRequest* request) {
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
-			void* pPixelData = PPMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			void* pPixelData = PPMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_PPM, false, 0, 1, 0);
 			}
@@ -1590,7 +1607,7 @@ void CImageLoadThread::ProcessReadHDRRequest(CRequest* request) {
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
-			void* pPixelData = HDRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			void* pPixelData = HDRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_HDR, false, 0, 1, 0);
 			}
@@ -1628,7 +1645,7 @@ void CImageLoadThread::ProcessReadPBMRequest(CRequest* request) {
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
-			void* pPixelData = PBMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			void* pPixelData = PBMReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_PBM, false, 0, 1, 0);
 			}
@@ -1666,7 +1683,7 @@ void CImageLoadThread::ProcessReadJP2Request(CRequest* request) {
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
-			void* pPixelData = JP2Reader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			void* pPixelData = JP2Reader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_JP2, false, 0, 1, 0);
 			}
@@ -1704,7 +1721,7 @@ void CImageLoadThread::ProcessReadEXRRequest(CRequest* request) {
 		}
 		if (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize) {
 			int nWidth, nHeight;
-			void* pPixelData = EXRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, pBuffer, (int)nFileSize);
+			void* pPixelData = EXRReader::ReadImage(nWidth, nHeight, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, (int)nFileSize);
 			if (pPixelData != NULL) {
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, NULL, 3, 0, IF_EXR, false, 0, 1, 0);
 			}
@@ -2355,6 +2372,7 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 
 void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	bool bOutOfMemory = false;
+	bool bSizeLimitExceeded = false; // R-04/P2-5: set by RawReader, mapped to the request below
 	try {
 		if (!IsPlausibleRawFile(request->FileName)) {
 			return;
@@ -2375,13 +2393,13 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 		CErrorModeGuard errorModeGuard;
 		try {
 			if (fullsize == 2 || fullsize == 3) {
-				request->Image = RawReader::ReadImage(request->FileName, bOutOfMemory, fullsize == 2);
+				request->Image = RawReader::ReadImage(request->FileName, bOutOfMemory, bSizeLimitExceeded, fullsize == 2);
 			}
 			if (request->Image == NULL && fullsize == 2) {
 				request->Image = CReaderRAW::ReadRawImage(request->FileName, bOutOfMemory);
 			}
 			if (request->Image == NULL) {
-				request->Image = RawReader::ReadImage(request->FileName, bOutOfMemory, fullsize == 0 || fullsize == 3);
+				request->Image = RawReader::ReadImage(request->FileName, bOutOfMemory, bSizeLimitExceeded, fullsize == 0 || fullsize == 3);
 			}
 		} catch (...) {
 			// libraw.dll not found or VC++ Runtime not installed
@@ -2400,6 +2418,9 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	}
 	if (bOutOfMemory) {
 		request->OutOfMemory = true;
+	}
+	if (bSizeLimitExceeded) {
+		request->SizeLimitExceeded = true;
 	}
 }
 

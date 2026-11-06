@@ -7,6 +7,7 @@
 // so the DLL is only loaded when a JP2 file is actually opened.
 #include "openjpeg-2.5/openjpeg.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 #include <new>
 
@@ -77,6 +78,7 @@ inline unsigned char JP2SampleTo8(OPJ_INT32 v, OPJ_UINT32 prec, OPJ_UINT32 sgnd)
 void* JP2Reader::ReadImage(int& width,
 	int& height,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -142,8 +144,9 @@ void* JP2Reader::ReadImage(int& width,
 	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		goto cleanup;
 	}
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
-		outOfMemory = true;
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		isSizeLimitExceeded = true;
 		goto cleanup;
 	}
 	// Only component counts we know how to map to BGR. (2 = gray+alpha,

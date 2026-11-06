@@ -8,8 +8,9 @@
 #include "TJPEGWrapper.h"
 #include "RawMetadata.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 
-CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool bGetThumb)
+CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& bSizeLimitExceeded, bool bGetThumb)
 {
 	unsigned char* pPixelData = NULL;
 
@@ -66,14 +67,15 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool b
 			return NULL;
 		}
 
-		if ((double)width * height > MAX_IMAGE_PIXELS) {
-			bOutOfMemory = true;
+		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+		if ((double)width * height > (double)CSettingsProvider::This().MaxImagePixels()) {
+			bSizeLimitExceeded = true;
 			return NULL;
 		}
 
 		// stride * height is int arithmetic: 65535 columns by 21846 rows of 3
 		// channels is 4.29 GB and wraps to ~256 KB, after which copy_mem_image
-		// still writes the real size. MAX_IMAGE_PIXELS only bounds the pixel
+		// still writes the real size. The pixel cap only bounds the pixel
 		// count as a double, never the byte count, so it does not catch this.
 		// F-M12: width * colors used to be computed in 32-bit int before
 		// DoPadding (which itself takes int), and stride was then cast
@@ -128,7 +130,7 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool b
 		if (thumb == NULL) {
 			return NULL;
 		}
-		pPixelData = (unsigned char*)TurboJpeg::ReadImage(width, height, colors, eChromoSubSampling, bOutOfMemory, thumb->data, thumb->data_size);
+		pPixelData = (unsigned char*)TurboJpeg::ReadImage(width, height, colors, eChromoSubSampling, bOutOfMemory, bSizeLimitExceeded, thumb->data, thumb->data_size);
 		if (pPixelData != NULL && (colors == 3 || colors == 1))
 		{
 			CRawMetadata* metadata = new CRawMetadata(RawProcessor.imgdata.idata.make, RawProcessor.imgdata.idata.model, RawProcessor.imgdata.other.timestamp,

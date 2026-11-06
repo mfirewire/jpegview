@@ -5,19 +5,9 @@
 #include "webp/encode.h"
 #include "webp/demux.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 #include "ICCProfileTransform.h"
-
-struct WebpReaderWriter::webp_cache {
-	WebPAnimDecoder* decoder;
-	WebPData data;
-	int prev_frame_timestamp;
-	int width;
-	int height;
-	void* transform;
-};
-
-WebpReaderWriter::webp_cache WebpReaderWriter::cache = { 0 };
 
 void* WebpReaderWriter::ReadImage(int& width,
 	int& height,
@@ -27,6 +17,7 @@ void* WebpReaderWriter::ReadImage(int& width,
 	int& frame_time,
 	void*& exif_chunk,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -44,8 +35,9 @@ void* WebpReaderWriter::ReadImage(int& width,
 			return NULL;
 		if (WebPGetFeatures((const uint8_t*)buffer, sizebytes, &features) != VP8_STATUS_OK)
 			return NULL;
-		if ((double)width * height > MAX_IMAGE_PIXELS) {
-			outOfMemory = true;
+		// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+		if ((double)width * height > (double)CSettingsProvider::This().MaxImagePixels()) {
+			isSizeLimitExceeded = true;
 			return NULL;
 		}
 

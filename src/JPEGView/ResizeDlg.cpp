@@ -2,6 +2,7 @@
 #include "ResizeDlg.h"
 #include "NLS.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 
 double CResizeDlg::sm_dPercents = 100.0;
@@ -160,7 +161,8 @@ bool CResizeDlg::CheckValidSize(CSize size) {
 	if (size.cx <= 0 || size.cy <= 0) {
 		return false;
 	}
-	if (((long long)size.cx) * size.cy > MAX_IMAGE_PIXELS) {
+	// R-04/P2-5: the dialog limit follows the live MaxImagePixelsMP setting, so raising the cap no longer blocks a resize the viewer would accept.
+	if (((long long)size.cx) * size.cy > (long long)CSettingsProvider::This().MaxImagePixels()) {
 		return false;
 	}
 	if (size.cx > MAX_IMAGE_DIMENSION || size.cy > MAX_IMAGE_DIMENSION) {

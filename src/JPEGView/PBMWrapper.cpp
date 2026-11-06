@@ -2,11 +2,13 @@
 
 #include "PBMWrapper.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 
 void* PBMReader::ReadImage(int& width,
 	int& height,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -63,9 +65,10 @@ void* PBMReader::ReadImage(int& width,
 	height = nValues[1];
 	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION)
 		return NULL;
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS)
-		outOfMemory = true;
-	if (outOfMemory)
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+		isSizeLimitExceeded = true;
+	if (isSizeLimitExceeded)
 		return NULL;
 
 	// Size gate: the raster is ceil(width/8) bytes per row. The file

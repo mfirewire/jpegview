@@ -12,6 +12,7 @@
 // DLL is only loaded when an SVG file is actually opened.
 #include "thorvg_capi.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 #include <new>
 
@@ -205,7 +206,8 @@ bool ParseSvgSize(const char* buf, size_t len, float& width, float& height) {
 // scaling down loses nothing but resolution the viewer cannot use.
 void CapRenderSize(float& w, float& h) {
 	double maxDim = (double)MAX_IMAGE_DIMENSION;
-	double maxPixels = (double)MAX_IMAGE_PIXELS;
+	// R-04/P2-5: the cap is the live MaxImagePixelsMP setting; the downscale-instead-of-reject semantics are unchanged.
+	double maxPixels = (double)CSettingsProvider::This().MaxImagePixels();
 	double scale = 1.0;
 	if (w > maxDim)
 		scale = maxDim / (double)w;
@@ -228,15 +230,20 @@ void CapRenderSize(float& w, float& h) {
 }
 
 #ifdef _WIN32
-// Load the system font once per process so <text> renders. If the font
-// file is missing (stripped Windows, Wine without fonts), render without
-// text rather than failing the whole image: the flag records the attempt,
-// not success.
-bool LoadSystemFontOnce() {
-	static bool attempted = false;
-	if (attempted)
-		return true;
-	attempted = true;
+// Load the system font for this engine session, so <text> renders.
+// The font must be (re-)loaded after every tvg_engine_init(): ThorVG
+// releases all loaded font data when the engine is fully terminated
+// (tvg_engine_term() dropping the init refcount to zero -- see the
+// ThorVG tutorial: "the global font data loaded into ThorVG is
+// automatically released when the ThorVG engine is terminated").
+// A process-lifetime "loaded once" flag would therefore leave every
+// render after the first init/term cycle without any font, and <text>
+// silently disappears when an SVG is revisited. tvg_font_load()
+// caches by path, so re-loading while the engine is still up (nested
+// init, font still loaded) is a cheap no-op, not a duplicate load.
+// If the font file is missing (stripped Windows, Wine without fonts),
+// render without text rather than failing the whole image.
+bool LoadSystemFont() {
 	WCHAR windir[MAX_PATH];
 	if (::GetWindowsDirectoryW(windir, MAX_PATH) == 0)
 		return false;
@@ -288,7 +295,7 @@ void* SVGReader::ReadImage(int& width,
 	bool ok = false;
 	do {
 #ifdef _WIN32
-		LoadSystemFontOnce();
+		LoadSystemFont();
 #endif
 		picture = tvg_picture_new();
 		if (picture == NULL)

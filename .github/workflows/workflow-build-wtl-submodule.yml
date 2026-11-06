@@ -136,6 +136,17 @@ jobs:
     - uses: ./.github/actions/wtl-submodule
     - uses: ./.github/actions/stamp-version
 
+    # R-06: regenerate the ThorVG import library with MSVC LIB.EXE from the
+    # checked-in .def, before msbuild links JPEGView.exe. The committed
+    # lib/lib64/libthorvg-1.lib is dlltool-generated (no SAFESEH info), so
+    # a Win32 /SAFESEH link fails (LNK2026/LNK1281) against it. The action
+    # overwrites the in-checkout .lib and uploads it as an artifact so it
+    # can be committed back (CI never commits by itself).
+    - uses: ./.github/actions/regen-thorvg-lib
+      with:
+        platform-arch: ${{ inputs.platform-arch }}
+        build-config: ${{ inputs.build-config }}
+
     - name: Build Solution
       shell: cmd
       run: |

@@ -4,6 +4,12 @@
 #include "ProcessParams.h"
 #include "WorkThread.h"
 #include <gdiplus.h>
+#include "PNGWrapper.h"
+#include "WEBPWrapper.h"
+#ifndef WINXP
+#include "JXLWrapper.h"
+#include "AVIFWrapper.h"
+#endif
 
 class CJPEGImage;
 
@@ -107,6 +113,21 @@ private:
 	CString m_sLastPngFileName; // Only for animated PNG files
 	CString m_sLastJxlFileName; // Only for animated JPEG XL files
 	CString m_sLastAvifFileName; // Only for animated AVIF files
+
+	// R-01: one animation decoder cache per load thread. The four readers
+	// used to keep their caches in process-wide statics, so the two load
+	// threads freed each other's in-flight decodes (heap corruption
+	// 0xC0000374 when paging between animated images). Each thread now owns
+	// its reader instances; the caches live inside them and are only ever
+	// touched by their owning thread. The readers are deliberately left
+	// without destructors that release the caches: CImageLoadThread's
+	// destructor owns the release and skips it when Terminate() times out.
+	PngReader m_pngReader;
+	WebpReaderWriter m_webpReader;
+#ifndef WINXP
+	JxlReader m_jxlReader;
+	AvifReader m_avifReader;
+#endif
 
 	virtual void ProcessRequest(CRequestBase& request);
 	virtual void AfterFinishProcess(CRequestBase& request);

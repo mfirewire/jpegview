@@ -5,6 +5,7 @@
 #define QOI_NO_STDIO
 #include "qoi/qoi.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "Helpers.h"
 
 #define LINEAR_TO_SRGB(rgb) ((rgb) > 0 ? ((rgb) < 255 ? (255.0 * (1.055 * pow((rgb)/255.0, 1.0/2.4) - 0.055)) : 255) : 0)
@@ -13,6 +14,7 @@ void* QoiReaderWriter::ReadImage(int& width,
 	int& height,
 	int& nchannels,
 	bool& outOfMemory,
+	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
 	int sizebytes)
 {
@@ -32,8 +34,9 @@ void* QoiReaderWriter::ReadImage(int& width,
 		return NULL;
 	if (nHdrChannels != 3 && nHdrChannels != 4)
 		return NULL;
-	if (abs((double)nHdrWidth * nHdrHeight) > MAX_IMAGE_PIXELS) {
-		outOfMemory = true;
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)nHdrWidth * nHdrHeight) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		isSizeLimitExceeded = true;
 		return NULL;
 	}
 	if (!IsImageBufferSizeOk((size_t)nHdrWidth * (size_t)nHdrChannels, (size_t)nHdrHeight, NULL)) {
@@ -48,9 +51,10 @@ void* QoiReaderWriter::ReadImage(int& width,
 	width = desc.width;
 	height = desc.height;
 	nchannels = desc.channels;
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS)
-		outOfMemory = true;
-	if (outOfMemory || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels())
+		isSizeLimitExceeded = true;
+	if (isSizeLimitExceeded || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
 		QOI_FREE(pDecodedPixels);
 		return NULL;
 	}

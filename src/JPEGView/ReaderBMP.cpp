@@ -4,6 +4,7 @@
 #include "Helpers.h"
 #include "BasicProcessing.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 
 //////////////////////////////////////////////////////////////////////////////////
 // BITMAP reading
@@ -35,7 +36,7 @@ static void ReadUInt(FILE* file, uint32* pUInt) {
 	fread(pUInt, sizeof(uint32), 1, file);
 }
 
-CJPEGImage* CReaderBMP::ReadBmpImage(LPCTSTR strFileName, bool& bOutOfMemory) {
+CJPEGImage* CReaderBMP::ReadBmpImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& bSizeLimitExceeded) {
 	BMHEADER header;
 	BMINFOHEADER infoheader;
 	FILE *fptr;
@@ -74,9 +75,10 @@ CJPEGImage* CReaderBMP::ReadBmpImage(LPCTSTR strFileName, bool& bOutOfMemory) {
 		fclose(fptr);
 		return NULL;
 	}
-	if ((double)infoheader.width * abs(infoheader.height) > MAX_IMAGE_PIXELS) {
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if ((double)infoheader.width * abs(infoheader.height) > (double)CSettingsProvider::This().MaxImagePixels()) {
 		fclose(fptr);
-		bOutOfMemory = true;
+		bSizeLimitExceeded = true;
 		return NULL;
 	}
 

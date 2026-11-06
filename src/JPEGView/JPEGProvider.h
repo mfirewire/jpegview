@@ -127,6 +127,8 @@ private:
 	void GetLoadedImageFromWorkThread(CImageRequest* pRequest);
 	CImageLoadThread* SearchThreadForNewRequest(void);
 	void RemoveUnusedImages(bool bRemoveAlsoReadAhead);
+	// Returns NULL if the wait fails (WAIT_FAILED, ST-08) - the request must
+	// then not be touched by the caller.
 	CImageRequest* StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW = false);
 	CImageRequest* StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW = false);
 	void StartNewRequestBundle(CFileList* pFileList, EReadAheadDirection eDirection, const CProcessParams & processParams, int nNumRequests, CImageRequest* pLastReadyRequest);

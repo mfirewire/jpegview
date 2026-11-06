@@ -2,6 +2,7 @@
 
 #include "HEIFWrapper.h"
 #include "MaxImageDef.h"
+#include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
 
 void * HeifReader::ReadImage(int &width,
@@ -10,6 +11,7 @@ void * HeifReader::ReadImage(int &width,
 					   int &frame_count,
 					   void* &exif_chunk,
 					   bool &outOfMemory,
+					   bool &isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 					   int frame_index,
 					   const void *buffer,
 					   int sizebytes)
@@ -34,8 +36,9 @@ void * HeifReader::ReadImage(int &width,
 	height = handle.get_height();
 	if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION)
 		return NULL;
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
-		outOfMemory = true;
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		isSizeLimitExceeded = true;
 		return NULL;
 	}
 	if (!IsImageBufferSizeOk((size_t)width * nchannels, (size_t)height)) {
@@ -50,8 +53,9 @@ void * HeifReader::ReadImage(int &width,
 
 	if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION)
 		return NULL;
-	if (abs((double)width * height) > MAX_IMAGE_PIXELS) {
-		outOfMemory = true;
+	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
+	if (abs((double)width * height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+		isSizeLimitExceeded = true;
 		return NULL;
 	}
 	if (width < 1 || height < 1 || width * nchannels > stride)

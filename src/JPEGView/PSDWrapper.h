@@ -6,10 +6,10 @@ class PsdReader
 {
 public:
 	// Returns image from PSD file
-	static CJPEGImage* ReadImage(LPCTSTR strFileName, bool& bOutOfMemory);
+	static CJPEGImage* ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& bSizeLimitExceeded); // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 
 	// Returns embedded JPEG thumbnail from PSD file
-	static CJPEGImage* ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory);
+	static CJPEGImage* ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& bSizeLimitExceeded); // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 
 private:
 	enum ColorMode {

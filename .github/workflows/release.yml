@@ -43,6 +43,15 @@ jobs:
     - uses: ./.github/actions/setup-wix
     - uses: ./.github/actions/wtl-submodule
     - uses: ./.github/actions/stamp-version
+    # R-06: regenerate the ThorVG import library with MSVC LIB.EXE from the
+    # checked-in .def, before msbuild links JPEGView.exe (committed .lib is
+    # dlltool-generated, no SAFESEH info - Win32 /SAFESEH link fails
+    # LNK2026/LNK1281 against it). Uploads the regenerated .lib as an
+    # artifact so it can be committed back; CI never commits by itself.
+    - uses: ./.github/actions/regen-thorvg-lib
+      with:
+        platform-arch: Win32
+        build-config: Release
     - name: Build Solution Win32 Release
       shell: cmd
       run: msbuild.exe /property:Platform=Win32 /property:configuration="Release" src\\JPEGView.sln
@@ -88,6 +97,16 @@ jobs:
     - uses: ./.github/actions/setup-wix
     - uses: ./.github/actions/wtl-submodule
     - uses: ./.github/actions/stamp-version
+    # R-06: regenerate the ThorVG import library with MSVC LIB.EXE from the
+    # checked-in .def, before msbuild links JPEGView.exe (committed .lib is
+    # dlltool-generated; Win32 is the arch that needs SAFESEH, but the x64
+    # .lib is regenerated too so both stay LIB-generated and consistent).
+    # Uploads the regenerated .lib as an artifact so it can be committed
+    # back; CI never commits by itself.
+    - uses: ./.github/actions/regen-thorvg-lib
+      with:
+        platform-arch: x64
+        build-config: Release
     - name: Build Solution x64 Release
       shell: cmd
       run: msbuild.exe /property:Platform=x64 /property:configuration="Release" src\\JPEGView.sln
