@@ -2332,10 +2332,30 @@ public:
 		// that is small and legal can hide an absurd chained IFD1.
 		// A truncated file that ends before the pointer has no chain
 		// to hide (dcraw stops there as well), so treat it as 0.
+		// The pointer VALUE is not trusted: manufacturers do not
+		// maintain the chain pointer after a SubIFD, so those 4 bytes
+		// are often unrelated data (a D5000 NEF carries 34799619, an
+		// A100 ARW 957017457, both past EOF). Only follow a pointer
+		// that lands on a structurally plausible IFD - readable entry
+		// count, non-zero, whole entry block inside the file (the same
+		// checks ReadIFD applies at its entry); anything else ends the
+		// chain. A real chained IFD is still visited, so the F-01
+		// protection is unchanged.
 		nextIFD = 0;
 		unsigned char nextBuf[4];
 		if (ReadAt(ifdOff + 2 + entriesSize, nextBuf, 4)) {
-			nextIFD = Rd32(nextBuf);
+			unsigned long long candidate = Rd32(nextBuf);
+			// Validate the candidate the same way ReadIFD validates
+			// its own entry point (see above): a readable, non-zero
+			// entry count whose whole block fits in the file.
+			unsigned char candCount[2];
+			if (candidate != 0 && ReadAt(candidate, candCount, 2)) {
+				unsigned long long candN = Rd16(candCount);
+				if (candN != 0 && candidate + 2 <= m_fileSize &&
+					candN * 12 <= m_fileSize - (candidate + 2)) {
+					nextIFD = candidate;
+				}
+			}
 		}
 		return true;
 	}
