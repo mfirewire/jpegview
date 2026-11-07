@@ -14,10 +14,11 @@ Bugs fixed:
 - Post-build script: Config and LICENSE.txt copy failures now fail the build (exit-code check like the DLL copies) instead of being silently ignored
 - JXL loading: the exception handler no longer leaks the file buffer or the EXIF chunk, and no longer risks freeing a buffer owned by the JXL reader cache (double-free)
 - SVG viewing: rapid paging through SVG files no longer crashes (access violation in libthorvg-1.dll); the whole ThorVG session is now serialised across load threads instead of only init/term
-- Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the empty state is shown instead (F-H02)
+- Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the missing-file state is shown instead (or the empty state when the folder really has no images) (F-H02)
 - JPEG saving: a preserved ICC profile whose colour space is not RGB (e.g. a CMYK profile on a CMYK source saved as RGB) is no longer kept on the output file
 - Parameter DB: opening ParamDB.db now retries a transient sharing violation (up to ~2 s) instead of immediately showing the "Parameter DB error" dialog, so a fast relaunch no longer fails when the file is briefly locked by another process
-- Pressing a sort key now re-enumerates the folder, so files deleted externally drop out of the list (and the empty state is shown if the current file is gone) instead of staying until the next reload
+- Pressing a sort key now re-enumerates the folder, so files deleted externally drop out of the list (and the missing-file state is shown if the current file is gone) instead of staying until the next reload
+- Deleting the current file externally no longer shows the false "does not contain any image files" message when the folder still has images; the missing file is named and every page-turn input (arrow keys, other mapped keys, mouse wheel, navigation panel buttons) moves on to the neighbouring image instead of doing nothing
 - RAW loading: some RAW files (e.g. Nikon D5000 NEF, Sony A100 ARW) were wrongly rejected by the TIFF gate because the next-IFD chain pointer after a SubIFD was followed without validation; manufacturers do not maintain that pointer, so the gate now only follows it when it lands on a structurally plausible IFD
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check

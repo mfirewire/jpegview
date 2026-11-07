@@ -17,6 +17,10 @@ namespace HelpersGUI {
 		FileLoad_LoadError = 2,
 		FileLoad_SlideShowListInvalid = 3,
 		FileLoad_NoFilesInDirectory = 4,
+		// The folder still has images but the current file left the list
+		// (deleted or moved externally); the empty state names it and
+		// navigation moves on from its insertion point.
+		FileLoad_CurrentFileMissing = 5,
 
 		// these can be combined with other error codes, so make sure they work with bit arithmetic
 		FileLoad_OutOfMemory = 65536,

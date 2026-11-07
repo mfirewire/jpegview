@@ -422,6 +422,9 @@ namespace HelpersGUI {
 				_stprintf_s(buff, BUF_LEN, CString(CNLS::GetString(_T("The directory '%s' does not contain any image files!")))  + _T('\n') +
 					CNLS::GetString(_T("Press any key to search the subdirectories for image files.")), sFailedFileName);
 				break;
+			case FileLoad_CurrentFileMissing:
+				_stprintf_s(buff, BUF_LEN, CNLS::GetString(_T("Current file '%s' is missing. Press Right/Left to navigate to the next/previous image file.")), sFailedFileName);
+				break;
 			default:
 				return;
 		}

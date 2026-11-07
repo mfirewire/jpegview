@@ -9,6 +9,9 @@ class CFileDesc
 {
 public:
 	CFileDesc(const CString & sName, const FILETIME* lastModTime, const FILETIME* creationTime, __int64 fileSize);
+	// Default-constructed descriptor (empty name, zero times/size); only
+	// used as the placeholder for the recorded missing file, never sorted.
+	CFileDesc();
 
 	// STL sort only needs this operator to order CFileDesc objects
 	bool operator < (const CFileDesc& other) const;
@@ -130,6 +133,16 @@ public:
 	// Returns if the current file exists
 	bool CurrentFileExists() const;
 
+	// True when the folder still has images but the current file left the
+	// list (deleted or moved externally). The missing file is remembered
+	// (see m_missingFile) so the empty state can name it and Next/Prev
+	// can navigate on from its insertion point. Derived from m_iter and
+	// the record, so it clears itself as soon as m_iter lands on a file.
+	bool HasMissingFile() const;
+	// Full path / title of the missing file, or NULL when there is none
+	LPCTSTR MissingFileName() const;
+	LPCTSTR MissingFileTitle() const;
+
 	// Returns if the file in the given path can be moved to recycle bin (e.g. not possible for memory sticks or remote drives)
 	static bool DriveHasRecycleBin(LPCTSTR filePath);
 
@@ -163,6 +176,12 @@ private:
 	std::list<CFileDesc>::iterator m_iterStart; // start of iteration in m_fileList
 	std::list<CFileDesc>::iterator m_iterCheckPoint;
 
+	// Descriptor of the file that was current when it left the list
+	// (deleted or moved externally), captured before the list was
+	// rebuilt, so its sort keys (name, dates, size) are still known.
+	// Only consulted while HasMissingFile() is true.
+	CFileDesc m_missingFile;
+
 	CString m_sMarkedFile;
 	CString m_sMarkedFileCurrent;
 	int m_nMarkedIndexShow;
@@ -173,6 +192,13 @@ private:
 	// E10: (re)establish m_iter together with its cached index (SetCurrentIter
 	// walks the list; RecalcCurrentIndex only recomputes the index).
 	void SetCurrentIter(std::list<CFileDesc>::iterator iter);
+	// Records the file that was current when it left the list
+	void NoteMissingFile(const CFileDesc& desc) { m_missingFile = desc; }
+	// First element that sorts after the missing file in display order,
+	// or end() when the missing file sorts after all elements. Only
+	// meaningful when HasMissingFile() is true; random order has no
+	// insertion point, so callers fall back to first/last then.
+	std::list<CFileDesc>::iterator FindMissingInsertionPoint();
 	void RecalcCurrentIndex();
 	void NextInFolder();
 	CFileList* GotoFirstShown();

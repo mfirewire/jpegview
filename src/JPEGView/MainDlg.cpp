@@ -695,6 +695,7 @@ void CMainDlg::DisplayErrors(CJPEGImage* pCurrentImage, const CRect& clientRect,
 	} else if (pCurrentImage == NULL) {
 		HelpersGUI::DrawImageLoadErrorText(dc, clientRect,
 			(m_nLastLoadError == HelpersGUI::FileLoad_SlideShowListInvalid) ? m_sStartupFile :
+			(m_nLastLoadError == HelpersGUI::FileLoad_CurrentFileMissing) ? m_pFileList->MissingFileTitle() :
 			(m_nLastLoadError == HelpersGUI::FileLoad_NoFilesInDirectory) ? m_pFileList->CurrentDirectory() : CurrentFileName(false),
 			m_nLastLoadError,
 			(m_bOutOfMemoryLastImage ? HelpersGUI::FileLoad_OutOfMemory : 0) | (m_bExceptionErrorLastImage ? HelpersGUI::FileLoad_ExceptionError : 0) | (m_bSizeLimitExceededLastImage ? HelpersGUI::FileLoad_SizeLimitExceeded : 0));
@@ -1592,10 +1593,14 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				(nCommand == IDM_SORT_RANDOM) ? Helpers::FS_Random : 
 				(nCommand == IDM_SORT_SIZE) ? Helpers::FS_FileSize : Helpers::FS_FileName, m_pFileList->IsSortedAscending());
 			// F-H02: the current file may have left the list (deleted or moved
-			// externally) and SetSorting re-enumerates the folder. Show the empty
-			// state instead of keeping the stale image: GotoImage(POS_Current)
-			// requests Current() == NULL, which maps to NoFilesInDirectory.
-			if (m_pFileList->Current() == NULL) {
+			// externally) and SetSorting re-enumerates the folder. Show the
+			// missing-file state instead of keeping the stale image (or, when
+			// the recorded missing file came back, show it again).
+			// Reload when there is no current file, and also when the missing
+			// file came back and SetSorting landed on it (the load error is
+			// still the stale missing-file error): GotoImage(POS_Current)
+			// then shows it instead of the stale missing message.
+			if (m_pFileList->Current() == NULL || m_nLastLoadError == HelpersGUI::FileLoad_CurrentFileMissing) {
 				ReloadImage(false);
 			}
 			if (m_pEXIFDisplayCtl->IsActive() || m_bShowFileName) {
@@ -1606,10 +1611,14 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_SORT_DESCENDING:
 			m_pFileList->SetSorting(m_pFileList->GetSorting(), nCommand == IDM_SORT_ASCENDING);
 			// F-H02: the current file may have left the list (deleted or moved
-			// externally) and SetSorting re-enumerates the folder. Show the empty
-			// state instead of keeping the stale image: GotoImage(POS_Current)
-			// requests Current() == NULL, which maps to NoFilesInDirectory.
-			if (m_pFileList->Current() == NULL) {
+			// externally) and SetSorting re-enumerates the folder. Show the
+			// missing-file state instead of keeping the stale image (or, when
+			// the recorded missing file came back, show it again).
+			// Reload when there is no current file, and also when the missing
+			// file came back and SetSorting landed on it (the load error is
+			// still the stale missing-file error): GotoImage(POS_Current)
+			// then shows it instead of the stale missing message.
+			if (m_pFileList->Current() == NULL || m_nLastLoadError == HelpersGUI::FileLoad_CurrentFileMissing) {
 				ReloadImage(false);
 			}
 			if (m_pEXIFDisplayCtl->IsActive() || m_bShowFileName) {
@@ -2814,7 +2823,19 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 		m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, (ePos == POS_AwayFromCurrent) ? CJPEGProvider::NONE : eDirection,  
 			m_pFileList->Current(), nFrameIndex, procParams,
 			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0, &m_bSizeLimitExceededLastImage);
-		m_nLastLoadError = (m_pCurrentImage == NULL) ? ((m_pFileList->Current() == NULL) ? HelpersGUI::FileLoad_NoFilesInDirectory : HelpersGUI::FileLoad_LoadError) : HelpersGUI::FileLoad_Ok;
+		if (m_pCurrentImage != NULL) {
+			m_nLastLoadError = HelpersGUI::FileLoad_Ok;
+		} else if (m_pFileList->Current() != NULL) {
+			m_nLastLoadError = HelpersGUI::FileLoad_LoadError;
+		} else if (m_pFileList->HasMissingFile()) {
+			// The folder still has images but the current file left the
+			// list (deleted or moved externally): name the missing file
+			// instead of claiming the folder has no images, and let
+			// every navigation input move on from here.
+			m_nLastLoadError = HelpersGUI::FileLoad_CurrentFileMissing;
+		} else {
+			m_nLastLoadError = HelpersGUI::FileLoad_NoFilesInDirectory;
+		}
 	}
 	double minimalDisplayTime = CSettingsProvider::This().MinimalDisplayTime();
 	bool bSynchronize = (nFlags & KEEP_PARAMETERS) == 0;
@@ -3569,7 +3590,7 @@ int CMainDlg::GetLoadErrorAfterOpenFile() {
 			if (m_pFileList->IsSlideShowList()) {
 				return HelpersGUI::FileLoad_SlideShowListInvalid;
 			}
-			return HelpersGUI::FileLoad_NoFilesInDirectory;
+			return m_pFileList->HasMissingFile() ? HelpersGUI::FileLoad_CurrentFileMissing : HelpersGUI::FileLoad_NoFilesInDirectory;
 		}
 		return HelpersGUI::FileLoad_LoadError;
 	}

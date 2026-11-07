@@ -103,6 +103,7 @@ Creation date/time
 Crop image	
 Crop the image and apply transformation? Cropping cannot be undone!	
 Ctrl + Left mouse	
+Current file '%s' is missing. Press Right/Left to navigate to the next/previous image file.	
 Current image	
 Cyan-Red	
 Darken Highlights	

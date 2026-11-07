@@ -81,6 +81,15 @@ CFileDesc::CFileDesc(const CString & sName, const FILETIME* lastModTime, const F
 	m_fileSize = fileSize;
 }
 
+CFileDesc::CFileDesc() {
+	m_sName = _T("");
+	m_sTitle = (LPCTSTR)m_sName;
+	memset(&m_lastModTime, 0, sizeof(FILETIME));
+	memset(&m_creationTime, 0, sizeof(FILETIME));
+	m_nRandomOrderNumber = rand();
+	m_fileSize = 0;
+}
+
 bool CFileDesc::SortAscending(const CFileDesc& other) const {
 	if (sm_eSorting == Helpers::FS_CreationTime || sm_eSorting == Helpers::FS_LastModTime) {
 		const FILETIME* pTime = (sm_eSorting == Helpers::FS_LastModTime) ? &m_lastModTime : &m_creationTime;
@@ -423,6 +432,22 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 				iterInitial = m_fileList.begin();
 			}
 			SetCurrentIter(iterInitial);
+			if (iterInitial == m_fileList.end() && !bIsDirectory && !m_fileList.empty()) {
+				// The opened image file is not in its folder's list: remember
+				// it, so the empty state can name it and Next/Prev can
+				// navigate on from its insertion point (same missing-file
+				// state as in SetSorting/Reload).
+				CFindFile fileFind;
+				if (fileFind.FindFile(sInitialFile)) {
+					FILETIME lastWriteTime, creationTime;
+					fileFind.GetLastWriteTime(&lastWriteTime);
+					fileFind.GetCreationTime(&creationTime);
+					NoteMissingFile(CFileDesc(fileFind.GetFilePath(), &lastWriteTime, &creationTime, fileFind.GetFileSize()));
+				} else {
+					FILETIME ftZero = { 0, 0 };
+					NoteMissingFile(CFileDesc(sInitialFile, &ftZero, &ftZero, 0));
+				}
+			}
 			m_iterStart = bWrapAroundFolder ? m_iter : m_fileList.begin();
 			// F-H02: an end() anchor would make Next()'s folder-finished check
 			// unreachable (iterTemp wraps to begin() before the comparison),
@@ -473,12 +498,32 @@ void CFileList::Reload(LPCTSTR sFileName, bool clearForwardHistory) {
 	if (sCurrent == NULL) {
 		sCurrent = Current();
 		if (sCurrent == NULL) {
-			m_fileList.clear();
-			return;
+			if (HasMissingFile()) {
+				// Already in the missing-file state: re-enumerate
+				// around the recorded file instead of wiping the list,
+				// so it can be found again if it came back (and the
+				// missing state otherwise survives the reload).
+				sCurrent = MissingFileName();
+			} else {
+				m_fileList.clear();
+				return;
+			}
 		}
 	}
 
 	CString sCurrentFile = sCurrent;
+	// Capture the anchor file's descriptor before the list is rebuilt
+	// (same anchor as in SetSorting): if it left the folder, its sort
+	// keys are needed for the missing-file insertion point.
+	CFileDesc anchorDesc;
+	bool bHaveAnchorDesc = false;
+	{
+		std::list<CFileDesc>::iterator itAnchor = FindFile(sCurrentFile);
+		if (itAnchor != m_fileList.end()) {
+			anchorDesc = *itAnchor;
+			bHaveAnchorDesc = true;
+		}
+	}
 
 	if (clearForwardHistory) {
 		// delete the chain of CFileLists forward
@@ -509,7 +554,15 @@ void CFileList::Reload(LPCTSTR sFileName, bool clearForwardHistory) {
 		VerifyFiles(); // maybe some of the files got deleted or moved
 		m_iterStart = m_fileList.begin();
 	}
-	SetCurrentIter(FindFile(sCurrentFile)); // go again to current file; end() if it left the list (empty state, F-H02)
+	std::list<CFileDesc>::iterator itFound = FindFile(sCurrentFile);
+	SetCurrentIter(itFound); // go again to current file; end() if it left the list (missing-file state, F-H02)
+	if (itFound == m_fileList.end() && !m_fileList.empty() && bHaveAnchorDesc) {
+		// The anchor file left the list while the folder still has
+		// images: remember it (see SetSorting). When the anchor was the
+		// recorded missing file itself there is no descriptor to capture
+		// and the earlier record is kept.
+		NoteMissingFile(anchorDesc);
+	}
 }
 
 bool CFileList::CurrentFileExists() const {
@@ -594,6 +647,35 @@ void CFileList::ModificationTimeChanged() {
 
 CFileList* CFileList::Next() {
 	m_nMarkedIndexShow = -1;
+	if (m_iter == m_fileList.end() && m_fileList.size() > 0) {
+		// The current file left the list (deleted or moved externally)
+		// while the folder still has images: navigate on from its
+		// insertion point instead of staying stuck on end(). Next lands
+		// on the first file that sorts after the missing one.
+		if (HasMissingFile() && CFileDesc::GetSorting() != Helpers::FS_Random) {
+			std::list<CFileDesc>::iterator itIns = FindMissingInsertionPoint();
+			if (itIns != m_fileList.end()) {
+				SetCurrentIter(itIns);
+				return this;
+			}
+			// The missing file sorts after all remaining files: stand on
+			// the last file and let the normal advance below decide
+			// (wrap to first file / next folder, or stay when wrapping
+			// is off in loop-directory mode).
+			if (!m_bWrapAroundFolder && sm_eMode == Helpers::NM_LoopDirectory) {
+				return this;
+			}
+			std::list<CFileDesc>::iterator itLast = m_fileList.end();
+			--itLast;
+			SetCurrentIter(itLast);
+		} else {
+			// No missing file recorded (or random order, which has no
+			// insertion point): restart at the first file, like
+			// NextInFolder() does when stepping from end().
+			SetCurrentIter(m_fileList.begin());
+			return this;
+		}
+	}
 	if (m_fileList.size() > 0) {
 		std::list<CFileDesc>::iterator iterTemp = m_iter;
 		if (iterTemp == m_fileList.end())
@@ -634,6 +716,37 @@ CFileList* CFileList::Next() {
 
 CFileList* CFileList::Prev() {
 	m_nMarkedIndexShow = -1;
+	if (m_iter == m_fileList.end() && m_fileList.size() > 0) {
+		// Mirror of Next(): navigate on from the missing file's
+		// insertion point. Prev lands on the last file that sorts
+		// before the missing one.
+		if (HasMissingFile() && CFileDesc::GetSorting() != Helpers::FS_Random) {
+			std::list<CFileDesc>::iterator itIns = FindMissingInsertionPoint();
+			if (itIns != m_fileList.begin()) {
+				// The element before the insertion point is the last file
+				// sorting before the missing one (or the last file when
+				// the missing file sorts after all elements).
+				std::list<CFileDesc>::iterator itPrev = itIns;
+				--itPrev;
+				SetCurrentIter(itPrev);
+				return this;
+			}
+			// The missing file sorts before all remaining files: stand
+			// on the first file and let the "at start" handling below
+			// decide (wrap to last file / previous folder, or stay when
+			// wrapping is off in loop-directory mode).
+			if (!m_bWrapAroundFolder && sm_eMode == Helpers::NM_LoopDirectory) {
+				return this;
+			}
+			SetCurrentIter(m_fileList.begin());
+		} else {
+			// No missing file recorded (or random order): keep the
+			// historical behaviour of stepping to the last file.
+			m_iter--;
+			m_nCurrentIndex = (int)m_fileList.size() - 1;
+			return this;
+		}
+	}
 	if (m_iter == m_iterStart) {
 		if (sm_eMode == Helpers::NM_LoopDirectory) {
 			if (!m_bWrapAroundFolder) {
@@ -743,6 +856,28 @@ void CFileList::RecalcCurrentIndex() {
 	}
 }
 
+bool CFileList::HasMissingFile() const {
+	return m_iter == m_fileList.end() && !m_fileList.empty() && !m_missingFile.GetName().IsEmpty();
+}
+
+LPCTSTR CFileList::MissingFileName() const {
+	return HasMissingFile() ? (LPCTSTR)m_missingFile.GetName() : NULL;
+}
+
+LPCTSTR CFileList::MissingFileTitle() const {
+	return HasMissingFile() ? m_missingFile.GetTitle() : NULL;
+}
+
+std::list<CFileDesc>::iterator CFileList::FindMissingInsertionPoint() {
+	std::list<CFileDesc>::iterator iter;
+	for (iter = m_fileList.begin(); iter != m_fileList.end(); ++iter) {
+		if (m_missingFile < *iter) {
+			return iter;
+		}
+	}
+	return m_fileList.end();
+}
+
 int CFileList::CurrentIndex() const {
 	// E10: cached index, maintained incrementally wherever m_iter moves
 	// (NextInFolder/Prev/First/Last/MoveIterToLast/SetCurrentIter/
@@ -778,22 +913,43 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 }
 
 void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
-	CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
+	// Anchor: the current file, or the recorded missing file when
+	// already in the missing-file state (so a file that came back
+	// externally is found again instead of staying missing).
+	CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : (HasMissingFile() ? m_missingFile.GetName() : "");
+	// Capture the current file's descriptor before the list is rebuilt:
+	// if the file left the folder, its sort keys (name, dates, size)
+	// are the anchor for the missing-file insertion point.
+	CFileDesc currentDesc;
+	bool bHaveCurrentDesc = false;
+	if (m_iter != m_fileList.end()) {
+		currentDesc = *m_iter;
+		bHaveCurrentDesc = true;
+	}
 	CFileDesc::SetSorting(eSorting, sortAscending);
 	// P2: every sort-key press re-enumerates the folder, like Reload():
 	// files deleted externally drop out of the list (if it is the
-	// current file, FindFile below returns end() and the empty state is
-	// shown), and files added externally show up. Costs one directory
+	// current file, FindFile below returns end() and the missing-file
+	// state is shown), and files added externally show up. Costs one directory
 	// scan per sort-key press, the same as pressing Ctrl+R. Unconditional
 	// on purpose: pressing N while the sort is already FileName+ascending
 	// must still refresh, or a deleted current file would stay on screen.
 	if (!m_bIsSlideShowList) FindFiles(); else VerifyFiles();
 	m_fileList.sort();
 	// F-H02: FindFile returns end() when the current file left the list,
-	// keeping the empty state instead of silently jumping to the first
-	// image; m_iterStart follows m_iter in wrap mode (re-anchored at
+	// keeping the missing-file state instead of silently jumping to the
+	// first image; m_iterStart follows m_iter in wrap mode (re-anchored at
 	// begin() below when m_iter is end()).
-	SetCurrentIter(FindFile(sThisFile));
+	std::list<CFileDesc>::iterator itFound = FindFile(sThisFile);
+	SetCurrentIter(itFound);
+	if (itFound == m_fileList.end() && !m_fileList.empty() && bHaveCurrentDesc) {
+		// The current file left the list while the folder still has
+		// images: remember it, so the empty state can name it and
+		// Next/Prev can navigate on from its insertion point. (When
+		// already in the missing-file state the earlier record is kept:
+		// the anchor above is the missing file itself.)
+		NoteMissingFile(currentDesc);
+	}
 	m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
 	// An end() anchor would make Next()'s folder-finished check
 	// unreachable; anchor a missing current file at begin().
@@ -902,6 +1058,12 @@ void CFileList::DeleteHistory(bool onlyForward) {
 ///////////////////////////////////////////////////////////////////////////////////
 
 void CFileList::MoveIterToLast() {
+	// From end() (e.g. Last() in the missing-file state) the loop below
+	// would not run and would leave the iterator at end(); restart from
+	// the first file instead.
+	if (m_iter == m_fileList.end() && !m_fileList.empty()) {
+		m_iter = m_fileList.begin();
+	}
 	std::list<CFileDesc>::iterator lastIter = m_iter;
 	while (m_iter != m_fileList.end()) {
 		lastIter = m_iter;
