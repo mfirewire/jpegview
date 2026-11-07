@@ -1,20 +1,44 @@
 JPEGView Changelog
 ******************
 
-[1.3.47] 2026-11-01
+[Unreleased]
 New features:
+- Add JPEG 2000 (JP2/J2K/J2C) viewing and saving (OpenJPEG 2.5.4)
+- Add OpenEXR (.exr) viewing and saving (tinyexr)
+- Add SVG (.svg) viewing via ThorVG, including text rendering with system fonts
+- Add save/export for GIF, PNM (PPM/PGM/PNM), PBM, HDR, TGA (TGA/ICB/VDA/VST), JPEG 2000 and OpenEXR
+- Add text recognition (OCR): Ctrl+Q (or menu Recognize text (OCR)) recognizes text in the current image using the built-in Windows OCR engine; mixed Chinese/English is recognized with both engines and merged line by line; Ctrl+C copies the selected (or all) recognized text
+- Add PGM/PNM, AVIFS, ICB/VDA/VST, HDR (RGBE) and PBM viewing; PAM (P7) Netpbm viewing; true Windows cursor (.cur) support
+- Add INI settings: OcrShortcut (default Ctrl+Q), OcrLanguages (default zh-CN,zh-TW,en-US), FileEndingsExtra (extra browsable extensions, MAX_ENDINGS raised to 128)
+- Version stamp from git tag: tagged builds show the tag, development builds show the last release plus a dev marker
 - Add JXL encode null-check and ConvertToJXL JPEG-source guard (crash fixes)
 - Add CMYK ICC profile delayed-open + path buffer fix (MAX_PATH+16) with bundled cmyk.icm
 - Add PSD CMYK fixed 4-channel YMCK (avoid alpha-channel bugs)
 - Add TIFF OOM fallback to WIC reader (reset OutOfMemory before retry)
 - Add JXL single-pass BGR->RGB copy + 1 MB output pre-allocation (encode speed)
 Bugs fixed:
+- Animated image switching no longer corrupts the heap (per-thread animation caches)
+- JPEG 2000 save now works (the image rectangle is set explicitly; previously every JP2/J2K/J2C save failed)
+- Switching images no longer risks drawing a freed image while the load wait pumps paint messages
+- Uncompressed TGA at 8bpp is rejected instead of returning an uninitialized buffer
+- WebP files with an ICC profile no longer leak the color transform and EXIF chunk on decode failure
+- AVIF files rejected by the pixel cap no longer fall back to a second full HEIF parse
+- Copying a very large image no longer silently empties the clipboard when the allocation fails (and now reports the failure)
+- Pasting an image with a huge palette size in the clipboard header no longer reads out of bounds
+- SVG files with a very long root tag are no longer rejected as size-less
+- The per-thread whole-file read buffer is released after a request once past 64 MB (lower memory after opening a large file)
+- Oversized images now report the size limit instead of "Not enough memory", and raising MaxImagePixelsMP now applies to all decoders
+- SVG text no longer disappears after browsing away and back
+- Startup out-of-memory now shows a message instead of exiting silently
+- Numerous robustness fixes from code review (clipboard, KeyMap, file watcher, thumbnail and paint paths)
 - JXL save/convert no longer dereferences NULL output
 - TIFF read failure no longer sticks OutOfMemory flag
 - CMYK profile no longer opened on invalid path
 Changed behavior:
 - None (default runtime settings unchanged)
 Other changes:
+- Updated GitHub Actions: actions/checkout v5, action-gh-release v3
+- Vendored ThorVG 1.1.3, OpenJPEG 2.5.4, tinyexr, stb_image_write 1.16
 - Updated to library versions:
   * libwebp 1.6.0 (CVE fixes, perf)
   * libde265 1.1.3

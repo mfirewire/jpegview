@@ -238,11 +238,21 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 		::CloseClipboard();
 		return;
 	}
+	// The lock must be checked before EmptyClipboard: locking a freshly
+	// allocated block can only fail under extreme memory pressure, but if
+	// it does, the clipboard must still hold the previous contents (same
+	// class as the GlobalAlloc failure above).
+	void* pMemory = ::GlobalLock(hMem);
+	if (pMemory == NULL) {
+		::MessageBox(hWnd, _T("Not enough memory to copy the image to the clipboard."), _T("JPEGView"), MB_OK | MB_ICONERROR);
+		::GlobalFree(hMem);
+		::CloseClipboard();
+		return;
+	}
 	// P3-5: empty the clipboard only now that the allocation succeeded;
 	// emptying it first and then failing the allocation silently
 	// destroyed the user's previous clipboard contents.
 	::EmptyClipboard();
-	void* pMemory = ::GlobalLock(hMem); 
 
 	BITMAPINFO* pBMInfo = (BITMAPINFO*) pMemory;
 	memset(pBMInfo, 0, sizeof(BITMAPINFO));

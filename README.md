@@ -15,9 +15,9 @@ JPEGView is a lean, fast and highly configurable image viewer/editor with a mini
 JPEGView has built-in support the following formats:
 
 * Popular: JPEG (including JPS, MPO), GIF
-* Lossless: BMP, PNG (including APNG), TIFF, PSD, PPM (including PGM, PNM, PBM, PAM), HDR (including RGBE), JPEG 2000 (including JP2, J2K, J2C), OpenEXR (.exr)
+* Lossless: BMP, PNG (including APNG), TIFF, PSD, QOI, PPM (including PGM, PNM, PBM, PAM), HDR (including RGBE), JPEG 2000 (including JP2, J2K, J2C), OpenEXR (.exr)
 * Web: WEBP, JXL, HEIF/HEIC, AVIF (including AVIFS, AVIS), SVG (.svg)
-* Legacy: TGA (including ICB, VDA, VST), WDP, HDP, JXR, Windows icon/cursor (ICO, CUR)
+* Legacy: TGA (including ICB, VDA, VST), WDP, HDP, JXR, DDS, Windows icon/cursor (ICO, CUR)
 * Camera RAW formats:
   * Adobe (DNG), Canon (CRW, CR2, CR3), Nikon (NEF, NRW), Sony (ARW, SR2, SRF)
   * Olympus (ORF), Panasonic (RW2), Fujifilm (RAF)
@@ -25,6 +25,10 @@ JPEGView has built-in support the following formats:
   * A full list is available here: [LibRaw supported cameras](https://www.libraw.org/supported-cameras)
 
 Many additional formats are supported by Windows Imaging Component (WIC)
+
+### Save / Export
+
+Besides JPEG, BMP, PNG, TIFF, WebP and JPEG XL, the current image can also be saved as QOI, GIF (256 colours), PNM (PPM/PGM/PNM), PBM, HDR (HDR/RGBE), TGA (TGA/ICB/VDA/VST), JPEG 2000 (JP2/J2K/J2C) and OpenEXR (.exr). WebP, JPEG XL and JPEG 2000 offer a lossless option in the Save As dialog.
 
 ### Basic Image Editor
 
@@ -36,6 +40,15 @@ Basic on-the-fly image processing is provided - allowing adjusting typical param
 * perspective
 * contrast
 * local under-exposure/over-exposure
+
+### Text Recognition (OCR)
+
+Press `Ctrl+Q` (or menu *Recognize text (OCR)*) to recognize the text in the current image. JPEGView uses the built-in Windows OCR engine (Windows 10 and later), so the language packs you need must be installed in Windows Settings > Time & language > Language & region.
+
+* Mixed Chinese/English images are recognized with both engines and the results are merged line by line, so Chinese and English words appear in reading order.
+* Click or drag over words to select them; `Ctrl+C` copies the selection (or all recognized text when nothing is selected), `Ctrl+A` selects all. `Esc` hides the result.
+* Configure it in `JPEGView.ini`: `OcrShortcut` (default `Ctrl+Q`) and `OcrLanguages` (default `zh-CN,zh-TW,en-US`; empty means the installed languages, in Windows' own order).
+* The result belongs to the image as recognized: changing the image, rotating, cropping or mirroring clears it.
 
 ### Other Features
 
@@ -52,6 +65,9 @@ Basic on-the-fly image processing is provided - allowing adjusting typical param
 * CMYK ICC profile: delayed open + path buffer fix (MAX_PATH+16) avoids invalid-path crashes; bundled `Config/cmyk.icm`
 * PSD CMYK: fixed 4-channel YMCK avoids alpha-channel rendering bugs
 * Library updates: libwebp 1.6.0, libde265 1.1.3, libheif 1.23.7, LibRaw 0.22.3
+* JPEG 2000 save fixed: the image rectangle is now set, so JP2/J2K/J2C saves succeed (previously every save failed)
+* Animated image switching no longer corrupts the heap (per-thread animation caches)
+* Per-thread whole-file read buffer is released after a request once past 64 MB (lower memory after opening a large file)
 
 Default runtime settings (INI, key bindings, window behavior) are unchanged from this branch.
 
