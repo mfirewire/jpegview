@@ -2516,17 +2516,24 @@ public:
 	// crafted TIFF can force ~1,049,601 nodes (1024 SubIFDs each pointing
 	// at an IFD with 1024 more). A shared offset is walked once; exceeding
 	// the cap fails the gate (fail closed), it never crashes.
-	// F-01: the next-IFD chain is walked too (no depth limit for the
-	// chain; the cap and visited set bound it), because dcraw_mod
-	// follows the chain and an absurd chained IFD must not slip past.
+	// F-01: the next-IFD chain is walked too, but only at the top
+	// level (depth 0; no depth limit for the chain, the cap and
+	// visited set bound it), because dcraw_mod's parse_tiff loops on
+	// the next pointer and an absurd chained IFD must not slip past.
+	// A SubIFD's chain is never followed: dcraw's tag 330 handling
+	// parses each SubIFD once (parse_tiff_ifd) and never reads its
+	// next pointer.
 	bool CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out, std::vector<unsigned long long>& visited) const {
 		// F-01: walk the next-IFD chain as well as the SubIFD tree.
-		// dcraw_mod follows the chain (parse_tiff loops on the next
-		// pointer), so a chain IFD that declares absurd dimensions
-		// would otherwise bypass the gate. The chain is walked
-		// iteratively with no depth limit (a multi-page TIFF can
-		// chain many IFDs); the 4096-node cap and the visited set
-		// bound it. SubIFD nesting keeps the depth <= 2 limit.
+		// dcraw_mod's parse_tiff loops on the next pointer, so a chain
+		// IFD that declares absurd dimensions would otherwise bypass
+		// the gate, but only at the top level (depth 0). A SubIFD's
+		// next pointer is never followed: dcraw's tag 330 handling
+		// parses each SubIFD once (parse_tiff_ifd) and never reads it.
+		// The chain is walked iteratively with no depth limit (a
+		// multi-page TIFF can chain many IFDs); the 4096-node cap and
+		// the visited set bound it. SubIFD nesting keeps the depth
+		// <= 2 limit.
 		unsigned long long cur = ifdOff;
 		while (cur != 0) {
 			for (size_t i = 0; i < visited.size(); ++i) {
@@ -2555,7 +2562,14 @@ public:
 					}
 				}
 			}
-			cur = nextIFD;
+			// Only the top-level chain is followed (depth 0). A SubIFD's
+			// next pointer is never read by dcraw (tag 330 handling
+			// parses each SubIFD once), and manufacturers do not maintain
+			// it, so those 4 bytes are often unrelated data: a D60 NEF
+			// carries 197139 there, pointing at raw image bytes that
+			// parse as a 22627-entry "IFD" with insane dimensions and
+			// veto the file. Following it exceeds what dcraw decodes.
+			cur = (depth == 0) ? nextIFD : 0;
 		}
 		return true;
 	}
