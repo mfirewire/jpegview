@@ -781,6 +781,12 @@ void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
 	if (eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
 		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
 		CFileDesc::SetSorting(eSorting, sortAscending);
+		// P2: changing the sort order now re-enumerates the folder, like
+		// Reload(): files deleted externally drop out of the list (if it
+		// is the current file, FindFile below returns end() and the empty
+		// state is shown), and files added externally show up. Costs one
+		// directory scan per sort change, the same as pressing Ctrl+R.
+		if (!m_bIsSlideShowList) FindFiles(); else VerifyFiles();
 		m_fileList.sort();
 		// F-H02: FindFile returns end() when the current file left the list,
 		// keeping the empty state instead of silently jumping to the first
@@ -1138,7 +1144,7 @@ void CFileList::FindFiles() {
 
 	m_fileList.sort();
 	// E10: the list was rebuilt; the current position is re-established
-	// by the caller (FindFile + SetCurrentIter in the constructor/Reload).
+	// by the caller (FindFile + SetCurrentIter in the constructor/Reload/SetSorting).
 	m_nCurrentIndex = -1;
 }
 

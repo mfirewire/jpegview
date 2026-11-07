@@ -1588,7 +1588,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				(nCommand == IDM_SORT_RANDOM) ? Helpers::FS_Random : 
 				(nCommand == IDM_SORT_SIZE) ? Helpers::FS_FileSize : Helpers::FS_FileName, m_pFileList->IsSortedAscending());
 			// F-H02: the current file may have left the list (deleted or moved
-			// externally) while the sort only reordered it. Show the empty
+			// externally) and SetSorting re-enumerates the folder. Show the empty
 			// state instead of keeping the stale image: GotoImage(POS_Current)
 			// requests Current() == NULL, which maps to NoFilesInDirectory.
 			if (m_pFileList->Current() == NULL) {
@@ -1602,7 +1602,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_SORT_DESCENDING:
 			m_pFileList->SetSorting(m_pFileList->GetSorting(), nCommand == IDM_SORT_ASCENDING);
 			// F-H02: the current file may have left the list (deleted or moved
-			// externally) while the sort only reordered it. Show the empty
+			// externally) and SetSorting re-enumerates the folder. Show the empty
 			// state instead of keeping the stale image: GotoImage(POS_Current)
 			// requests Current() == NULL, which maps to NoFilesInDirectory.
 			if (m_pFileList->Current() == NULL) {

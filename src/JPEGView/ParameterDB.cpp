@@ -92,6 +92,38 @@ static bool CheckHeader(HANDLE hFile, int & nVersion) {
 	return bHeaderOk;
 }
 
+// How long opening the parameter DB is retried when the file is temporarily
+// locked by another process (e.g. an antivirus/indexer scan of the file that
+// was just written, or a second JPEGView process starting at the same time).
+// The open uses share mode 0, which is deliberately kept: it is the
+// cross-process mutex for the DB, relaxing it would allow concurrent writes.
+// Only ERROR_SHARING_VIOLATION is retried, and only with the short blocking
+// sleep below on the UI thread (at most ~1.9 s, and only when a lock is
+// actually hit); that is preferable to the modal "Parameter DB error" dialog
+// that used to appear for such a transient lock. All other errors (including
+// ERROR_FILE_NOT_FOUND) fail immediately, exactly as before.
+const int PARAM_DB_OPEN_MAX_ATTEMPTS = 20;
+const DWORD PARAM_DB_OPEN_RETRY_DELAY_MS = 100;
+
+// Opens the parameter DB file with the same arguments as ::CreateFile, but
+// retries a sharing violation for a short while. Returns INVALID_HANDLE_VALUE
+// on failure with the last error of the final attempt preserved in
+// ::GetLastError(), so the existing error reporting shows the real reason.
+static HANDLE OpenParamDBFile(LPCTSTR sParamDBName, DWORD dwDesiredAccess, DWORD dwCreationDisposition) {
+	for (int nAttempt = 0; nAttempt < PARAM_DB_OPEN_MAX_ATTEMPTS; nAttempt++) {
+		HANDLE hFile = ::CreateFile(sParamDBName, dwDesiredAccess, 0, NULL, dwCreationDisposition, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			return hFile;
+		}
+		DWORD dwLastError = ::GetLastError();
+		if (dwLastError != ERROR_SHARING_VIOLATION || nAttempt == PARAM_DB_OPEN_MAX_ATTEMPTS - 1) {
+			::SetLastError(dwLastError);
+			return INVALID_HANDLE_VALUE;
+		}
+		::Sleep(PARAM_DB_OPEN_RETRY_DELAY_MS);
+	}
+	return INVALID_HANDLE_VALUE; // unreachable: the loop always returns, keeps compilers from warning about a missing return
+}
 /////////////////////////////////////////////////////////////////////////////////////////////
 // CParameterDBEntry
 /////////////////////////////////////////////////////////////////////////////////////////////
@@ -544,7 +576,7 @@ CParameterDB::DBBlock* CParameterDB::LoadFromFile(const CString& sParamDBName, b
 	}
 
 	// file exists, open it
-	HANDLE hFile = ::CreateFile(sParamDBName, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile = OpenParamDBFile(sParamDBName, GENERIC_READ, OPEN_EXISTING);
 	if (hFile == INVALID_HANDLE_VALUE) {
 		HandleErrorAndCloseHandle(errorOpenFailed, sParamDBName, 0);
 		return NULL;
@@ -611,7 +643,7 @@ bool CParameterDB::SaveToFile(int nIndex, const CParameterDBEntry & dbEntry) {
 		::CreateDirectory(Helpers::JPEGViewAppDataPath(), NULL);
 	}
 
-	HANDLE hFile = ::CreateFile(sParamDBName, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile = OpenParamDBFile(sParamDBName, GENERIC_READ | GENERIC_WRITE, OPEN_ALWAYS);
 	if (hFile == INVALID_HANDLE_VALUE) {
 		HandleErrorAndCloseHandle(errorOpenFailed, sParamDBName, 0);
 		return false;
@@ -720,7 +752,7 @@ bool CParameterDB::ConvertVersion1To2(HANDLE hFile, const CString& sFileName) {
 		return false;
 	}
 
-	HANDLE hFileWrite = ::CreateFile(sFileName, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFileWrite = OpenParamDBFile(sFileName, GENERIC_WRITE, OPEN_ALWAYS);
 	if (hFileWrite == INVALID_HANDLE_VALUE) { // F-M38: was hFile, the already-closed read handle
 		delete[] pTarget;
 		HandleErrorAndCloseHandle(errorOpenFailed, sFileName, 0);
