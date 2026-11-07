@@ -1312,4 +1312,80 @@ int GetWindowsVersion() {
 	return osvi.dwMajorVersion * 100 + osvi.dwMinorVersion;
 }
 
+// Diagnostic probe for the navigation panel black bar. PROBE ONLY
+// (probe/blackbar-panel branch): this code must NOT be merged into the
+// fix branch. It appends timestamped lines to JPEGView_panelprobe.log in
+// the exe directory, one line per call, flushed by closing the file, so
+// lines survive a crash. All call sites run on the UI thread; the file is
+// opened, written and closed on every call, so concurrent writes can only
+// interleave whole lines, never tear one. Failures are silent on purpose:
+// a probe must never pop a dialog.
+void LogPanelProbe(LPCTSTR sLine) {
+	TCHAR sPath[MAX_PATH];
+	DWORD nLen = ::GetModuleFileName(NULL, sPath, MAX_PATH);
+	if (nLen == 0 || nLen >= MAX_PATH) {
+		return;
+	}
+	TCHAR* pSlash = _tcsrchr(sPath, _T('\\'));
+	if (pSlash == NULL) {
+		return;
+	}
+	*(pSlash + 1) = 0;
+	CString sFileName = CString(sPath) + _T("JPEGView_panelprobe.log");
+	HANDLE hFile = ::CreateFile(sFileName, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	// New file: write a UTF-8 BOM so the log opens as UTF-8 everywhere
+	// (lines are UTF-8; file names in them may be non-ASCII).
+	bool bNewFile = (::GetFileSize(hFile, NULL) == 0);
+	::SetFilePointer(hFile, 0, NULL, FILE_END);
+	DWORD nWritten = 0;
+	if (bNewFile) {
+		static const BYTE bom[3] = { 0xEF, 0xBB, 0xBF };
+		::WriteFile(hFile, bom, 3, &nWritten, NULL);
+	}
+	CString sOut;
+	// NOTE: GetTickCount64 is not used on purpose: the project still targets
+	// XP (see DirectoryWatcher.h), and GetTickCount64 needs Vista+. The
+	// 32-bit GetTickCount wraps every 49.7 days; differences over the short
+	// windows this probe cares about are still correct in DWORD arithmetic.
+	sOut.Format(_T("[%u] %s\r\n"), ::GetTickCount(), sLine);
+	// Convert to UTF-8 into a stack buffer; lines are short (a file title
+	// is at most MAX_PATH), so 2048 bytes cannot overflow.
+	char sUtf8[2048];
+	int nBytes = ::WideCharToMultiByte(CP_UTF8, 0, (LPCTSTR)sOut, sOut.GetLength(), sUtf8, 2048, NULL, NULL);
+	if (nBytes > 0) {
+		::WriteFile(hFile, sUtf8, (DWORD)nBytes, &nWritten, NULL);
+	}
+	::CloseHandle(hFile);
+}
+
+// Samples the fraction of pure-black pixels in a memory DC, one sample
+// every 16 pixels in each direction. Enough to tell a solid-black strip
+// (black ~1.00) from a strip holding image content (black ~0.00); not a
+// full scan. Returns -1.0 when the DC is unusable or has no sample points.
+double PanelProbeBlackRatio(HDC hDC, int nWidth, int nHeight) {
+	if (hDC == NULL || nWidth <= 0 || nHeight <= 0) {
+		return -1.0;
+	}
+	int nSamples = 0;
+	int nBlack = 0;
+	for (int y = 0; y < nHeight; y += 16) {
+		for (int x = 0; x < nWidth; x += 16) {
+			COLORREF color = ::GetPixel(hDC, x, y);
+			if (color == CLR_INVALID) {
+				continue;
+			}
+			nSamples++;
+			if (color == RGB(0, 0, 0)) {
+				nBlack++;
+			}
+		}
+	}
+	if (nSamples == 0) {
+		return -1.0;
+	}
+	return (double)nBlack / nSamples;
+}
 }

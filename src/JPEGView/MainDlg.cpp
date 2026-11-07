@@ -3292,6 +3292,15 @@ void CMainDlg::ExchangeProcessingParams() {
 }
 
 void CMainDlg::AfterNewImageLoaded(bool bSynchronize, bool bAfterStartup, bool noAdjustWindow) {
+	// PROBE (probe/blackbar-panel only, do not merge into the fix branch):
+	// log every image change so a black frame can be matched to the file
+	// on screen at the time.
+	{
+		LPCTSTR sProbeFile = CurrentFileName(true);
+		CString sProbeLine;
+		sProbeLine.Format(_T("NEWIMG file=%s"), (sProbeFile != NULL) ? sProbeFile : _T("<<none>>"));
+		Helpers::LogPanelProbe(sProbeLine);
+	}
 	UpdateWindowTitle();
 	InvalidateHelpDlg();
 	m_pDirectoryWatcher->SetCurrentFile(CurrentFileName(false));

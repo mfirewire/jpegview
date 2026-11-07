@@ -261,6 +261,28 @@ void CNavigationPanelCtl::DoNavPanelAnimation() {
 								  CPoint(xDest - rectNavPanel.left, yDest - rectNavPanel.top), CSize(pCurrentImage->DIBWidth(), pCurrentImage->DIBHeight()), 
 								  *m_pNavPanel, CPoint(-rectNavPanel.left, -rectNavPanel.top), m_fCurrentBlendingFactorNavPanel);
 			screenDC.BitBlt(rectNavPanel.left, rectNavPanel.top, rectNavPanel.Width(), rectNavPanel.Height(), *m_pMemDCAnimation, 0, 0, SRCCOPY);
+			// PROBE (probe/blackbar-panel only, do not merge into the fix branch):
+			// log every animation stamp: blend factor and how black the
+			// animation memory DC is (sampled). This path bypasses OnPaint.
+			{
+				double fProbeBlack = Helpers::PanelProbeBlackRatio(*m_pMemDCAnimation, rectNavPanel.Width(), rectNavPanel.Height());
+				CString sProbeLine;
+				sProbeLine.Format(_T("ANI stamp=1 dib=1 factor=%.2f black=%.2f w=%d h=%d"),
+					m_fCurrentBlendingFactorNavPanel, fProbeBlack, rectNavPanel.Width(), rectNavPanel.Height());
+				Helpers::LogPanelProbe(sProbeLine);
+			}
+		} else {
+			// PROBE (probe/blackbar-panel only, do not merge into the fix branch):
+			// animation tick with no DIB: nothing is stamped this tick.
+			// Rate-limited to one line per second so the log is not flooded.
+			static DWORD s_nProbeLastNoDIBTick = 0;
+			DWORD nProbeNow = ::GetTickCount();
+			if (nProbeNow - s_nProbeLastNoDIBTick >= 1000) {
+				s_nProbeLastNoDIBTick = nProbeNow;
+				CString sProbeLine;
+				sProbeLine.Format(_T("ANI stamp=0 dib=0 factor=%.2f"), m_fCurrentBlendingFactorNavPanel);
+				Helpers::LogPanelProbe(sProbeLine);
+			}
 		}
 		// GetDC above paired with ReleaseDC here, outside the pDIBData check so
 		// every path releases. Without it every animation frame leaked a device

@@ -331,4 +331,13 @@ namespace Helpers {
 	private:
 		CRITICAL_SECTION & m_cs;
 	};
+
+	// Diagnostic probe for the navigation panel black bar (probe/blackbar-panel
+	// branch only, must NOT be merged into the fix branch). LogPanelProbe
+	// appends one timestamped line to JPEGView_panelprobe.log in the exe
+	// directory; PanelProbeBlackRatio samples the fraction of pure-black
+	// pixels in a memory DC (one sample every 16 pixels in each direction).
+	// Both are silent on failure: a probe must never pop a dialog.
+	void LogPanelProbe(LPCTSTR sLine);
+	double PanelProbeBlackRatio(HDC hDC, int nWidth, int nHeight);
 }

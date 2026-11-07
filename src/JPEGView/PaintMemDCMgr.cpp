@@ -145,6 +145,19 @@ void CPaintMemDCMgr::PaintMemDCToScreen() {
 			m_managedRegions[i].DisplayRegion->OnPaint(m_managedRegions[i].MemoryDC, CPoint(-rect.left, -rect.top));
 		}
 		// Blit the memory DC to the screen
+		// PROBE (probe/blackbar-panel only, do not merge into the fix branch):
+		// for every blended region, log how black the memory DC is that
+		// this frame stamps (sampled). A stamp of a solid-black DC is
+		// the black bar. (The blit-skip this probe originally logged
+		// against was reverted, so blended regions are always stamped
+		// here: stamp=1, blitted=1.)
+		if (m_managedRegions[i].Blend) {
+			double fProbeBlack = Helpers::PanelProbeBlackRatio(m_managedRegions[i].MemoryDC, rect.Width(), rect.Height());
+			CString sProbeLine;
+			sProbeLine.Format(_T("PAINT stamp=1 blitted=1 black=%.2f w=%d h=%d"),
+				fProbeBlack, rect.Width(), rect.Height());
+			Helpers::LogPanelProbe(sProbeLine);
+		}
 		m_paintDC.BitBlt(rect.left, rect.top, rect.Width(), rect.Height(), m_managedRegions[i].MemoryDC, 0, 0, SRCCOPY);
 		// Paint tooltips
 		m_managedRegions[i].DisplayRegion->GetTooltipMgr().OnPaint(m_paintDC);
