@@ -61,7 +61,7 @@ namespace HelpersGUI {
 	CString GetINIFileSaveConfirmationText(const CImageProcessingParams& procParams,
 		EProcessingFlags eProcFlags, Helpers::ENavigationMode eNavigationMode, Helpers::ESorting eFileSorting, bool isSortedAscending,
 		Helpers::EAutoZoomMode eAutoZoomMode,
-		bool bShowNavPanel, bool bShowFileName, bool bShowFileInfo,
+		bool bShowNavPanel, bool bShowBottomPanel, bool bShowFileName, bool bShowFileInfo,
 		Helpers::ETransitionEffect eSlideShowTransitionEffect);
 
 	// Draws an error text for the given file loading error, and detailed load error code (bit combination of EFileLoadError codes)

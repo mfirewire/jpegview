@@ -6,6 +6,7 @@ New features:
 - JPEG saving: chroma subsampling is now configurable via the JPEGSaveSubsampling INI key (444/422/420, default 420, the historical behaviour); 444 keeps full chroma resolution for the best quality
 - JPEG saving: ICC profile, XMP metadata, Photoshop/IPTC data, JFIF density and COM comment segments from the original file are now preserved on save, in their original order (previously only the EXIF segment was copied)
 - HDR (.hdr) viewing: the GAMMA header is now honoured when converting to 8-bit, so files written for gamma 0.454545 are no longer displayed far too bright; files without a GAMMA header (or GAMMA=1.0) render byte-identically to before
+- The image processing (edit) panel at the bottom can now be shown or hidden from the context menu ("Show edit bar", Ctrl+E); like the navigation panel, the choice is kept when saving default parameters
 Bugs fixed:
 - Saving settings now reports a failure instead of silently discarding it (SaveSettings reports success/failure and a message box shows the INI path on failure)
 - A custom KeyMap.txt stored in AppData is now migrated to the EXE directory like the INI file, instead of being silently discarded in EXE mode

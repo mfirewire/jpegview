@@ -264,7 +264,7 @@ namespace HelpersGUI {
 	CString GetINIFileSaveConfirmationText(const CImageProcessingParams& procParams, 
 		EProcessingFlags eProcFlags, Helpers::ENavigationMode eNavigationMode, Helpers::ESorting eFileSorting, bool isSortedAscending,
 		Helpers::EAutoZoomMode eAutoZoomMode,
-		bool bShowNavPanel, bool bShowFileName, bool bShowFileInfo,
+		bool bShowNavPanel, bool bShowBottomPanel, bool bShowFileName, bool bShowFileInfo,
 		Helpers::ETransitionEffect eSlideShowTransitionEffect) {
 
 		const int BUFF_SIZE = 256;
@@ -338,6 +338,9 @@ namespace HelpersGUI {
 		sText += _T("\n");
 		sText += CNLS::GetString(_T("Show navigation panel")); sText += _T(": ");
 		sText += bShowNavPanel ? CNLS::GetString(_T("yes")) : CNLS::GetString(_T("no"));
+		sText += _T("\n");
+		sText += CNLS::GetString(_T("Show edit bar")); sText += _T(": ");
+		sText += bShowBottomPanel ? CNLS::GetString(_T("yes")) : CNLS::GetString(_T("no"));
 		sText += _T("\n");
 		AddFlagText(sText, CString(CNLS::GetString(_T("Show filename"))) + _T(": "), bShowFileName);
 		AddFlagText(sText, CString(CNLS::GetString(_T("Show picture info (EXIF)"))) + _T(": "), bShowFileInfo);

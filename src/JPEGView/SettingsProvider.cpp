@@ -531,7 +531,7 @@ bool CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams,
 									 EProcessingFlags eProcFlags,
 									 Helpers::ENavigationMode eNavigationMode, Helpers::ESorting eFileSorting, bool isSortedAscending,
 									 Helpers::EAutoZoomMode eAutoZoomMode, Helpers::EAutoZoomMode eAutoZoomModeFullScreen,
-									 bool bShowNavPanel, bool bShowFileName, bool bShowFileInfo,
+									 bool bShowNavPanel, bool bShowBottomPanel, bool bShowFileName, bool bShowFileInfo,
 									 Helpers::ETransitionEffect eSlideShowTransitionEffect) {
 	MakeSureUserINIExists();
 
@@ -582,6 +582,7 @@ bool CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams,
 	bWriteFailed = !WriteString(_T("AutoZoomModeFullscreen"), GetAutoZoomModeString(eAutoZoomModeFullScreen)) || bWriteFailed;
 
 	bWriteFailed = !WriteBool(_T("ShowNavPanel"), bShowNavPanel) || bWriteFailed;
+	bWriteFailed = !WriteBool(_T("ShowBottomPanel"), bShowBottomPanel) || bWriteFailed;
 
 	bWriteFailed = !WriteBool(_T("HighQualityResampling"), GetProcessingFlag(eProcFlags, PFLAG_HighQualityResampling)) || bWriteFailed;
 	bWriteFailed = !WriteBool(_T("KeepParameters"), GetProcessingFlag(eProcFlags, PFLAG_KeepParams)) || bWriteFailed;

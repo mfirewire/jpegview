@@ -1230,6 +1230,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	if (m_pEXIFDisplayCtl->IsActive()) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_FILEINFO, MF_CHECKED);
 	if (m_bShowFileName) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_FILENAME, MF_CHECKED);
 	if (m_pNavPanelCtl->IsActive()) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_NAVPANEL, MF_CHECKED);
+	if (m_pImageProcPanelCtl->IsActive()) ::CheckMenuItem(hMenuTrackPopup, IDM_SHOW_EDIT_PANEL, MF_CHECKED);
 	if (m_bAutoContrast) ::CheckMenuItem(hMenuTrackPopup, IDM_AUTO_CORRECTION, MF_CHECKED);
 	if (m_bLDC) ::CheckMenuItem(hMenuTrackPopup, IDM_LDC, MF_CHECKED);
 	if (m_bKeepParams) ::CheckMenuItem(hMenuTrackPopup, IDM_KEEP_PARAMETERS, MF_CHECKED);
@@ -1556,6 +1557,9 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_SHOW_NAVPANEL:
 			m_pNavPanelCtl->SetActive(!m_pNavPanelCtl->IsActive());
+			break;
+		case IDM_SHOW_EDIT_PANEL:
+			m_pImageProcPanelCtl->SetActive(!m_pImageProcPanelCtl->IsActive());
 			break;
 		case IDM_NEXT:
 			GotoImage(POS_Next);
@@ -3368,14 +3372,14 @@ void CMainDlg::SaveParameters() {
 
 	EProcessingFlags eFlags = CreateDefaultProcessingFlags(m_bKeepParams);
 	CString sText = HelpersGUI::GetINIFileSaveConfirmationText(*m_pImageProcParams, eFlags,
-		m_pFileList->GetNavigationMode(), m_pFileList->GetSorting(), m_pFileList->IsSortedAscending(), GetAutoZoomMode(), m_pNavPanelCtl->IsActive(),
+		m_pFileList->GetNavigationMode(), m_pFileList->GetSorting(), m_pFileList->IsSortedAscending(), GetAutoZoomMode(), m_pNavPanelCtl->IsActive(), m_pImageProcPanelCtl->IsActive(),
 		m_bShowFileName, m_pEXIFDisplayCtl->IsActive(), m_eTransitionEffect);
 
 	if (IDYES == this->MessageBox(sText, CNLS::GetString(_T("Confirm save default parameters")), MB_YESNO | MB_ICONQUESTION)) {
 		// F-H07: a failed save used to be silent (e.g. the EXE-dir INI is
 		// not writable in an installed copy); tell the user which file failed.
 		if (!CSettingsProvider::This().SaveSettings(*m_pImageProcParams, eFlags, m_pFileList->GetNavigationMode(), m_pFileList->GetSorting(), m_pFileList->IsSortedAscending(),
-			m_eAutoZoomModeWindowed, m_eAutoZoomModeFullscreen, m_pNavPanelCtl->IsActive(), m_bShowFileName, m_pEXIFDisplayCtl->IsActive(), m_eTransitionEffect)) {
+			m_eAutoZoomModeWindowed, m_eAutoZoomModeFullscreen, m_pNavPanelCtl->IsActive(), m_pImageProcPanelCtl->IsActive(), m_bShowFileName, m_pEXIFDisplayCtl->IsActive(), m_eTransitionEffect)) {
 			::MessageBox(m_hWnd, CString(CNLS::GetString(_T("Failed to save settings to the INI file."))) + _T("\n") + CSettingsProvider::This().GetUserINIFileName(),
 				CNLS::GetString(_T("Error")), MB_OK | MB_ICONERROR);
 		}

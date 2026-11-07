@@ -19,7 +19,7 @@ public:
 	virtual bool IsActive() { return m_bEnabled; }
 
 	virtual void SetVisible(bool bVisible);
-	virtual void SetActive(bool bActive) {}  // not possible to set, determined by INI file only
+	virtual void SetActive(bool bActive); // toggled from the context menu / KeyMap (Ctrl+E); INI ShowBottomPanel is the initial value only
 
 	virtual void AfterNewImageLoaded();
 
