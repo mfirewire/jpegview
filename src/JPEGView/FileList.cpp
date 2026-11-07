@@ -778,27 +778,27 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 }
 
 void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
-	if (eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
-		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
-		CFileDesc::SetSorting(eSorting, sortAscending);
-		// P2: changing the sort order now re-enumerates the folder, like
-		// Reload(): files deleted externally drop out of the list (if it
-		// is the current file, FindFile below returns end() and the empty
-		// state is shown), and files added externally show up. Costs one
-		// directory scan per sort change, the same as pressing Ctrl+R.
-		if (!m_bIsSlideShowList) FindFiles(); else VerifyFiles();
-		m_fileList.sort();
-		// F-H02: FindFile returns end() when the current file left the list,
-		// keeping the empty state instead of silently jumping to the first
-		// image; m_iterStart follows m_iter in wrap mode (re-anchored at
-		// begin() below when m_iter is end()).
-		SetCurrentIter(FindFile(sThisFile));
-		m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
-		// An end() anchor would make Next()'s folder-finished check
-		// unreachable; anchor a missing current file at begin().
-		if (m_bWrapAroundFolder && m_iterStart == m_fileList.end()) {
-			m_iterStart = m_fileList.begin();
-		}
+	CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
+	CFileDesc::SetSorting(eSorting, sortAscending);
+	// P2: every sort-key press re-enumerates the folder, like Reload():
+	// files deleted externally drop out of the list (if it is the
+	// current file, FindFile below returns end() and the empty state is
+	// shown), and files added externally show up. Costs one directory
+	// scan per sort-key press, the same as pressing Ctrl+R. Unconditional
+	// on purpose: pressing N while the sort is already FileName+ascending
+	// must still refresh, or a deleted current file would stay on screen.
+	if (!m_bIsSlideShowList) FindFiles(); else VerifyFiles();
+	m_fileList.sort();
+	// F-H02: FindFile returns end() when the current file left the list,
+	// keeping the empty state instead of silently jumping to the first
+	// image; m_iterStart follows m_iter in wrap mode (re-anchored at
+	// begin() below when m_iter is end()).
+	SetCurrentIter(FindFile(sThisFile));
+	m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
+	// An end() anchor would make Next()'s folder-finished check
+	// unreachable; anchor a missing current file at begin().
+	if (m_bWrapAroundFolder && m_iterStart == m_fileList.end()) {
+		m_iterStart = m_fileList.begin();
 	}
 }
 

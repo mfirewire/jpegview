@@ -16,7 +16,7 @@ Bugs fixed:
 - Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the empty state is shown instead (F-H02)
 - JPEG saving: a preserved ICC profile whose colour space is not RGB (e.g. a CMYK profile on a CMYK source saved as RGB) is no longer kept on the output file
 - Parameter DB: opening ParamDB.db now retries a transient sharing violation (up to ~2 s) instead of immediately showing the "Parameter DB error" dialog, so a fast relaunch no longer fails when the file is briefly locked by another process
-- Changing the sort order now re-enumerates the folder, so files deleted externally drop out of the list (and the empty state is shown if the current file is gone) instead of staying until the next reload
+- Pressing a sort key now re-enumerates the folder, so files deleted externally drop out of the list (and the empty state is shown if the current file is gone) instead of staying until the next reload
 - Rapid paging no longer flashes a black bar at the navigation panel: a blended panel region whose image was not painted this frame is left untouched instead of stamping an unfilled memory DC to the screen
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
