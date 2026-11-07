@@ -12,6 +12,9 @@ Bugs fixed:
 - Setting the desktop wallpaper now shows an error message when it fails instead of only writing a debug log line
 - Post-build script: Config and LICENSE.txt copy failures now fail the build (exit-code check like the DLL copies) instead of being silently ignored
 - JXL loading: the exception handler no longer leaks the file buffer or the EXIF chunk, and no longer risks freeing a buffer owned by the JXL reader cache (double-free)
+- SVG viewing: rapid paging through SVG files no longer crashes (access violation in libthorvg-1.dll); the whole ThorVG session is now serialised across load threads instead of only init/term
+- Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the empty state is shown instead (F-H02)
+- JPEG saving: a preserved ICC profile whose colour space is not RGB (e.g. a CMYK profile on a CMYK source saved as RGB) is no longer kept on the output file
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

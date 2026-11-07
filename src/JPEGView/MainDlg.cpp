@@ -1587,6 +1587,13 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				(nCommand == IDM_SORT_MOD_DATE) ? Helpers::FS_LastModTime : 
 				(nCommand == IDM_SORT_RANDOM) ? Helpers::FS_Random : 
 				(nCommand == IDM_SORT_SIZE) ? Helpers::FS_FileSize : Helpers::FS_FileName, m_pFileList->IsSortedAscending());
+			// F-H02: the current file may have left the list (deleted or moved
+			// externally) while the sort only reordered it. Show the empty
+			// state instead of keeping the stale image: GotoImage(POS_Current)
+			// requests Current() == NULL, which maps to NoFilesInDirectory.
+			if (m_pFileList->Current() == NULL) {
+				ReloadImage(false);
+			}
 			if (m_pEXIFDisplayCtl->IsActive() || m_bShowFileName) {
 				this->Invalidate(FALSE);
 			}
@@ -1594,6 +1601,13 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_SORT_ASCENDING:
 		case IDM_SORT_DESCENDING:
 			m_pFileList->SetSorting(m_pFileList->GetSorting(), nCommand == IDM_SORT_ASCENDING);
+			// F-H02: the current file may have left the list (deleted or moved
+			// externally) while the sort only reordered it. Show the empty
+			// state instead of keeping the stale image: GotoImage(POS_Current)
+			// requests Current() == NULL, which maps to NoFilesInDirectory.
+			if (m_pFileList->Current() == NULL) {
+				ReloadImage(false);
+			}
 			if (m_pEXIFDisplayCtl->IsActive() || m_bShowFileName) {
 				this->Invalidate(FALSE);
 			}
@@ -2197,6 +2211,12 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				_stprintf_s(buff2, 256, CNLS::GetString(_T("EXIF date successfully set on %d images, failed on %d images")), result.NumberOfSucceededFiles, result.NumberOfFailedFiles);
 				::MessageBox(m_hWnd, CString(buff1) + _T('\n') + buff2, _T(JPEGVIEW_TITLE), MB_OK | MB_ICONINFORMATION);
 				m_pFileList->Reload();
+				// F-H02: the current file may have been deleted or moved
+			// externally; if it left the list, show the empty state
+			// instead of keeping the stale image (see sorting handler).
+				if (m_pFileList->Current() == NULL) {
+					ReloadImage(false);
+				}
 				if (m_pEXIFDisplayCtl->IsActive()) {
 					this->Invalidate(FALSE);
 				}
@@ -2463,6 +2483,12 @@ bool CMainDlg::SaveImageNoPrompt(LPCTSTR sFileName, bool bFullSize, bool bJxlTra
 	}
 	if (result) {
 		m_pFileList->Reload(); // maybe image is stored to current directory - needs reload
+		// F-H02: if the current file left the list (deleted or moved
+		// externally before the save), show the empty state instead of
+		// keeping the stale image.
+		if (m_pFileList->Current() == NULL) {
+			ReloadImage(false);
+		}
 		::SetCursor(hOldCursor);
 		Invalidate();
 		return true;

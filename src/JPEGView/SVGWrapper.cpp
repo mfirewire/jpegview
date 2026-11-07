@@ -297,23 +297,27 @@ bool LoadSystemFont() {
 }
 #endif
 
-// R-14: ThorVG's init/term refcount thread-safety is NOT documented in
-// the vendored headers (thorvg_capi.h only says init/term are
-// reference-counted and must pair on the same thread) and the upstream
-// tvgInitializer.cpp source could not be confirmed from the public
-// documentation (no thread-safety statement found; the implementation
-// was not retrievable). Concurrent SVG decodes on different load
-// threads are reachable in this app (CJPEGProvider spawns one
-// CImageLoadThread per worker), so a plain-int refcount would risk a
-// lost update: double real-init, or a term dropping the count to zero
-// while another thread is still rendering. This narrow process-wide
-// lock serializes only init/term (+ the font load, which must happen
-// while the engine is up); rendering itself is NOT serialized, because
-// the refcount keeps the engine alive while any thread is inside its
-// init/term pair. This is DEFENSIVE HARDENING for an unconfirmed risk,
-// not a fix for a proven defect: if ThorVG's refcount is already
-// atomic/locked, the lock changes no behavior. The lock is only ever
-// held for a single call and never nested, so it cannot deadlock.
+// R-14 (revised): the process-wide lock used to serialize only
+// init/term (+ the font load), on the theory that the init/term
+// refcount keeps the engine alive while any thread is inside its
+// init/term pair, so rendering itself needed no lock. That theory was
+// disproven on real hardware: rapid paging through a 3-SVG folder
+// crashed 9/9 in libthorvg-1.dll with 0xC0000005, i.e. concurrent
+// renders on different load threads (CJPEGProvider spawns one
+// CImageLoadThread per worker) corrupt ThorVG-internal state -- the
+// init/term refcount alone does not make picture load / canvas draw
+// thread-safe, and tvg_picture_load_data itself touches shared
+// loader/font state. The lock therefore now serializes the WHOLE
+// ThorVG session: engine init, font load, picture load, canvas draw
+// and sync, picture/canvas teardown, and engine term, via the RAII
+// SvgEngineGuard in ReadImage below. SVG renders on different threads
+// are strictly sequential; the cost is one SVG at a time, which is
+// correct -- a crash is worse than serialization. The lock is only
+// ever held by one guard at a time and never nested (the old
+// Enter/Leave around tvg_engine_term in the cleanup block is gone,
+// the guard covers it), so it cannot deadlock. tvg_engine_init(0)
+// still requests no ThorVG worker threads; rendering happens on the
+// calling (load) thread.
 struct SvgEngineLock {
 	CRITICAL_SECTION cs;
 	SvgEngineLock() { ::InitializeCriticalSection(&cs); }
@@ -324,6 +328,18 @@ CRITICAL_SECTION& GetSvgEngineLock() {
 	static SvgEngineLock lock; // thread-safe magic static (VS2015+)
 	return lock.cs;
 }
+
+// RAII holder for GetSvgEngineLock(): Enter on construction, Leave on
+// destruction, so every return/break path out of the guarded region
+// releases the lock. Non-copyable: copying would Leave twice.
+class SvgEngineGuard {
+public:
+	SvgEngineGuard() { ::EnterCriticalSection(&GetSvgEngineLock()); }
+	~SvgEngineGuard() { ::LeaveCriticalSection(&GetSvgEngineLock()); }
+private:
+	SvgEngineGuard(const SvgEngineGuard&);
+	SvgEngineGuard& operator=(const SvgEngineGuard&);
+};
 
 } // namespace
 
@@ -356,18 +372,22 @@ void* SVGReader::ReadImage(int& width,
 	// ThorVG engine: init(0) = no worker threads, rendering happens on
 	// the calling (load) thread. init/term are reference-counted and must
 	// pair on the same thread, so every exit path below goes through the
-	// single cleanup block. R-14: init (+ the font load, which must happen
-	// while the engine is up) runs under the narrow engine lock; the
-	// matching term at the cleanup block takes the same lock.
+	// single cleanup block. R-14: the SvgEngineGuard below serializes
+	// the whole ThorVG session (init, font load, picture load, canvas
+	// draw/sync, teardown, term) across load threads; it is constructed
+	// here, after the lock-free size checks, and lives until ReadImage
+	// returns, so the early `return NULL` on init failure and both
+	// returns at the end all release it via its destructor. The
+	// BGR conversion below also runs under the guard -- it touches no
+	// ThorVG state, but keeping one scope avoids an early unlock site.
 	bool bEngineInit = false;
-	::EnterCriticalSection(&GetSvgEngineLock());
+	SvgEngineGuard svgGuard;
 	bEngineInit = (tvg_engine_init(0) == TVG_RESULT_SUCCESS);
 	if (bEngineInit) {
 #ifdef _WIN32
 		LoadSystemFont();
 #endif
 	}
-	::LeaveCriticalSection(&GetSvgEngineLock());
 	if (!bEngineInit)
 		return NULL;
 	Tvg_Canvas canvas = NULL;
@@ -497,10 +517,11 @@ void* SVGReader::ReadImage(int& width,
 	if (canvas != NULL)
 		tvg_canvas_destroy(canvas);
 	delete[] pArgb;
-	// R-14: paired with the init above, under the same narrow lock.
-	::EnterCriticalSection(&GetSvgEngineLock());
+	// R-14: paired with the init above; the SvgEngineGuard constructed
+	// at the top of ReadImage already holds the lock here, so no
+	// Enter/Leave is needed (and nesting one would be pointless --
+	// CRITICAL_SECTION is re-entrant, but the guard is the single owner).
 	tvg_engine_term();
-	::LeaveCriticalSection(&GetSvgEngineLock());
 	if (!ok) {
 		delete[] (unsigned char*)pPixelData;
 		return NULL;

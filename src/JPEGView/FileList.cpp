@@ -412,8 +412,27 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 	if (!m_bIsSlideShowList) {
 		if (bImageFile || bIsDirectory) {
 			FindFiles();
-			SetCurrentIter(FindFile(sInitialFile));
+			std::list<CFileDesc>::iterator iterInitial = FindFile(sInitialFile);
+			// F-H02: a directory path is never an entry of its own listing,
+			// so opening a folder falls back to the first image (also in
+			// wrap mode, where TryCreateFileList opens the next folder this
+			// way). An image file that is not in the list stays at end()
+			// and shows the empty state instead of silently jumping to
+			// the first image.
+			if (iterInitial == m_fileList.end() && bIsDirectory) {
+				iterInitial = m_fileList.begin();
+			}
+			SetCurrentIter(iterInitial);
 			m_iterStart = bWrapAroundFolder ? m_iter : m_fileList.begin();
+			// F-H02: an end() anchor would make Next()'s folder-finished check
+			// unreachable (iterTemp wraps to begin() before the comparison),
+			// so Next() would cycle inside the folder forever instead of
+			// advancing to the next folder. Anchor a missing file at begin();
+			// the displayed image is m_iter (still end(), empty state) -- only
+			// the navigation anchor moves.
+			if (bWrapAroundFolder && m_iterStart == m_fileList.end()) {
+				m_iterStart = m_fileList.begin();
+			}
 		} else {
 			// neither image file nor directory nor list of file names - try to read anyway but normally will fail
 			CFindFile fileFind;
@@ -475,12 +494,22 @@ void CFileList::Reload(LPCTSTR sFileName, bool clearForwardHistory) {
 
 	if (!m_bIsSlideShowList) {
 		FindFiles();
+		// F-H02: FindFile returns end() when the anchor file is gone; the
+		// current file keeps the not-found value (empty state) while
+		// m_iterStart is re-anchored at begin() below, so Next() can still
+		// detect a completed loop and advance to the next folder.
 		m_iterStart = m_bWrapAroundFolder ? FindFile(m_sInitialFile) : m_fileList.begin();
+		// An end() anchor would make Next()'s folder-finished check
+		// unreachable (iterTemp wraps to begin() first); see the same
+		// guard in the constructor.
+		if (m_bWrapAroundFolder && m_iterStart == m_fileList.end()) {
+			m_iterStart = m_fileList.begin();
+		}
 	} else {
 		VerifyFiles(); // maybe some of the files got deleted or moved
 		m_iterStart = m_fileList.begin();
 	}
-	SetCurrentIter(FindFile(sCurrentFile)); // go again to current file
+	SetCurrentIter(FindFile(sCurrentFile)); // go again to current file; end() if it left the list (empty state, F-H02)
 }
 
 bool CFileList::CurrentFileExists() const {
@@ -753,8 +782,17 @@ void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
 		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
 		CFileDesc::SetSorting(eSorting, sortAscending);
 		m_fileList.sort();
+		// F-H02: FindFile returns end() when the current file left the list,
+		// keeping the empty state instead of silently jumping to the first
+		// image; m_iterStart follows m_iter in wrap mode (re-anchored at
+		// begin() below when m_iter is end()).
 		SetCurrentIter(FindFile(sThisFile));
 		m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
+		// An end() anchor would make Next()'s folder-finished check
+		// unreachable; anchor a missing current file at begin().
+		if (m_bWrapAroundFolder && m_iterStart == m_fileList.end()) {
+			m_iterStart = m_fileList.begin();
+		}
 	}
 }
 
@@ -775,6 +813,11 @@ void CFileList::SetNavigationMode(Helpers::ENavigationMode eMode) {
 	DeleteHistory();
 	m_nLevel = 0;
 	m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
+	// F-H02: an end() anchor would make Next()'s folder-finished check
+	// unreachable; anchor a missing current file at begin().
+	if (m_bWrapAroundFolder && m_iterStart == m_fileList.end()) {
+		m_iterStart = m_fileList.begin();
+	}
 }
 
 void CFileList::MarkCurrentFile() {
@@ -865,7 +908,7 @@ void CFileList::MoveIterToLast() {
 std::list<CFileDesc>::iterator CFileList::FindFile(const CString& sName) {
 	int nStart = sName.ReverseFind(_T('\\')) + 1;
 	if (nStart == sName.GetLength()) {
-		return m_fileList.begin();
+		return m_fileList.end();
 	}
 	std::list<CFileDesc>::iterator iter;
 	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
@@ -873,7 +916,7 @@ std::list<CFileDesc>::iterator CFileList::FindFile(const CString& sName) {
 			return iter;
 		}
 	}
-	return m_fileList.begin(); // in case the file was not found
+	return m_fileList.end(); // F-H02: not found is distinguishable from the first image; each caller falls back explicitly
 }
 
 CFileList* CFileList::WrapToNextImage() {

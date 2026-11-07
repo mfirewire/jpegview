@@ -346,6 +346,130 @@ static TJSAMP JPEGSaveSubsamplingFromSettings() {
 	return TJSAMP_420;
 }
 
+// CMYK ICC (F-H10 follow-up): the saved pixels are always RGB (a 24-bit
+// BGR DIB), so a preserved ICC profile whose colour space is not RGB is
+// wrong on the output file: lcms2 rejects the mismatched profile when
+// the file is reloaded (JPEGView falls back silently), other viewers
+// differ, and a CMYK profile is ~557 KB of dead weight. When the
+// profile's colour space is not RGB, drop every ICC_PROFILE APP2 chunk;
+// an RGB profile is kept verbatim, and a grey source is no exception
+// (its output is RGB too). The signature is read straight from the ICC
+// header (profile bytes 16..19), so no lcms2 is pulled into the save
+// path. A profile may span several APP2 chunks; only chunk 1 carries
+// the header, so the decision reads chunk 1 and the strip drops all
+// ICC chunks. Anything unrecognisable (no chunk 1, truncated chunk 1,
+// malformed segment chain, allocation failure) keeps the segments
+// untouched: failing safe preserves metadata rather than dropping it
+// on a guess. Returns true when the caller must use the filtered blob:
+// *ppFilteredSegments is the new buffer, owned by the caller (NULL
+// when every segment was ICC and nothing is left); false keeps the
+// original blob unchanged.
+static bool FilterNonRGBICCProfileSegments(const unsigned char* pSegments, int nSegmentsLen, int nSegmentsBeforeEXIF,
+	unsigned char** ppFilteredSegments, int& nFilteredLen, int& nFilteredBeforeEXIF) {
+	*ppFilteredSegments = NULL;
+	nFilteredLen = nSegmentsLen;
+	nFilteredBeforeEXIF = nSegmentsBeforeEXIF;
+	if (pSegments == NULL || nSegmentsLen < 18) {
+		return false;
+	}
+	// Pass 1: find chunk 1 and read its colour-space signature.
+	// Segment layout: FF E2, length (counts itself, not the marker),
+	// "ICC_PROFILE\0" (12 bytes), chunk number, chunk count, profile
+	// data. The signature is profile bytes 16..19, i.e. segment
+	// offsets 34..37, so chunk 1 needs at least 20 profile bytes
+	// (block length >= 36).
+	int nIndex = 0;
+	bool bIsNonRGB = false;
+	bool bFoundChunk1 = false;
+	while (nIndex + 4 <= nSegmentsLen) {
+		if (pSegments[nIndex] != 0xFF) {
+			return false;
+		}
+		int nBlockLength = pSegments[nIndex + 2] * 256 + pSegments[nIndex + 3];
+		if (nBlockLength < 2) {
+			return false;
+		}
+		int nSegLen = 2 + nBlockLength;
+		if (nIndex + nSegLen > nSegmentsLen) {
+			return false;
+		}
+		if (pSegments[nIndex + 1] == 0xE2 && nBlockLength >= 16 &&
+			memcmp(pSegments + nIndex + 4, "ICC_PROFILE\0", 12) == 0 &&
+			pSegments[nIndex + 16] == 1) {
+			if (nBlockLength < 36) {
+				return false; // chunk 1 too short for the signature
+			}
+			bFoundChunk1 = true;
+			bIsNonRGB = memcmp(pSegments + nIndex + 34, "RGB ", 4) != 0;
+			break;
+		}
+		nIndex += nSegLen;
+	}
+	if (!bFoundChunk1 || !bIsNonRGB) {
+		return false; // no ICC profile, RGB profile, or no chunk 1: keep
+	}
+	// Pass 2: validate the whole chain and count the ICC bytes. The
+	// chain was checked only up to chunk 1 above, so a malformed
+	// segment after chunk 1 must still keep the original.
+	int nICCBytes = 0;
+	nIndex = 0;
+	while (nIndex < nSegmentsLen) {
+		if (nIndex + 4 > nSegmentsLen || pSegments[nIndex] != 0xFF) {
+			return false;
+		}
+		int nBlockLength = pSegments[nIndex + 2] * 256 + pSegments[nIndex + 3];
+		if (nBlockLength < 2) {
+			return false;
+		}
+		int nSegLen = 2 + nBlockLength;
+		if (nIndex + nSegLen > nSegmentsLen) {
+			return false;
+		}
+		if (pSegments[nIndex + 1] == 0xE2 && nBlockLength >= 16 &&
+			memcmp(pSegments + nIndex + 4, "ICC_PROFILE\0", 12) == 0) {
+			nICCBytes += nSegLen;
+		}
+		nIndex += nSegLen;
+	}
+	// nSegmentsLen is capped at 16 MB by the F-H10 walker and
+	// nICCBytes <= nSegmentsLen, so the subtraction cannot underflow.
+	nFilteredLen = nSegmentsLen - nICCBytes;
+	if (nFilteredLen == 0) {
+		nFilteredBeforeEXIF = 0;
+		return true; // *ppFilteredSegments stays NULL: nothing left
+	}
+	unsigned char* pFiltered = new(std::nothrow) unsigned char[nFilteredLen];
+	if (pFiltered == NULL) {
+		nFilteredLen = nSegmentsLen;
+		nFilteredBeforeEXIF = nSegmentsBeforeEXIF;
+		return false; // allocation failed: keep the original
+	}
+	// Pass 3: copy every non-ICC segment. The chain was fully
+	// validated in pass 2, so the lengths below are known good.
+	// nSegmentsBeforeEXIF is a byte offset between segments (the
+	// walker sets it at a kept-size boundary), so a kept segment lies
+	// wholly before the split iff it started before it.
+	nIndex = 0;
+	int nDst = 0;
+	nFilteredBeforeEXIF = 0;
+	while (nIndex < nSegmentsLen) {
+		int nBlockLength = pSegments[nIndex + 2] * 256 + pSegments[nIndex + 3];
+		int nSegLen = 2 + nBlockLength;
+		bool bIsICC = pSegments[nIndex + 1] == 0xE2 && nBlockLength >= 16 &&
+			memcmp(pSegments + nIndex + 4, "ICC_PROFILE\0", 12) == 0;
+		if (!bIsICC) {
+			memcpy(pFiltered + nDst, pSegments + nIndex, nSegLen);
+			if (nIndex < nSegmentsBeforeEXIF) {
+				nFilteredBeforeEXIF += nSegLen;
+			}
+			nDst += nSegLen;
+		}
+		nIndex += nSegLen;
+	}
+	*ppFilteredSegments = pFiltered;
+	return true;
+}
+
 // Returns the compressed JPEG stream that must be freed by the caller. NULL in case of error.
 static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage, 
 							 void* pData, int nWidth, int nHeight, int nQuality, int& nJPEGStreamLen, 
@@ -380,6 +504,10 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 	// the throw happens after it was allocated but before it was handed
 	// to pTargetStream (it is NULled on transfer, so no double free).
 	unsigned char* pEXIFStream = NULL;
+	// pStrippedSegments is hoisted for the same reason: the filter below
+	// allocates it inside the try, and the catch must free it when the
+	// throw happens before the segments are copied into the stream.
+	unsigned char* pStrippedSegments = NULL;
 	try {
 
 	// F-H10: preserved APP/COM segments from the source JPEG (JFIF APP0,
@@ -388,6 +516,21 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 	unsigned char* pSegments = (unsigned char*)pImage->GetJPEGSegments();
 	int nSegmentsLen = pImage->GetJPEGSegmentsLength();
 	int nSegmentsBeforeEXIF = pImage->GetJPEGSegmentsBeforeEXIF();
+
+	// CMYK ICC (F-H10 follow-up): the saved pixels are always RGB, so
+	// a non-RGB profile must not survive on the output file. When the
+	// filter strips, pSegments points at the filtered copy below (or
+	// NULL when every segment was ICC); otherwise it stays the
+	// image-owned blob. The copy is freed once the segments have been
+	// copied into the output stream; see also the R-11 catch.
+	int nStrippedLen = 0;
+	int nStrippedBeforeEXIF = 0;
+	if (FilterNonRGBICCProfileSegments(pSegments, nSegmentsLen, nSegmentsBeforeEXIF,
+		&pStrippedSegments, nStrippedLen, nStrippedBeforeEXIF)) {
+		pSegments = pStrippedSegments;
+		nSegmentsLen = nStrippedLen;
+		nSegmentsBeforeEXIF = nStrippedBeforeEXIF;
+	}
 
 	// If EXIF data is present, replace any JFIF block by this EXIF block to preserve the EXIF information
 	if (pImage->GetEXIFData() != NULL && bCopyEXIF) {
@@ -458,6 +601,12 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		nJPEGStreamLen = nJPEGStreamLen - nJFIFLength + nSegmentsLen;
 	}
 
+	// The segments were copied into pTargetStream above; the filtered
+	// copy is no longer needed (the unfiltered blob is owned by the
+	// image and never freed here).
+	delete[] pStrippedSegments;
+	pStrippedSegments = NULL;
+
 	// Take over existing JPEG comment from the old image
 	LPCTSTR sComment = pImage->GetJPEGComment();
 	if (sComment != NULL && sComment[0] != 0) {
@@ -514,6 +663,7 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		if (pEXIFStream != NULL) {
 			delete[] pEXIFStream;
 		}
+		delete[] pStrippedSegments; // NULL-safe; NULled once freed above
 		if (tjFreeNeeded) TurboJpeg::Free(pTargetStream); else delete[] pTargetStream;
 		DeleteAtomicTempFile(sTempFile);
 		return NULL;
