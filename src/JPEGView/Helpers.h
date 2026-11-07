@@ -340,4 +340,18 @@ namespace Helpers {
 	// Both are silent on failure: a probe must never pop a dialog.
 	void LogPanelProbe(LPCTSTR sLine);
 	double PanelProbeBlackRatio(HDC hDC, int nWidth, int nHeight);
+
+	// Finds a solid pure-black horizontal bar in the given screen DC (the
+	// whole client area as actually displayed). Reads the area into a
+	// 32-bit top-down DIB in one GetDIBits call and scans every row in
+	// memory, so even a bar only a few pixels high is found. A row counts
+	// as black when >= 90% of its pixels are pure black (0,0,0);
+	// consecutive black rows form a bar (height >= 3 rows). An interior bar
+	// (not touching the top/bottom edge) wins over an edge bar (a letterbox
+	// touches an edge); among bars of the same kind the tallest wins. The
+	// bar must be shorter than half the client height (a fully black screen
+	// is the expected "no image" state, not a bar). Returns false when no
+	// bar is found or the DC is unusable. Silent on failure: a probe must
+	// never pop a dialog.
+	bool PanelProbeFindScreenBlackBar(HDC hdcScreen, int nWidth, int nHeight, CRect& rectBar, double& fBlack);
 }

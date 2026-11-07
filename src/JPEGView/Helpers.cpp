@@ -1388,4 +1388,133 @@ double PanelProbeBlackRatio(HDC hDC, int nWidth, int nHeight) {
 	}
 	return (double)nBlack / nSamples;
 }
+
+// Finds a solid pure-black horizontal bar in the given screen DC (see
+// Helpers.h). There is no whole-client-area composited memory DC to sample:
+// PaintMemDCMgr only manages per-panel memory DCs and the main image is
+// drawn straight to the screen paint DC in CMainDlg::OnPaint, so the screen
+// itself is the only place holding the complete final frame. The snapshot
+// is taken with one BitBlt + GetDIBits (a GetPixel grid over the whole
+// client area would be far too slow); every row and pixel is then scanned
+// in memory. Never throws and never pops a dialog.
+bool PanelProbeFindScreenBlackBar(HDC hdcScreen, int nWidth, int nHeight, CRect& rectBar, double& fBlack) {
+	rectBar.SetRectEmpty();
+	fBlack = 0.0;
+	if (hdcScreen == NULL || nWidth <= 0 || nHeight <= 0) {
+		return false;
+	}
+	// Cap the area so a pathological window size cannot allocate absurdly
+	// (a 4K client area is ~33 MB at 32 bpp; that is the realistic max).
+	if ((__int64)nWidth * nHeight > (__int64)4096 * 2160) {
+		return false;
+	}
+	HDC hdcMem = ::CreateCompatibleDC(hdcScreen);
+	if (hdcMem == NULL) {
+		return false;
+	}
+	HBITMAP hbm = ::CreateCompatibleBitmap(hdcScreen, nWidth, nHeight);
+	if (hbm == NULL) {
+		::DeleteDC(hdcMem);
+		return false;
+	}
+	HGDIOBJ hOld = ::SelectObject(hdcMem, hbm);
+	BITMAPINFO bmi;
+	::ZeroMemory(&bmi, sizeof(bmi));
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = nWidth;
+	bmi.bmiHeader.biHeight = -nHeight; // top-down: row 0 is the top
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+	const size_t nBytes = (size_t)nWidth * (size_t)nHeight * 4;
+	BYTE* pBits = (BYTE*)::HeapAlloc(::GetProcessHeap(), 0, nBytes);
+	bool bFound = false;
+	if (pBits != NULL) {
+		if (::BitBlt(hdcMem, 0, 0, nWidth, nHeight, hdcScreen, 0, 0, SRCCOPY) &&
+			::GetDIBits(hdcMem, hbm, 0, (UINT)nHeight, pBits, &bmi, DIB_RGB_COLORS) != 0) {
+			// Best interior bar (not touching top/bottom edge) and best
+			// edge bar (a letterbox touches an edge); an interior bar wins.
+			int nBestInTop = -1, nBestInBottom = -1, nBestInLeft = 0, nBestInRight = 0;
+			__int64 nBestInBlack = 0;
+			int nBestEdgeTop = -1, nBestEdgeBottom = -1, nBestEdgeLeft = 0, nBestEdgeRight = 0;
+			__int64 nBestEdgeBlack = 0;
+			int nRunTop = -1;
+			int nRunLeft = nWidth, nRunRight = -1;
+			__int64 nRunBlack = 0;
+			for (int y = 0; y <= nHeight; y++) {
+				bool bBlackRow = false;
+				int nLeft = nWidth, nRight = -1;
+				__int64 nBlack = 0;
+				if (y < nHeight) {
+					const BYTE* pRow = pBits + (size_t)y * nWidth * 4;
+					for (int x = 0; x < nWidth; x++) {
+						const BYTE* pPx = pRow + (size_t)x * 4;
+						// 32-bit DIB pixel order is B, G, R, (unused).
+						if (pPx[0] == 0 && pPx[1] == 0 && pPx[2] == 0) {
+							nBlack++;
+							if (x < nLeft) nLeft = x;
+							if (x > nRight) nRight = x;
+						}
+					}
+					bBlackRow = (nBlack * 10 >= (__int64)nWidth * 9);
+				}
+				if (bBlackRow) {
+					if (nRunTop < 0) {
+						nRunTop = y;
+						nRunLeft = nLeft;
+						nRunRight = nRight;
+						nRunBlack = 0;
+					}
+					if (nLeft < nRunLeft) nRunLeft = nLeft;
+					if (nRight > nRunRight) nRunRight = nRight;
+					nRunBlack += nBlack;
+				} else if (nRunTop >= 0) {
+					int nRunBottom = y - 1;
+					int nRunH = y - nRunTop;
+					if (nRunH >= 3) {
+						bool bTouchesEdge = (nRunTop == 0) || (nRunBottom == nHeight - 1);
+						if (!bTouchesEdge) {
+							if (nBestInTop < 0 || nRunH > (nBestInBottom - nBestInTop + 1)) {
+								nBestInTop = nRunTop; nBestInBottom = nRunBottom;
+								nBestInLeft = nRunLeft; nBestInRight = nRunRight;
+								nBestInBlack = nRunBlack;
+							}
+						} else {
+							if (nBestEdgeTop < 0 || nRunH > (nBestEdgeBottom - nBestEdgeTop + 1)) {
+								nBestEdgeTop = nRunTop; nBestEdgeBottom = nRunBottom;
+								nBestEdgeLeft = nRunLeft; nBestEdgeRight = nRunRight;
+								nBestEdgeBlack = nRunBlack;
+							}
+						}
+					}
+					nRunTop = -1;
+				}
+			}
+			int nTop = -1, nBottom = -1, nLeft = 0, nRight = 0;
+			__int64 nBlack = 0;
+			if (nBestInTop >= 0) {
+				nTop = nBestInTop; nBottom = nBestInBottom; nLeft = nBestInLeft; nRight = nBestInRight; nBlack = nBestInBlack;
+			} else if (nBestEdgeTop >= 0) {
+				nTop = nBestEdgeTop; nBottom = nBestEdgeBottom; nLeft = nBestEdgeLeft; nRight = nBestEdgeRight; nBlack = nBestEdgeBlack;
+			}
+			if (nTop >= 0) {
+				// A bar must be a strip, not the whole screen black (the
+				// expected "no image" state paints the full client area).
+				int nH = nBottom - nTop + 1;
+				if (nH * 2 < nHeight) {
+					rectBar.SetRect(nLeft, nTop, nRight + 1, nBottom + 1);
+					__int64 nArea = (__int64)rectBar.Width() * rectBar.Height();
+					fBlack = (nArea > 0) ? (double)nBlack / (double)nArea : 0.0;
+					bFound = true;
+				}
+			}
+		}
+		::HeapFree(::GetProcessHeap(), 0, pBits);
+	}
+	::SelectObject(hdcMem, hOld);
+	::DeleteObject(hbm);
+	::DeleteDC(hdcMem);
+	return bFound;
+}
+
 }

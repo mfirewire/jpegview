@@ -607,6 +607,90 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 
 	SetCursorForMoveSection();
 
+	// PROBE (probe/blackbar-panel only, do not merge into the fix branch):
+	// sample the screen (whole client area, as actually displayed) for a
+	// solid pure-black horizontal bar, once the frame is fully painted.
+	// There is no whole-client-area composited memory DC to sample:
+	// PaintMemDCMgr only manages per-panel memory DCs and the main image
+	// is drawn straight to the screen paint DC above, so the screen itself
+	// is the only place holding the complete final frame. Sampled at most
+	// once per 250 ms so the probe does not slow the UI; a bar is logged
+	// only when its (file, bounding box) is new, so a lingering bar does
+	// not flood the log. Sampled in the NULL-image state too: the review's
+	// strongest candidate is the page-turn wait with the image NULL, and a
+	// fully black screen there is the expected "no image" state (the
+	// helper only reports a bar shorter than half the client height).
+	{
+		static DWORD s_nProbeLastScreenTick = 0;
+		static CString s_sProbeLastScreenFile;
+		static CRect s_rectProbeLastScreenBar(0, 0, 0, 0);
+		static CString s_sProbeLastNavFile;
+		static CRect s_rectProbeLastNavBar(0, 0, 0, 0);
+		DWORD nProbeNow = ::GetTickCount();
+		if (nProbeNow - s_nProbeLastScreenTick >= 250) {
+			s_nProbeLastScreenTick = nProbeNow;
+			CRect rectBar;
+			double fProbeBlack = 0.0;
+			HDC hdcScreen = ::GetDC(m_hWnd);
+			if (hdcScreen != NULL) {
+				if (Helpers::PanelProbeFindScreenBlackBar(hdcScreen, m_clientRect.Width(), m_clientRect.Height(), rectBar, fProbeBlack)) {
+					LPCTSTR sProbeFile = CurrentFileName(true);
+					CString sProbeFileName = (sProbeFile != NULL) ? sProbeFile : _T("<<none>>");
+					if (sProbeFileName != s_sProbeLastScreenFile || rectBar != s_rectProbeLastScreenBar) {
+						s_sProbeLastScreenFile = sProbeFileName;
+						s_rectProbeLastScreenBar = rectBar;
+						CString sProbeLine;
+						sProbeLine.Format(_T("SCREEN file=%s bar=%d,%d,%d,%d black=%.2f cw=%d ch=%d"),
+							sProbeFileName, rectBar.left, rectBar.top, rectBar.right, rectBar.bottom,
+							fProbeBlack, m_clientRect.Width(), m_clientRect.Height());
+						Helpers::LogPanelProbe(sProbeLine);
+					}
+				}
+
+				// NAV panel rect on screen: the bar IS the nav panel rect
+				// (779x48, centered, pure black, no buttons; seen on a
+				// KODAK RAW and a Minolta JPG, so not format/decode, and on
+				// b238400 where the ImageBlitted skip was active, so the
+				// skip alone does not prevent it). The panel memory DC
+				// measures 0.00 black, so only the screen shows it: a NULL
+				// frame's FillRect blacked the whole window and the repaint
+				// after the new image arrived did not cover the panel strip.
+				// Sample the screen pixels in the nav panel rect itself
+				// (every 8 px); a solid-black rect here is the bar. (A
+				// full-width row scan cannot see it: the rect is only
+				// ~779 px of a ~2800 px row, so a row through it is only
+				// ~28% black.)
+				{
+					CRect rectNav = m_pNavPanelCtl->PanelRect();
+					int nNavSamples = 0, nNavBlack = 0;
+					for (int nNavY = rectNav.top; nNavY < rectNav.bottom; nNavY += 8) {
+						for (int nNavX = rectNav.left; nNavX < rectNav.right; nNavX += 8) {
+							COLORREF cNav = ::GetPixel(hdcScreen, nNavX, nNavY);
+							if (cNav == CLR_INVALID) continue;
+							nNavSamples++;
+							if (cNav == RGB(0, 0, 0)) nNavBlack++;
+						}
+					}
+					double fNavBlack = (nNavSamples > 0) ? (double)nNavBlack / nNavSamples : 0.0;
+					if (fNavBlack >= 0.90) {
+						LPCTSTR sProbeNavFile = CurrentFileName(true);
+						CString sProbeNavFileName = (sProbeNavFile != NULL) ? sProbeNavFile : _T("<<none>>");
+						if (sProbeNavFileName != s_sProbeLastNavFile || rectNav != s_rectProbeLastNavBar) {
+							s_sProbeLastNavFile = sProbeNavFileName;
+							s_rectProbeLastNavBar = rectNav;
+							CString sProbeLine;
+							sProbeLine.Format(_T("SCREEN_NAV file=%s rect=%d,%d,%d,%d black=%.2f cw=%d ch=%d"),
+								sProbeNavFileName, rectNav.left, rectNav.top, rectNav.right, rectNav.bottom,
+								fNavBlack, m_clientRect.Width(), m_clientRect.Height());
+							Helpers::LogPanelProbe(sProbeLine);
+						}
+					}
+				}
+				::ReleaseDC(m_hWnd, hdcScreen);
+			}
+		}
+	}
+
 	return 0;
 }
 
