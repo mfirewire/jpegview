@@ -4,9 +4,9 @@
 
 // R-04/P2-5: the WIC DLL has no settings channel (separate binary, it only
 // ever sees a file name), so it cannot read MaxImagePixelsMP. Its cap is the
-// same 100 MP default as the main program on both architectures, and the live
+// same 256 MP default as the main program on both architectures, and the live
 // setting has NO effect on this path in either direction: lowering it does
-// not reject WIC-only images below 100 MP, and raising it above 100 MP does
+// not reject WIC-only images below 256 MP, and raising it above 256 MP does
 // NOT admit larger WIC-only images (*.wdp/*.mdp/*.hdp/*.jxr/*.dds) -- the DLL
 // refuses those first, as a plain load error. The DIB prefetch gate in
 // CImageLoadThread::ProcessImageAfterLoad is NOT a substitute for the missing
@@ -16,9 +16,9 @@
 // export plus a GetProcAddress fallback for old DLLs; that is deferred, not
 // smuggled in.
 #ifdef _WIN64
-const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 100;
+const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 256;
 #else
-const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 100;
+const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 256;
 #endif
 
 // That must not be bigger than 65535 due to internal limitations

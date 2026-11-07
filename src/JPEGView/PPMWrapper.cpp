@@ -135,7 +135,7 @@ void* PPMReader::ReadImage(int& width,
 	// F-07 size gate, before stbi_load_from_memory: the only allocation so
 	// far is a copy of the input file (bounded by the file size, not the
 	// header). The byte gate is the one that bites for 65535x65535: the
-	// pixel count alone sits exactly at the default pixel cap (100 MP).
+	// pixel count alone sits exactly at the default pixel cap (256 MP).
 	if (bHdrOk) {
 		// Gate on the padded 3-byte BGR output stride (as HDRWrapper does):
 		// it bounds both the stb raster and the output buffer, so even a

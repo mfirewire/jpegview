@@ -185,14 +185,15 @@ CSettingsProvider::CSettingsProvider(void) {
 		if (m_nNumCores > 16) m_nNumCores = 16;
 	}
 
-	// P2-5: configurable pixel cap, in megapixels. Default 100 MP (the old
-	// Win32 MAX_IMAGE_PIXELS); 1..4096 MP covers up to the old x64 cap of
-	// 65535*65535 pixels. The byte cap (MAX_IMAGE_BYTES) still bounds the
-	// allocation whatever this is set to.
+	// P2-5: configurable pixel cap, in megapixels. Default 256 MP (raised
+	// from the old Win32 value of 100 MP in 1.3.46-20261107: 100 rejected
+	// real 102/108/200 MP photos); 1..4096 MP covers up to the old x64 cap
+	// of 65535*65535 pixels. The byte cap (MAX_IMAGE_BYTES) still bounds
+	// the allocation whatever this is set to.
 	// A1-5: compute in 64-bit, then clamp to SIZE_MAX. On Win32 size_t is
 	// 32-bit, so 4096*1024*1024 (= 2^32) used to wrap to 0 and every image
 	// was wrongly rejected as over the size limit.
-	unsigned __int64 v = (unsigned __int64)GetInt(_T("MaxImagePixelsMP"), 100, 1, 4096) * 1024 * 1024;
+	unsigned __int64 v = (unsigned __int64)GetInt(_T("MaxImagePixelsMP"), 256, 1, 4096) * 1024 * 1024;
 	m_nMaxImagePixels = (v > (size_t)-1) ? (size_t)-1 : (size_t)v;
 
 	CString sDownSampling = GetString(_T("DownSamplingFilter"), _T("BestQuality"));

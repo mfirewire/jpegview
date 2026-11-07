@@ -52,7 +52,7 @@ public:
 	Helpers::CPUType AlgorithmImplementation() { return m_eCPUAlgorithm; }
 	int NumberOfCoresToUse() { return m_nNumCores; }
 	// P2-5: effective pixel cap (MaxImagePixelsMP INI setting, megapixels).
-	// Default 100 MP; the byte cap in MaxImageDef.h still applies on top.
+	// Default 256 MP; the byte cap in MaxImageDef.h still applies on top.
 	size_t MaxImagePixels() { return m_nMaxImagePixels; }
 	EFilterType DownsamplingFilter() { return m_eDownsamplingFilter; }
 	Helpers::ESorting Sorting() { return m_eSorting; }

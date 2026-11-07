@@ -1,7 +1,7 @@
 JPEGView Changelog
 ******************
 
-[Unreleased]
+[1.3.46-20261107] 2026-11-07
 New features:
 - Add JPEG 2000 (JP2/J2K/J2C) viewing and saving (OpenJPEG 2.5.4)
 - Add OpenEXR (.exr) viewing and saving (tinyexr)
@@ -35,7 +35,7 @@ Bugs fixed:
 - TIFF read failure no longer sticks OutOfMemory flag
 - CMYK profile no longer opened on invalid path
 Changed behavior:
-- None (default runtime settings unchanged)
+- MaxImagePixelsMP default raised from 100 to 256 megapixels: 100 rejected real photos (102 MP medium format, 108 MP phones, 200 MP phones); 256 covers every single-shot camera (largest is a 200 MP phone sensor at 201 MP) with headroom, and still blocks absurd dimensions. Existing INI files that already set MaxImagePixelsMP keep their value; the new default applies to fresh installs and INI files without the key.
 Other changes:
 - Updated GitHub Actions: actions/checkout v5, action-gh-release v3
 - Vendored ThorVG 1.1.3, OpenJPEG 2.5.4, tinyexr, stb_image_write 1.16
