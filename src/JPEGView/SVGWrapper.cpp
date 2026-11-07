@@ -188,12 +188,12 @@ bool ParseSvgSize(const char* buf, size_t len, float& width, float& height) {
 	const char* svgTag = FindBytes(buf, len, "<svg", 4);
 	if (svgTag == NULL)
 		return false;
-	// The tag ends at the first '>' (bounded: at most 4096 bytes in, an
+	// The tag ends at the first '>' (bounded: at most 64KB in, an
 	// <svg> tag with more than that is not a tag we can trust).
 	const char* tagEnd = NULL;
 	size_t scanLen = len - (size_t)(svgTag - buf);
-	if (scanLen > 4096)
-		scanLen = 4096;
+	if (scanLen > 64 * 1024)
+		scanLen = 64 * 1024;
 	for (size_t i = 0; i < scanLen; i++) {
 		if (svgTag[i] == '>') {
 			tagEnd = svgTag + i;

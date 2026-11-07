@@ -90,10 +90,14 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	// - no strange image attributes
 	// - supported image types - only RGB, mono and indexed
 	// - color map format must be 256 RGB entries
+	// - uncompressed RGB has no 8bpp decode branch (only 24/32 and
+	//   16/15); 8bpp would fall through and return an uninitialised
+	//   buffer. RLE_RGB 8bpp IS handled (grey expansion) and stays allowed.
 	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION ||
 		(bits != 8 && bits != 16 && bits != 15 && bits != 24 && bits != 32) ||
 		(imageType != TGA_INDEXED && imageType != TGA_RGB && imageType != TGA_MONO && imageType != TGA_RLE_INDEXED && imageType != TGA_RLE_RGB && imageType != TGA_RLE_MONO) ||
 		((imageType == TGA_MONO || imageType == TGA_RLE_MONO) && bits != 8) ||
+		(imageType == TGA_RGB && bits == 8) ||
 		(isIndexed && (colormapStart != 0 || colormapLen != 256 || colormapBits != 24)))
 	{
 		fclose(pFile);

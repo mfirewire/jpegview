@@ -142,6 +142,18 @@ bool SaveJP2File(LPCTSTR sFileName, void* pData24bppBGR, int nWidth, int nHeight
 		pImage->comps[0].data == NULL || pImage->comps[1].data == NULL || pImage->comps[2].data == NULL)
 		goto cleanup;
 
+	// opj_image_create leaves the image rectangle (x0/y0/x1/y1) at zero
+	// and opj_setup_encoder does not fill it either; opj_start_compress
+	// derives the tile size from the rectangle, so an all-zero rectangle
+	// is a zero-size image and the encode fails. Set it explicitly, as
+	// opj_compress's own main does. The casts are safe: the A3-3 gate
+	// above caps width*height below INT_MAX, and nWidth/nHeight > 0 was
+	// checked at entry.
+	pImage->x0 = 0;
+	pImage->y0 = 0;
+	pImage->x1 = (OPJ_UINT32)nWidth;
+	pImage->y1 = (OPJ_UINT32)nHeight;
+
 	// Fill the components: BGR DIB -> RGB, row-preserving. Row 0 is the
 	// top row on both sides: the input buffer is the same top-down 24bpp
 	// DIB SaveWebP/SaveQOI hand to the top-down WebP/QOI encoders with no

@@ -72,11 +72,17 @@ void* WebpReaderWriter::ReadImage(int& width,
 			size_t size = 0;
 			if (!IsImageBufferSizeOk(nStride, (size_t)height, &size)) {
 				outOfMemory = true;
+				ICCProfileTransform::DeleteTransform(transform);
+				free(exif_chunk);
+				exif_chunk = NULL;
 				return NULL;
 			}
 			pPixelData = new(std::nothrow) unsigned char[size];
 			if (pPixelData == NULL) {
 				outOfMemory = true;
+				ICCProfileTransform::DeleteTransform(transform);
+				free(exif_chunk);
+				exif_chunk = NULL;
 				return NULL;
 			}
 			// WebPDecodeBGRAInto returns NULL on a corrupt bitstream. The old code
@@ -84,6 +90,9 @@ void* WebpReaderWriter::ReadImage(int& width,
 			// got blended and displayed as if it were a valid image.
 			if (WebPDecodeBGRAInto((const uint8_t*)buffer, sizebytes, pPixelData, size, (int)nStride) == NULL) {
 				delete[] pPixelData;
+				ICCProfileTransform::DeleteTransform(transform);
+				free(exif_chunk);
+				exif_chunk = NULL;
 				return NULL;
 			}
 
@@ -105,6 +114,8 @@ void* WebpReaderWriter::ReadImage(int& width,
 		uint8_t* cached_webp_bytes = (uint8_t*)malloc(sizebytes);
 		if (cached_webp_bytes == NULL) {
 			ICCProfileTransform::DeleteTransform(transform);
+			free(exif_chunk);
+			exif_chunk = NULL;
 			outOfMemory = true;
 			return NULL;
 		}
@@ -121,16 +132,22 @@ void* WebpReaderWriter::ReadImage(int& width,
 	width = cache.width;
 	height = cache.height;
 
-	if (decoder == NULL)
+	if (decoder == NULL) {
+		free(exif_chunk);
+		exif_chunk = NULL;
 		return NULL;
+	}
 
 	// Decode frame
 	int timestamp;
 	uint8_t* buf;
 	if (!WebPAnimDecoderHasMoreFrames(decoder))
 		WebPAnimDecoderReset(decoder);
-	if (!WebPAnimDecoderGetNext(decoder, &buf, &timestamp))
+	if (!WebPAnimDecoderGetNext(decoder, &buf, &timestamp)) {
+		free(exif_chunk);
+		exif_chunk = NULL;
 		return NULL;
+	}
 
 	// Set frametime and frame count
 	WebPAnimInfo anim_info;
@@ -148,11 +165,15 @@ void* WebpReaderWriter::ReadImage(int& width,
 	size_t frameBytes = 0;
 	if (!IsImageBufferSizeOk((size_t)width * nchannels, (size_t)height, &frameBytes)) {
 		outOfMemory = true;
+		free(exif_chunk);
+		exif_chunk = NULL;
 		return NULL;
 	}
 	pPixelData = new(std::nothrow) unsigned char[frameBytes];
 	if (pPixelData == NULL) {
 		outOfMemory = true;
+		free(exif_chunk);
+		exif_chunk = NULL;
 		return NULL;
 	}
 

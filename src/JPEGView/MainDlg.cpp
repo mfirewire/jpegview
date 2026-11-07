@@ -668,7 +668,7 @@ void CMainDlg::BlendBlackRect(CDC & targetDC, CPanel& panel, float fBlendFactor)
 	memDCPanel.CreateCompatibleDC(targetDC);
 	CBitmap bitmapPanel;
 	bitmapPanel.CreateCompatibleBitmap(targetDC, nW, nH);
-	memDCPanel.SelectBitmap(bitmapPanel);
+	HBITMAP hOldBitmap = memDCPanel.SelectBitmap(bitmapPanel);
 	memDCPanel.FillSolidRect(0, 0, nW, nH, RGB(0, 0, 1)); // nVidia workaround: blending pure black has a bug
 	
 	BLENDFUNCTION blendFunc{ 0 };
@@ -676,6 +676,9 @@ void CMainDlg::BlendBlackRect(CDC & targetDC, CPanel& panel, float fBlendFactor)
 	blendFunc.SourceConstantAlpha = (unsigned char)(fBlendFactor*255 + 0.5f);
 	blendFunc.AlphaFormat = 0;
 	targetDC.AlphaBlend(panel.PanelRect().left, panel.PanelRect().top, nW, nH, memDCPanel, 0, 0, nW, nH, blendFunc);
+	// P3-7: select the original bitmap back before bitmapPanel is destroyed:
+	// DeleteObject fails while a bitmap is still selected into a DC.
+	memDCPanel.SelectBitmap(hOldBitmap);
 }
 
 void CMainDlg::DisplayErrors(CJPEGImage* pCurrentImage, const CRect& clientRect, CDC& dc) {
@@ -2334,6 +2337,10 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	// free current image and all read ahead images
 	InitParametersForNewImage();
 	m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
+	// P2-1: NULL the current image before ClearAllRequests: it deletes the
+	// image and pumps WM_PAINT while waiting, and OnPaint would otherwise
+	// draw the freed image (its NULL checks do not guard a dangling pointer).
+	m_pCurrentImage = NULL;
 	m_pJPEGProvider->ClearAllRequests(true);
 	m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
 		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode && (bAfterStartup || IsAdjustWindowToImage())),
@@ -2546,8 +2553,10 @@ void CMainDlg::ExecuteUserCommand(CUserCommand* pUserCommand) {
 			}
 			if (pUserCommand->NeedsReloadAll()) {
 				m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
-				m_pJPEGProvider->ClearAllRequests(true);
+				// P2-1: NULL before ClearAllRequests (see OpenFile): the wait
+				// inside pumps WM_PAINT, which must not see a dangling image.
 				m_pCurrentImage = NULL;
+				m_pJPEGProvider->ClearAllRequests(true);
 				bReloadCurrent = true;
 			} else {
 				if (pUserCommand->NeedsReloadFileList()) {

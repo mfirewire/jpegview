@@ -2,6 +2,7 @@
 
 #include "OcrEngine.h"
 #include <memory>
+#include <thread>
 
 class CMainDlg;
 class CJPEGImage;
@@ -31,6 +32,12 @@ public:
 private:
     struct Job;
     std::shared_ptr<Job> m_job;
+    // Running OCR worker, owned by the UI thread (Toggle starts it,
+    // Shutdown joins or detaches it). Never left joinable: Shutdown
+    // is called from the destructor, and destroying a joinable thread
+    // would std::terminate. Reset() deliberately does not touch it -
+    // a canceled worker is reclaimed by the next Toggle or Shutdown.
+    std::thread m_worker;
     Ocr::Result m_result;
     bool m_active = false, m_selecting = false;
     bool m_hovering = false;

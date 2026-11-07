@@ -141,6 +141,23 @@ CJPEGImage* CClipboard::PasteImageFromClipboard(HWND hWnd, const CImageProcessin
 			if (nNumColors == 0 && pbmInfo->bmiHeader.biBitCount <= 8) {
 				nNumColors = 1 << pbmInfo->bmiHeader.biBitCount;
 			}
+			// P3-4: biClrUsed comes from the clipboard DIB header and is
+			// attacker-controlled; an unbounded value pushes pDIBBits past
+			// the end of the buffer (on Win32 the nNumColors*sizeof(RGBQUAD)
+			// product can also wrap). Clamp to the palette size the format
+			// can actually have: at most 1 << biBitCount entries for
+			// <= 8 bpp, at most 256 otherwise. (BI_BITFIELDS below still
+			// overrides this with 3.)
+			if (nNumColors < 0) {
+				nNumColors = 0;
+			} else if (pbmInfo->bmiHeader.biBitCount <= 8) {
+				int nMaxColors = 1 << pbmInfo->bmiHeader.biBitCount;
+				if (nNumColors > nMaxColors) {
+					nNumColors = nMaxColors;
+				}
+			} else if (nNumColors > 256) {
+				nNumColors = 256;
+			}
 			if (pbmInfo->bmiHeader.biCompression == BI_BITFIELDS) {
 				nNumColors = 3;
 			}
@@ -192,7 +209,6 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 	if (!::OpenClipboard(hWnd)) {
 		return;
 	}
-	::EmptyClipboard();
 
 	// get needed size of memory block
 	// R-30: size_t + IsImageBufferSizeOk gate (was uint32: a future decoder
@@ -215,9 +231,17 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 	// Allocate memory
 	HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, nSizeBytes);
 	if (hMem == NULL) {
+		// P3-5: DoCopy returns void and the callers do not check for
+		// failure, so report the failure here. The clipboard has not
+		// been emptied yet (see below), so its previous contents survive.
+		::MessageBox(hWnd, _T("Not enough memory to copy the image to the clipboard."), _T("JPEGView"), MB_OK | MB_ICONERROR);
 		::CloseClipboard();
 		return;
 	}
+	// P3-5: empty the clipboard only now that the allocation succeeded;
+	// emptying it first and then failing the allocation silently
+	// destroyed the user's previous clipboard contents.
+	::EmptyClipboard();
 	void* pMemory = ::GlobalLock(hMem); 
 
 	BITMAPINFO* pBMInfo = (BITMAPINFO*) pMemory;

@@ -43,6 +43,33 @@ void COcrController::Shutdown() {
         std::lock_guard lock(m_job->mutex);
         m_job->window = nullptr;
     }
+    if (!m_worker.joinable()) return;
+    // Bounded wait, 2 s (200 x 10 ms): Recognize only checks canceled
+    // between engines and before each RecognizeAsync call, never inside the
+    // blocking RecognizeAsync(...).get(), so a worker mid-engine cannot be
+    // woken early and must finish that call. 2 s covers a normal
+    // single-engine run while keeping process exit responsive; the UI thread
+    // is exiting anyway (CleanupAndTerminate / dialog teardown), so waiting
+    // longer would hang shutdown visibly. If it is still running, detach:
+    // the Job is a shared_ptr held by the worker, window is already null so
+    // nothing posts to the dying window, and process termination reclaims
+    // the thread anyway.
+    const std::shared_ptr<Job> job = m_job;
+    bool done = false;
+    if (job) {
+        for (int i = 0; i < 200 && !done; ++i) {
+            {
+                std::lock_guard lock(job->mutex);
+                done = job->done;
+            }
+            if (!done) ::Sleep(10);
+        }
+    } else {
+        // No current job: Complete() only drops m_job after done is set, so
+        // the worker has finished and only its return is outstanding.
+        done = true;
+    }
+    if (done) m_worker.join(); else m_worker.detach();
 }
 
 void COcrController::Toggle(CMainDlg& main) {
@@ -77,13 +104,28 @@ void COcrController::Toggle(CMainDlg& main) {
         // Publish before the thread starts: a worker that finishes immediately
         // posts WM_OCR_COMPLETED, and Complete has to find the job it belongs to.
         m_job = job;
-        std::thread([job, snapshot = std::move(snapshot), languages = std::move(languages)]() {
+        // Reclaim the previous worker before storing the new one: assigning
+        // over a joinable thread would std::terminate. The gate above only
+        // lets us here when the previous job is done or canceled, so a
+        // still-running worker is already canceled and owns its Job via
+        // shared_ptr - detach it and let it finish on its own; a finished
+        // one is joined to reclaim it now. (Joining a canceled-but-running
+        // worker here would block the UI on an engine call.)
+        if (m_worker.joinable()) {
+            bool previousDone = false;
+            if (previousJob) {
+                std::lock_guard lock(previousJob->mutex);
+                previousDone = previousJob->done;
+            }
+            if (previousDone) m_worker.join(); else m_worker.detach();
+        }
+        m_worker = std::thread([job, snapshot = std::move(snapshot), languages = std::move(languages)]() {
             auto result = Ocr::Recognize(snapshot, languages, job->canceled);
             std::lock_guard lock(job->mutex);
             job->result = std::move(result);
             job->done = true;
             if (job->window) ::PostMessage(job->window, WM_OCR_COMPLETED, 0, 0);
-        }).detach();
+        });
         m_result = {};
         m_selected.clear();
         m_dragAnchor = m_dragEnd = -1;

@@ -132,8 +132,9 @@ private:
 #endif
 
 	// E8: per-thread reusable whole-file read buffer (see
-	// ReadWholeFileIntoReuseBuffer in ImageLoadThread.cpp). Grow-only
-	// capacity; one buffer per load thread, never shared (R-01).
+	// ReadWholeFileIntoReuseBuffer in ImageLoadThread.cpp). Grows on
+	// demand, released after a request once past 64 MB (P3-1); one
+	// buffer per load thread, never shared (R-01).
 	char* m_pReadBuffer;
 	size_t m_nReadBufferCapacity;
 

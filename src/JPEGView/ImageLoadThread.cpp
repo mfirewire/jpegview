@@ -534,6 +534,13 @@ CImageData CImageLoadThread::GetLoadedImage(int nHandle) {
 	bool bFailedSizeLimit = false;
 	std::list<CRequestBase*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
+		// P3-3: the list holds CRequestBase*; a CReleaseFileRequest has no
+		// RequestHandle/Image fields, so only load requests (Type == 0, the
+		// CRequestBase default; CRequest never changes it) may be read as
+		// CRequest. Processed/Deleted/Type themselves live in the base class.
+		if ((*iter)->Type != 0) {
+			continue;
+		}
 		CRequest* pRequest = (CRequest*)(*iter);
 		if (pRequest->Processed && pRequest->Deleted == false && pRequest->RequestHandle == nHandle) {
 			imageFound = pRequest->Image;
@@ -823,6 +830,16 @@ void CImageLoadThread::AfterFinishProcess(CRequestBase& request) {
 		// post message to window that request has been processed
 		::PostMessage(rq.TargetWnd, WM_IMAGE_LOAD_COMPLETED, 0, rq.RequestHandle);
 	}
+
+	// P3-1: release the per-thread reuse buffer once it grew past 64 MB.
+	// The decode is finished and no decoder aliases the buffer (each cache
+	// keeps its own copy), so freeing here is safe; it also covers the
+	// open-once case, which a free-on-next-small-file would leave resident.
+	if (m_nReadBufferCapacity > (size_t)64 * 1024 * 1024) {
+		delete[] m_pReadBuffer;
+		m_pReadBuffer = NULL;
+		m_nReadBufferCapacity = 0;
+	}
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////
@@ -1000,7 +1017,8 @@ static void* ConvertYmckInkToRgbNaive(void* pYmck, int nWidth, int nHeight) {
 }
 
 // E8: read a whole file into the thread's reusable buffer. The buffer grows
-// only (never shrinks) and is owned by this CImageLoadThread instance, so the
+// on demand and is released after a request once it passed 64 MB (P3-1);
+// it is owned by this CImageLoadThread instance, so the
 // two load threads never share it (R-01). Only "borrow" readers use it: the
 // decoder reads synchronously from the buffer and keeps no pointer to it
 // (QOI/PPM/HDR/PBM/JP2/EXR/SVG, HEIF, and WebP/PNG/AVIF, whose animation
@@ -1571,7 +1589,10 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 	// of letting the HEIF path open and read the file a second time. The buffer
 	// is still owned here, so the fallback runs before it is freed below. On
 	// the cached-decoder path there is no buffer; fall back the old way.
-	if (!bSuccess) {
+	// P3-2: a size-limit rejection must not fall back to HEIF: HEIF has its
+	// own pixel cap and would reject the same file after a second full parse.
+	// Guarded here, not an early return, so the CloseHandle below still runs.
+	if (!bSuccess && !request->SizeLimitExceeded) {
 		if (!bUseCachedDecoder && pBuffer != NULL) {
 			ProcessReadHEIFRequest(request, pBuffer, nFileSize);
 		} else {
