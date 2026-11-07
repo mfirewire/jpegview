@@ -163,7 +163,7 @@ public:
 		EProcessingFlags eProcFlags,
 		Helpers::ENavigationMode eNavigationMode, Helpers::ESorting eFileSorting, bool isSortedAscending,
 		Helpers::EAutoZoomMode eAutoZoomMode, Helpers::EAutoZoomMode eAutoZoomModeFullScreen,
-		bool bShowNavPanel, bool bShowBottomPanel, bool bShowFileName, bool bShowFileInfo,
+		bool bShowNavPanel, bool bShowFileName, bool bShowFileInfo,
 		Helpers::ETransitionEffect eSlideShowTransitionEffect);
 
 	// Saves the pattern used in the copy/rename dialog to rename files

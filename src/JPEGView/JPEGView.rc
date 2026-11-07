@@ -308,7 +308,6 @@ BEGIN
         MENUITEM "Show picture info (EXIF)",    IDM_SHOW_FILEINFO
         MENUITEM "Show filename",               IDM_SHOW_FILENAME
         MENUITEM "Show navigation panel",       IDM_SHOW_NAVPANEL
-        MENUITEM "Show edit bar",               IDM_SHOW_EDIT_PANEL
         MENUITEM SEPARATOR
         MENUITEM "Next image",                  IDM_NEXT
         MENUITEM "Previous image",              IDM_PREV

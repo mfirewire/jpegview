@@ -323,7 +323,6 @@ Sharpen low
 Sharpen medium	
 Shortcut Help	
 Shortcut key:	
-Show edit bar	
 Show filename	
 Show first image in folder	
 Show grid lines	
@@ -333,7 +332,6 @@ Show navigation panel
 Show next image	
 Show picture info (EXIF)	
 Show previous image	
-Show/hide edit bar	
 Show/hide file name	
 Show/hide navigation panel	
 Show/hide picture information (EXIF data)	

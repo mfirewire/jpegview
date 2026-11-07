@@ -61,26 +61,6 @@ void CImageProcPanelCtl::SetVisible(bool bVisible) {
 	}
 }
 
-void CImageProcPanelCtl::SetActive(bool bActive) {
-	if (m_bEnabled == bActive) {
-		return;
-	}
-	if (bActive) {
-		m_bEnabled = true;
-		// Show it right away if the window allows (same conditions
-		// as the mouse-hover auto-show).
-		if (CanMakeVisible()) {
-			SetVisible(true);
-		}
-	} else {
-		// Hide first while still enabled, so the navigation panel
-		// fades back in and tooltips are cleared; disabling alone
-		// would skip that (SetVisible only acts when enabled).
-		SetVisible(false);
-		m_bEnabled = false;
-	}
-}
-
 void CImageProcPanelCtl::AfterNewImageLoaded() {
 	ShowHideSaveDBButtons();
 	m_pImageProcPanel->GetBtnUnsharpMask()->SetShow(CurrentImage() != NULL);

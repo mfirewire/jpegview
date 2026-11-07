@@ -60,7 +60,6 @@ Ctrl+C                  IDM_COPY
 Ctrl+Shift+C            IDM_COPY_PATH
 C                       IDM_SORT_CREATION_DATE
 Ctrl+N                  IDM_SHOW_NAVPANEL
-Ctrl+E                  IDM_SHOW_EDIT_PANEL
 N                       IDM_SORT_NAME
 Ctrl+M                  IDM_MARK_FOR_TOGGLE
 Ctrl+Shift+M            IDM_TOUCH_IMAGE
