@@ -61,7 +61,7 @@ jobs:
         platform-arch: Win32
         build-config: Release
     - name: Upload Win32 artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: jpegview-win32-${{ env.short_sha }}
         path: |
@@ -116,7 +116,7 @@ jobs:
       shell: cmd
       run: msbuild.exe /property:Platform=x64 /property:configuration="Release" src\\JPEGView.sln
     - name: Upload x64 artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: jpegview-x64-${{ env.short_sha }}
         path: |

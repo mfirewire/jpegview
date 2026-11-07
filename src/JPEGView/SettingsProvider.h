@@ -81,6 +81,9 @@ public:
 	bool SingleInstance() { return m_bSingleInstance; }
 	bool SingleFullScreenInstance() { return m_bSingleFullScreenInstance; }
 	int JPEGSaveQuality() { return m_nJPEGSaveQuality; }
+	// F-H09: chroma subsampling for JPEG saves, as 444/422/420 (see the
+	// JPEGSaveSubsampling INI key). Anything else maps to 420.
+	int JPEGSaveSubsampling() { return m_nJPEGSaveSubsampling; }
 	int WEBPSaveQuality() { return m_nWEBPSaveQuality; }
 	int JXLSaveQuality() { return m_nJXLSaveQuality; }
 	LPCTSTR DefaultSaveFormat() { return m_sDefaultSaveFormat; }
@@ -154,7 +157,9 @@ public:
 
 	// This will only save a subset of settings to the INI file located in AppData\JPEGView\JPEGView.ini.
 	// Note that this INI file has precedence over the INI file at the program directory
-	void SaveSettings(const CImageProcessingParams& procParams,
+	// F-H07: returns false when any of the INI writes failed, so the
+	// caller can tell the user instead of silently losing the settings.
+	bool SaveSettings(const CImageProcessingParams& procParams,
 		EProcessingFlags eProcFlags,
 		Helpers::ENavigationMode eNavigationMode, Helpers::ESorting eFileSorting, bool isSortedAscending,
 		Helpers::EAutoZoomMode eAutoZoomMode, Helpers::EAutoZoomMode eAutoZoomModeFullScreen,
@@ -257,6 +262,7 @@ private:
 	bool m_bSingleInstance;
 	bool m_bSingleFullScreenInstance;
 	int m_nJPEGSaveQuality;
+	int m_nJPEGSaveSubsampling; // F-H09: 444/422/420, default 420
 	int m_nWEBPSaveQuality;
 	int m_nJXLSaveQuality;
 	CString m_sDefaultSaveFormat;
@@ -345,10 +351,13 @@ private:
 	COLORREF GetColor(LPCTSTR sKey, COLORREF defaultColor);
 	Helpers::EAutoZoomMode GetAutoZoomMode(LPCTSTR sKey, Helpers::EAutoZoomMode defaultZoomMode);
 	LPCTSTR GetAutoZoomModeString(Helpers::EAutoZoomMode autoZoomMode);
-	void WriteString(LPCTSTR sKey, LPCTSTR sString);
-	void WriteDouble(LPCTSTR sKey, double dValue);
-	void WriteBool(LPCTSTR sKey, bool bValue);
-	void WriteInt(LPCTSTR sKey, int nValue);
+	// F-H07: these return false when the INI write fails
+	// (WritePrivateProfileString returns 0). Callers that must not lose
+	// settings check the result; other callers ignore it, as before.
+	bool WriteString(LPCTSTR sKey, LPCTSTR sString);
+	bool WriteDouble(LPCTSTR sKey, double dValue);
+	bool WriteBool(LPCTSTR sKey, bool bValue);
+	bool WriteInt(LPCTSTR sKey, int nValue);
 
 	CSettingsProvider(void);
 };

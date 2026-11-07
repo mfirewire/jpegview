@@ -231,6 +231,17 @@ namespace Helpers {
 	// Finds the EXIF block in the JPEG bytes stream, NULL if no EXIF block
 	void* FindEXIFBlock(void* pJPEGStream, int nStreamLength);
 
+	// F-H10: collects the JPEG APP/COM segments worth preserving on save
+	// (JFIF APP0, non-EXIF APP1, ICC APP2, IPTC APP13, COM) from the JPEG
+	// stream, in source order and excluding the EXIF APP1 (handled
+	// separately). Returns a buffer allocated with new[], to be released
+	// with delete[] (NULL when the stream carries nothing worth keeping,
+	// is not a JPEG, or is malformed); nSegmentsSize is its size in bytes,
+	// nSegmentsBeforeEXIF the length of the part that stood before the
+	// EXIF block (the rest stood after it). When bExcludeCOM is true, COM
+	// segments are skipped (the comment is re-inserted from its string).
+	void* FindPreservedJPEGSegments(void* pJPEGStream, int nStreamLength, int& nSegmentsSize, int& nSegmentsBeforeEXIF, bool bExcludeCOM);
+
 	// Collects the ICC profile embedded in the JPEG's APP2 segments. A profile
 	// larger than 64 KB is split into several segments that have to be joined in
 	// sequence order. Returns a buffer allocated with new[], to be released with

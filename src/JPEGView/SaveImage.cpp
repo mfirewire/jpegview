@@ -337,6 +337,15 @@ static float LinearFromSRGB(unsigned char v) {
 	return (float)pow((double)v / 255.0, 2.2);
 }
 
+// F-H09: maps the JPEGSaveSubsampling INI value (444/422/420) to
+// TurboJPEG. Anything else falls back to 420, the historical behaviour.
+static TJSAMP JPEGSaveSubsamplingFromSettings() {
+	int nSubsampling = CSettingsProvider::This().JPEGSaveSubsampling();
+	if (nSubsampling == 444) return TJSAMP_444;
+	if (nSubsampling == 422) return TJSAMP_422;
+	return TJSAMP_420;
+}
+
 // Returns the compressed JPEG stream that must be freed by the caller. NULL in case of error.
 static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage, 
 							 void* pData, int nWidth, int nHeight, int nQuality, int& nJPEGStreamLen, 
@@ -345,7 +354,7 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 	tjFreeNeeded = true;
 	bool bOutOfMemory;
 	unsigned char* pTargetStream = (unsigned char*) TurboJpeg::Compress(pData, nWidth, nHeight, 
-		nJPEGStreamLen, bOutOfMemory, nQuality);
+		nJPEGStreamLen, bOutOfMemory, nQuality, JPEGSaveSubsamplingFromSettings());
 	if (pTargetStream == NULL) {
 		return NULL;
 	}
@@ -373,16 +382,28 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 	unsigned char* pEXIFStream = NULL;
 	try {
 
+	// F-H10: preserved APP/COM segments from the source JPEG (JFIF APP0,
+	// XMP, ICC, IPTC, COM) in source order, excluding the EXIF APP1.
+	// NULL when the source had none (or was not a JPEG).
+	unsigned char* pSegments = (unsigned char*)pImage->GetJPEGSegments();
+	int nSegmentsLen = pImage->GetJPEGSegmentsLength();
+	int nSegmentsBeforeEXIF = pImage->GetJPEGSegmentsBeforeEXIF();
+
 	// If EXIF data is present, replace any JFIF block by this EXIF block to preserve the EXIF information
 	if (pImage->GetEXIFData() != NULL && bCopyEXIF) {
 		const int cnAdditionalThumbBytes = 32000;
 		int nEXIFBlockLenCorrection = 0;
-		pEXIFStream = new unsigned char[nJPEGStreamLen + pImage->GetEXIFDataLength() + cnAdditionalThumbBytes];
+		pEXIFStream = new unsigned char[nJPEGStreamLen + pImage->GetEXIFDataLength() + nSegmentsLen + cnAdditionalThumbBytes];
 		memcpy(pEXIFStream, pTargetStream, 2); // copy SOI block
-		memcpy(pEXIFStream + 2, pImage->GetEXIFData(), pImage->GetEXIFDataLength()); // copy EXIF block
+		// F-H10: segments that stood before the EXIF block in the source
+		// (usually the JFIF APP0), so the original segment order survives.
+		if (nSegmentsBeforeEXIF > 0) {
+			memcpy(pEXIFStream + 2, pSegments, nSegmentsBeforeEXIF);
+		}
+		memcpy(pEXIFStream + 2 + nSegmentsBeforeEXIF, pImage->GetEXIFData(), pImage->GetEXIFDataLength()); // copy EXIF block
 		
 		// Set image orientation back to normal orientation, we save the pixels as displayed
-		CEXIFReader exifReader(pEXIFStream + 2, IF_JPEG);
+		CEXIFReader exifReader(pEXIFStream + 2 + nSegmentsBeforeEXIF, IF_JPEG);
 		exifReader.WriteImageOrientation(1); // 1 means default orientation (unrotated)
 		if (bDeleteThumbnail) {
 			exifReader.DeleteThumbnail();
@@ -408,12 +429,33 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 		}
 
 		int nJFIFLength = GetJFIFBlockLength(pTargetStream);
-		memcpy(pEXIFStream + 2 + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection, pTargetStream + 2 + nJFIFLength, nJPEGStreamLen - 2 - nJFIFLength);
+		// F-H10: segments that stood after the EXIF block, then the rest
+		// of the TurboJPEG stream (without its own JFIF APP0).
+		int nSegmentsAfterEXIF = nSegmentsLen - nSegmentsBeforeEXIF;
+		unsigned char* pTail = pEXIFStream + 2 + nSegmentsBeforeEXIF + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection;
+		if (nSegmentsAfterEXIF > 0) {
+			memcpy(pTail, pSegments + nSegmentsBeforeEXIF, nSegmentsAfterEXIF);
+		}
+		memcpy(pTail + nSegmentsAfterEXIF, pTargetStream + 2 + nJFIFLength, nJPEGStreamLen - 2 - nJFIFLength);
 		TurboJpeg::Free(pTargetStream);
 		pTargetStream = pEXIFStream;
 		pEXIFStream = NULL; // ownership moved to pTargetStream
 		tjFreeNeeded = false;
-		nJPEGStreamLen = nJPEGStreamLen - nJFIFLength + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection;
+		nJPEGStreamLen = nJPEGStreamLen - nJFIFLength + pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection + nSegmentsLen;
+	} else if (pSegments != NULL && nSegmentsLen > 0 && bCopyEXIF) {
+		// F-H10: no EXIF to preserve, but the source had other segments:
+		// keep them (SOI + segments + TurboJPEG stream without its own
+		// JFIF APP0, so a preserved APP0 is the only one).
+		int nJFIFLength = GetJFIFBlockLength(pTargetStream);
+		pEXIFStream = new unsigned char[nJPEGStreamLen + nSegmentsLen];
+		memcpy(pEXIFStream, pTargetStream, 2); // copy SOI block
+		memcpy(pEXIFStream + 2, pSegments, nSegmentsLen);
+		memcpy(pEXIFStream + 2 + nSegmentsLen, pTargetStream + 2 + nJFIFLength, nJPEGStreamLen - 2 - nJFIFLength);
+		TurboJpeg::Free(pTargetStream);
+		pTargetStream = pEXIFStream;
+		pEXIFStream = NULL; // ownership moved to pTargetStream
+		tjFreeNeeded = false;
+		nJPEGStreamLen = nJPEGStreamLen - nJFIFLength + nSegmentsLen;
 	}
 
 	// Take over existing JPEG comment from the old image

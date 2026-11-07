@@ -183,7 +183,7 @@ jobs:
 
     - name: Upload build log
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: buildlog-${{ inputs.platform-arch }}-${{ inputs.build-config }}-${{ env.short_sha }}
         path: |

@@ -8,9 +8,55 @@
 // in that same object. This file only uses the declarations, so it must
 // not define STB_IMAGE_IMPLEMENTATION again.
 #include "stb/stb_image.h"
+#include <math.h> // pow (HDR gamma conversion)
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "Helpers.h"
+
+// Converts one HDR float channel to 8-bit, replicating stb's 8-bit
+// conversion (stbi__hdr_to_ldr) exactly: pow(v, invGamma) * 255 + 0.5,
+// clamped to [0, 255], truncated. pow() (double) matches stb, which also
+// calls the double pow() and casts the result to float before scaling.
+// The exponent is a float: for GAMMA=1.0 (or no GAMMA header) it is
+// exactly stb's 1.0f/2.2f, so the output is byte-identical to the old
+// stb 8-bit load (verified against the vendored stb on the test samples).
+static unsigned char ConvertHDRChannel(float fValue, float fInvGamma) {
+	float z = (float)pow((double)fValue, (double)fInvGamma) * 255.0f + 0.5f;
+	if (z < 0.0f) z = 0.0f;
+	if (z > 255.0f) z = 255.0f;
+	return (unsigned char)(int)z;
+}
+
+// Parses the GAMMA header line (e.g. "GAMMA=0.454545") from a Radiance
+// header. Returns the value, or -1 when the header has no GAMMA line.
+// The scan stops at the blank line / resolution line, so pixel data is
+// never scanned; it is also bounded by the buffer size.
+static double ParseHDRGamma(const unsigned char* pBuffer, int nSize) {
+	int nPos = 0;
+	while (nPos < nSize) {
+		int nLineEnd = nPos;
+		while (nLineEnd < nSize && pBuffer[nLineEnd] != '\n') nLineEnd++;
+		int nLineLen = nLineEnd - nPos;
+		if (nLineLen == 0) {
+			break; // blank line: end of header
+		}
+		// The resolution line ("-Y 768 +X 1024") ends the header too.
+		if (pBuffer[nPos] == '-' || pBuffer[nPos] == '+') {
+			break;
+		}
+		if (nLineLen >= 6 && memcmp(pBuffer + nPos, "GAMMA=", 6) == 0) {
+			// Copy the value into a small NUL-terminated buffer for strtod.
+			char szValue[32];
+			int nValueLen = nLineLen - 6;
+			if (nValueLen >= (int)sizeof(szValue)) nValueLen = (int)sizeof(szValue) - 1;
+			memcpy(szValue, pBuffer + nPos + 6, nValueLen);
+			szValue[nValueLen] = 0;
+			return strtod(szValue, NULL);
+		}
+		nPos = nLineEnd + 1;
+	}
+	return -1.0; // no GAMMA header
+}
 
 void* HDRReader::ReadImage(int& width,
 	int& height,
@@ -51,17 +97,31 @@ void* HDRReader::ReadImage(int& width,
 		return NULL;
 	}
 
-	// 8-bit load: stb_image converts the float HDR data to 8-bit with
-	// its default gamma-2.2 tone mapping (documented in the header).
-	unsigned char* pDecoded = stbi_load_from_memory(pMagic, sizebytes, &width, &height, &nChannels, 0);
-	if (pDecoded == NULL)
+	// Header-aware gamma: stb_image's 8-bit load converts the float HDR
+	// data to 8-bit with a fixed gamma-2.2 tone mapping and ignores the
+	// file's GAMMA header, so a file written for gamma 0.454545 came out
+	// far too bright. Load floats instead and apply the gamma here:
+	// GAMMA=g means the stored values were encoded with exponent g
+	// (stored = linear^g), so displaying them needs stored^(1/(2.2*g)).
+	// g=0.454545 gives exponent 1 (as stored), g=1.0 gives 1/2.2 (the old
+	// stb behaviour). No GAMMA header means g=1.0; a missing or absurd
+	// value falls back to the old 2.2 display gamma.
+	double dGamma = ParseHDRGamma(pMagic, sizebytes);
+	float fInvGamma;
+	if (dGamma > 0.0 && dGamma <= 4.0) {
+		fInvGamma = (float)(1.0 / (2.2 * dGamma));
+	} else {
+		fInvGamma = (float)(1.0 / 2.2);
+	}
+	float* pDecodedFloat = stbi_loadf_from_memory(pMagic, sizebytes, &width, &height, &nChannels, 0);
+	if (pDecodedFloat == NULL)
 		return NULL;
 	if (nChannels != 3) {
-		stbi_image_free(pDecoded);
+		stbi_image_free(pDecodedFloat);
 		return NULL;
 	}
 	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-		stbi_image_free(pDecoded);
+		stbi_image_free(pDecodedFloat);
 		return NULL;
 	}
 	// Output is 3-byte BGR padded to a 4-byte boundary, like QOIWrapper.
@@ -70,13 +130,13 @@ void* HDRReader::ReadImage(int& width,
 	size_t allocSize = 0;
 	if (!IsImageBufferSizeOk(padded_stride, (size_t)height, &allocSize)) {
 		outOfMemory = true;
-		stbi_image_free(pDecoded);
+		stbi_image_free(pDecodedFloat);
 		return NULL;
 	}
 	unsigned char* pPixelData = new(std::nothrow) unsigned char[allocSize];
 	if (pPixelData == NULL) {
 		outOfMemory = true;
-		stbi_image_free(pDecoded);
+		stbi_image_free(pDecodedFloat);
 		return NULL;
 	}
 	// Zero the row padding so no uninitialised bytes reach the DIB.
@@ -86,11 +146,11 @@ void* HDRReader::ReadImage(int& width,
 			size_t srcIdx = ((size_t)y * (size_t)width + (size_t)x) * 3;
 			size_t dstIdx = (size_t)y * padded_stride + (size_t)x * 3;
 			// stb_image returns RGB; JPEGView pixels are BGR.
-			pPixelData[dstIdx] = pDecoded[srcIdx + 2];
-			pPixelData[dstIdx + 1] = pDecoded[srcIdx + 1];
-			pPixelData[dstIdx + 2] = pDecoded[srcIdx];
+			pPixelData[dstIdx] = ConvertHDRChannel(pDecodedFloat[srcIdx + 2], fInvGamma);
+			pPixelData[dstIdx + 1] = ConvertHDRChannel(pDecodedFloat[srcIdx + 1], fInvGamma);
+			pPixelData[dstIdx + 2] = ConvertHDRChannel(pDecodedFloat[srcIdx], fInvGamma);
 		}
 	}
-	stbi_image_free(pDecoded);
+	stbi_image_free(pDecodedFloat);
 	return (void*)pPixelData;
 }

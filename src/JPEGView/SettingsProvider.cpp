@@ -108,6 +108,10 @@ CSettingsProvider::CSettingsProvider(void) {
 		// below, because SetJPEGViewAppDataPath overwrites the static
 		// buffer JPEGViewAppDataPath returns.
 		CString sAppDataIni = CString(Helpers::JPEGViewAppDataPath()) + m_sIniFileTitle;
+		// F-H08: capture the AppData KeyMap path here too, for the same
+		// reason (see the NOTE above): after the redirect below,
+		// JPEGViewAppDataPath() returns the EXE dir.
+		CString sAppDataKeyMap = CString(Helpers::JPEGViewAppDataPath()) + _T("KeyMap.txt");
 		Helpers::SetJPEGViewAppDataPath(m_sEXEPath);
 		if (::GetFileAttributes(m_sIniNameUser) == INVALID_FILE_ATTRIBUTES &&
 			::GetFileAttributes(sAppDataIni) != INVALID_FILE_ATTRIBUTES &&
@@ -122,6 +126,18 @@ CSettingsProvider::CSettingsProvider(void) {
 			m_pIniGlobalSectionBuffer = NULL;
 			m_pIniUserSectionBuffer = NULL;
 			m_bUserINIExists = true;
+		}
+		// F-H08: migrate a custom KeyMap.txt from AppData on the same
+		// terms as the INI above (only when no EXE-dir KeyMap.txt exists
+		// yet, so an existing one is never overwritten). Without this,
+		// the redirect made CKeyMap look in the EXE dir first and the
+		// AppData KeyMap was silently discarded. Independent of the INI
+		// migration above: an upgrader may already have an EXE-dir INI
+		// and still own an AppData-only KeyMap.
+		if (::GetFileAttributes(m_sEXEPath + _T("KeyMap.txt")) == INVALID_FILE_ATTRIBUTES &&
+			::GetFileAttributes(sAppDataKeyMap) != INVALID_FILE_ATTRIBUTES &&
+			::CopyFile(sAppDataKeyMap, m_sEXEPath + _T("KeyMap.txt"), TRUE)) {
+			OutputDebugString(CString(_T("JPEGView: migrated user KeyMap from AppData: ")) + sAppDataKeyMap + _T("\n"));
 		}
 	}
 
@@ -227,6 +243,10 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_bSingleInstance = GetBool(_T("SingleInstance"), false);
 	m_bSingleFullScreenInstance = GetBool(_T("SingleFullScreenInstance"), true);
 	m_nJPEGSaveQuality = GetInt(_T("JPEGSaveQuality"), 85, 0, 100);
+	// F-H09: chroma subsampling for JPEG saves. The value is validated at
+	// the use site (SaveImage.cpp): 444 and 422 are honoured, anything
+	// else falls back to 420, the historical behaviour.
+	m_nJPEGSaveSubsampling = GetInt(_T("JPEGSaveSubsampling"), 420, 400, 444);
 	m_nWEBPSaveQuality = GetInt(_T("WEBPSaveQuality"), 85, 0, 100);
 	m_nJXLSaveQuality = GetInt(_T("JXLSaveQuality"), 85, 0, 100);
 	m_sDefaultSaveFormat = GetString(_T("DefaultSaveFormat"), _T("jpg"));
@@ -507,7 +527,7 @@ void CSettingsProvider::ReadWriteableINISettings() {
 	m_eSlideShowTransitionEffect = Helpers::ConvertTransitionEffectFromString(GetString(_T("SlideShowTransitionEffect"), _T("")));
 }
 
-void CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams, 
+bool CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams, 
 									 EProcessingFlags eProcFlags,
 									 Helpers::ENavigationMode eNavigationMode, Helpers::ESorting eFileSorting, bool isSortedAscending,
 									 Helpers::EAutoZoomMode eAutoZoomMode, Helpers::EAutoZoomMode eAutoZoomModeFullScreen,
@@ -515,19 +535,24 @@ void CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams,
 									 Helpers::ETransitionEffect eSlideShowTransitionEffect) {
 	MakeSureUserINIExists();
 
-	WriteDouble(_T("Contrast"), procParams.Contrast);
-	WriteDouble(_T("Gamma"), procParams.Gamma);
-	WriteDouble(_T("Saturation"), procParams.Saturation);
-	WriteDouble(_T("Sharpen"), procParams.Sharpen);
-	WriteDouble(_T("CyanRed"), procParams.CyanRed);
-	WriteDouble(_T("MagentaGreen"), procParams.MagentaGreen);
-	WriteDouble(_T("YellowBlue"), procParams.YellowBlue);
-	WriteBool(_T("AutoContrastCorrection"), GetProcessingFlag(eProcFlags, PFLAG_AutoContrast));
-	WriteBool(_T("LocalDensityCorrection"), GetProcessingFlag(eProcFlags, PFLAG_LDC));
+	// F-H07: WritePrivateProfileString can fail (e.g. the EXE-dir INI is
+	// not writable in an installed copy); collect the failures and
+	// report them at the end instead of silently losing the settings.
+	bool bWriteFailed = false;
+
+	bWriteFailed = !WriteDouble(_T("Contrast"), procParams.Contrast) || bWriteFailed;
+	bWriteFailed = !WriteDouble(_T("Gamma"), procParams.Gamma) || bWriteFailed;
+	bWriteFailed = !WriteDouble(_T("Saturation"), procParams.Saturation) || bWriteFailed;
+	bWriteFailed = !WriteDouble(_T("Sharpen"), procParams.Sharpen) || bWriteFailed;
+	bWriteFailed = !WriteDouble(_T("CyanRed"), procParams.CyanRed) || bWriteFailed;
+	bWriteFailed = !WriteDouble(_T("MagentaGreen"), procParams.MagentaGreen) || bWriteFailed;
+	bWriteFailed = !WriteDouble(_T("YellowBlue"), procParams.YellowBlue) || bWriteFailed;
+	bWriteFailed = !WriteBool(_T("AutoContrastCorrection"), GetProcessingFlag(eProcFlags, PFLAG_AutoContrast)) || bWriteFailed;
+	bWriteFailed = !WriteBool(_T("LocalDensityCorrection"), GetProcessingFlag(eProcFlags, PFLAG_LDC)) || bWriteFailed;
 	if (GetProcessingFlag(eProcFlags, PFLAG_LDC)) {
-		WriteDouble(_T("LDCBrightenShadows"), procParams.LightenShadows);
-		WriteDouble(_T("LDCDarkenHighlights"), procParams.DarkenHighlights);
-		WriteDouble(_T("LDCBrightenShadowsSteepness"), procParams.LightenShadowSteepness);
+		bWriteFailed = !WriteDouble(_T("LDCBrightenShadows"), procParams.LightenShadows) || bWriteFailed;
+		bWriteFailed = !WriteDouble(_T("LDCDarkenHighlights"), procParams.DarkenHighlights) || bWriteFailed;
+		bWriteFailed = !WriteDouble(_T("LDCBrightenShadowsSteepness"), procParams.LightenShadowSteepness) || bWriteFailed;
 	}
 
 	LPCTSTR sNavigation = _T("LoopFolder");
@@ -537,7 +562,7 @@ void CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams,
 	else if (eNavigationMode == Helpers::NM_LoopSubDirectories) {
 		sNavigation = _T("LoopSubFolders");
 	}
-	WriteString(_T("FolderNavigation"), sNavigation);
+	bWriteFailed = !WriteString(_T("FolderNavigation"), sNavigation) || bWriteFailed;
 
 	LPCTSTR sSorting = _T("FileName");
 	if (eFileSorting == Helpers::FS_CreationTime) {
@@ -549,24 +574,25 @@ void CSettingsProvider::SaveSettings(const CImageProcessingParams& procParams,
 	} else if (eFileSorting == Helpers::FS_FileSize) {
 		sSorting = _T("FileSize");
 	}
-	WriteString(_T("FileDisplayOrder"), sSorting);
+	bWriteFailed = !WriteString(_T("FileDisplayOrder"), sSorting) || bWriteFailed;
 
-	WriteBool(_T("FileSortAscending"), isSortedAscending);
+	bWriteFailed = !WriteBool(_T("FileSortAscending"), isSortedAscending) || bWriteFailed;
 
-	WriteString(_T("AutoZoomMode"), GetAutoZoomModeString(eAutoZoomMode));
-	WriteString(_T("AutoZoomModeFullscreen"), GetAutoZoomModeString(eAutoZoomModeFullScreen));
+	bWriteFailed = !WriteString(_T("AutoZoomMode"), GetAutoZoomModeString(eAutoZoomMode)) || bWriteFailed;
+	bWriteFailed = !WriteString(_T("AutoZoomModeFullscreen"), GetAutoZoomModeString(eAutoZoomModeFullScreen)) || bWriteFailed;
 
-	WriteBool(_T("ShowNavPanel"), bShowNavPanel);
+	bWriteFailed = !WriteBool(_T("ShowNavPanel"), bShowNavPanel) || bWriteFailed;
 
-	WriteBool(_T("HighQualityResampling"), GetProcessingFlag(eProcFlags, PFLAG_HighQualityResampling));
-	WriteBool(_T("KeepParameters"), GetProcessingFlag(eProcFlags, PFLAG_KeepParams));
-	WriteBool(_T("ShowFileName"), bShowFileName);
-	WriteBool(_T("ShowFileInfo"), bShowFileInfo);
+	bWriteFailed = !WriteBool(_T("HighQualityResampling"), GetProcessingFlag(eProcFlags, PFLAG_HighQualityResampling)) || bWriteFailed;
+	bWriteFailed = !WriteBool(_T("KeepParameters"), GetProcessingFlag(eProcFlags, PFLAG_KeepParams)) || bWriteFailed;
+	bWriteFailed = !WriteBool(_T("ShowFileName"), bShowFileName) || bWriteFailed;
+	bWriteFailed = !WriteBool(_T("ShowFileInfo"), bShowFileInfo) || bWriteFailed;
 
-	WriteString(_T("SlideShowTransitionEffect"), Helpers::ConvertTransitionEffectToString(eSlideShowTransitionEffect));
+	bWriteFailed = !WriteString(_T("SlideShowTransitionEffect"), Helpers::ConvertTransitionEffectToString(eSlideShowTransitionEffect)) || bWriteFailed;
 
 	m_bUserINIExists = true;
 	ReadWriteableINISettings();
+	return !bWriteFailed;
 }
 
 void CSettingsProvider::SaveCopyRenamePattern(const CString& sPattern) {
@@ -955,22 +981,25 @@ LPCTSTR CSettingsProvider::GetAutoZoomModeString(Helpers::EAutoZoomMode autoZoom
 	return _T("FitNoZoom");
 }
 
-void CSettingsProvider::WriteString(LPCTSTR sKey, LPCTSTR sString) {
-	::WritePrivateProfileString(SECTION_NAME, sKey, sString, m_sIniNameUser);
+// F-H07: returns false when the INI write fails (WritePrivateProfileString
+// returns 0), so callers that must not lose settings (SaveSettings) can
+// report it. Other callers ignore the result, as before.
+bool CSettingsProvider::WriteString(LPCTSTR sKey, LPCTSTR sString) {
+	return ::WritePrivateProfileString(SECTION_NAME, sKey, sString, m_sIniNameUser) != 0;
 }
 
-void CSettingsProvider::WriteDouble(LPCTSTR sKey, double dValue) {
+bool CSettingsProvider::WriteDouble(LPCTSTR sKey, double dValue) {
 	TCHAR buff[32];
 	_stprintf_s(buff, 32, _T("%.2f"), dValue);
-	WriteString(sKey, buff);
+	return WriteString(sKey, buff);
 }
 
-void CSettingsProvider::WriteBool(LPCTSTR sKey, bool bValue) {
-	WriteString(sKey, bValue ? _T("true") : _T("false"));
+bool CSettingsProvider::WriteBool(LPCTSTR sKey, bool bValue) {
+	return WriteString(sKey, bValue ? _T("true") : _T("false"));
 }
 
-void CSettingsProvider::WriteInt(LPCTSTR sKey, int nValue) {
+bool CSettingsProvider::WriteInt(LPCTSTR sKey, int nValue) {
 	TCHAR buff[32];
 	_stprintf_s(buff, 32, _T("%d"), nValue);
-	WriteString(sKey, buff);
+	return WriteString(sKey, buff);
 }

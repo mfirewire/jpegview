@@ -5,12 +5,13 @@ setlocal
 REM The copying of DLLs was formerly the primary function of the Post-Build Event
 REM but localization, generating, and copying things around from different places is necessary to avoid duplication
 
-REM NOTE (O-09): a failed DLL copy now fails the build. Each COPY_DLLS call
-REM is checked below and the script exits non-zero at once, so a missing DLL
-REM can no longer slip into the release zip silently. The Config/LICENSE
-REM xcopy steps above stay best-effort (unchanged); only the DLL copies are
-REM fatal. (The old NOTE claiming "does not fail on error" was removed: it
-REM described the pre-O-09 behaviour.)
+REM NOTE (O-09): a failed copy now fails the build. Each COPY_DLLS call is
+REM checked below and the script exits non-zero at once, so a missing DLL can
+REM no longer slip into the release zip silently. The Config/LICENSE xcopy
+REM steps above are checked the same way (O-09 follow-up): a failed copy of
+REM the shipped INI, cmyk.icm or LICENSE.txt fails the build instead of
+REM producing a zip that silently lacks them. (The old NOTE claiming "does
+REM not fail on error" was removed: it described the pre-O-09 behaviour.)
 
 
 IF /I "%~4" EQU "" (
@@ -47,13 +48,17 @@ echo %% OUT_DIR_FULL_PATH=%OUT_DIR_FULL_PATH%
 
 REM ----------- COPY COMMON CONFIG FILES -----------
 REM these are common across all builds, regardless of architecture or version
+REM O-09 (follow-up): the two xcopy steps below are checked with
+REM :XCOPY_CHECK, like the DLL copies. A failed copy fails the build.
 echo + XCopy Config\* ...
 xcopy "%PROJECT_DIR%Config\*" "%OUT_DIR_FULL_PATH%" /Y /C /D
-echo ~ ErrorLevel: %ErrorLevel%
+call :XCOPY_CHECK %ErrorLevel% "Config files" "%PROJECT_DIR%Config\*"
+if errorlevel 1 exit /b 1
 
 echo + XCopy LICENSE.txt ...
 xcopy "%PROJECT_DIR%..\..\LICENSE.txt" "%OUT_DIR_FULL_PATH%" /Y /D
-echo ~ ErrorLevel: %ErrorLevel%
+call :XCOPY_CHECK %ErrorLevel% "LICENSE.txt" "%PROJECT_DIR%..\..\LICENSE.txt"
+if errorlevel 1 exit /b 1
 
 
 REM ----------- COPY DLL FILES -----------
@@ -88,6 +93,36 @@ exit /b 0
 
 
 
+
+REM ================================================================================
+REM O-09 (follow-up): shared exit-code check for the Config/LICENSE xcopy steps
+REM above. %~1 is the xcopy exit code (passed as %ErrorLevel% on the call
+REM line, so it is expanded before the call runs); %~2 is a label for the
+REM error message; %~3 is the source pattern used for the "any files at all?"
+REM check. xcopy exit codes (Microsoft Learn): 0 copied OK, 1 no files found
+REM to copy, 2 Ctrl+C, 4 init error, 5 disk write error. Exit code 1 is
+REM ambiguous with /D: it also means "nothing was newer to copy" when the
+REM destination files are already up to date, which is a successful
+REM incremental build, not a failure. Disambiguate by checking whether the
+REM source has any files at all, as :COPY_DLLS does for DLLs.
+:XCOPY_CHECK
+
+setlocal
+
+SET XC_ERR=%~1
+echo ~ ErrorLevel: %XC_ERR%
+if %XC_ERR% equ 0 exit /b 0
+if %XC_ERR% geq 2 (
+	echo ERROR: Failed to copy %~2 ^(xcopy exit code %XC_ERR%^)
+	exit /b %XC_ERR%
+)
+dir /b /a-d "%~3" >nul 2>&1
+if errorlevel 1 (
+	echo ERROR: No files found for %~2 in "%~3" - nothing was copied
+	exit /b 1
+)
+REM Source files exist but none needed copying: already up to date.
+exit /b 0
 
 REM ================================================================================
 

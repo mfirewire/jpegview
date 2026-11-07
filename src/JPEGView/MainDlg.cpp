@@ -2260,12 +2260,21 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_SET_WALLPAPER_ORIG:
 			if (m_pFileList->Current() != NULL && m_pCurrentImage != NULL) {
-				SetDesktopWallpaper::SetFileAsWallpaper(*m_pCurrentImage, m_pFileList->Current());
+				// F-M02: the bool was discarded and a failure only reached
+				// the debug log; tell the user the wallpaper was not set.
+				if (!SetDesktopWallpaper::SetFileAsWallpaper(*m_pCurrentImage, m_pFileList->Current())) {
+					::MessageBox(m_hWnd, CNLS::GetString(_T("Failed to set the desktop wallpaper.")),
+						CNLS::GetString(_T("Error")), MB_OK | MB_ICONERROR);
+				}
 			}
 			break;
 		case IDM_SET_WALLPAPER_DISPLAY:
 			if (m_pCurrentImage != NULL) {
-				SetDesktopWallpaper::SetProcessedImageAsWallpaper(*m_pCurrentImage);
+				// F-M02: same as above (the BMP save or the SPI call failed).
+				if (!SetDesktopWallpaper::SetProcessedImageAsWallpaper(*m_pCurrentImage)) {
+					::MessageBox(m_hWnd, CNLS::GetString(_T("Failed to set the desktop wallpaper.")),
+						CNLS::GetString(_T("Error")), MB_OK | MB_ICONERROR);
+				}
 			}
 			break;
 	}
@@ -3337,8 +3346,13 @@ void CMainDlg::SaveParameters() {
 		m_bShowFileName, m_pEXIFDisplayCtl->IsActive(), m_eTransitionEffect);
 
 	if (IDYES == this->MessageBox(sText, CNLS::GetString(_T("Confirm save default parameters")), MB_YESNO | MB_ICONQUESTION)) {
-		CSettingsProvider::This().SaveSettings(*m_pImageProcParams, eFlags, m_pFileList->GetNavigationMode(), m_pFileList->GetSorting(), m_pFileList->IsSortedAscending(),
-			m_eAutoZoomModeWindowed, m_eAutoZoomModeFullscreen, m_pNavPanelCtl->IsActive(), m_bShowFileName, m_pEXIFDisplayCtl->IsActive(), m_eTransitionEffect);
+		// F-H07: a failed save used to be silent (e.g. the EXE-dir INI is
+		// not writable in an installed copy); tell the user which file failed.
+		if (!CSettingsProvider::This().SaveSettings(*m_pImageProcParams, eFlags, m_pFileList->GetNavigationMode(), m_pFileList->GetSorting(), m_pFileList->IsSortedAscending(),
+			m_eAutoZoomModeWindowed, m_eAutoZoomModeFullscreen, m_pNavPanelCtl->IsActive(), m_bShowFileName, m_pEXIFDisplayCtl->IsActive(), m_eTransitionEffect)) {
+			::MessageBox(m_hWnd, CString(CNLS::GetString(_T("Failed to save settings to the INI file."))) + _T("\n") + CSettingsProvider::This().GetUserINIFileName(),
+				CNLS::GetString(_T("Error")), MB_OK | MB_ICONERROR);
+		}
 	}
 }
 

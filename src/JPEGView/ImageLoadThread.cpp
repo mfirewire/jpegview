@@ -1110,7 +1110,12 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 						request->OutOfMemory = request->Image == NULL && isOutOfMemory;
 						request->SizeLimitExceeded = request->Image == NULL && isSizeLimitExceeded;
 						if (request->Image != NULL) {
-							request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
+							// F-H10: preserve the source JPEG's APP/COM segments for saving.
+							CString sJPEGComment = Helpers::GetJPEGComment(pBuffer, nFileSize);
+							request->Image->SetJPEGComment(sJPEGComment);
+							int nSegSize = 0, nSegBeforeEXIF = 0;
+							void* pSegments = Helpers::FindPreservedJPEGSegments(pBuffer, nFileSize, nSegSize, nSegBeforeEXIF, !sJPEGComment.IsEmpty());
+							request->Image->SetJPEGSegments(pSegments, nSegSize, nSegBeforeEXIF);
 						}
 						pStream->Release();
 						delete pBitmap;
@@ -1152,7 +1157,12 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 						request->Image = new CJPEGImage(nWidth, nHeight, pRGB, 
 							Helpers::FindEXIFBlock(pBuffer, nFileSize), 3, 
 							Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
-						request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
+						// F-H10: preserve the source JPEG's APP/COM segments for saving.
+						CString sJPEGComment = Helpers::GetJPEGComment(pBuffer, nFileSize);
+						request->Image->SetJPEGComment(sJPEGComment);
+						int nSegSize = 0, nSegBeforeEXIF = 0;
+						void* pSegments = Helpers::FindPreservedJPEGSegments(pBuffer, nFileSize, nSegSize, nSegBeforeEXIF, !sJPEGComment.IsEmpty());
+						request->Image->SetJPEGSegments(pSegments, nSegSize, nSegBeforeEXIF);
 						// R-06: TurboJpeg lets TJSAMP_UNKNOWN (-1) through for CMYK,
 						// but CanUseLosslessJPEGTransformations /
 						// TrimRectToMCUBlockSize index tjMCUWidth/tjMCUHeight
@@ -1193,7 +1203,12 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 					request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, 
 						Helpers::FindEXIFBlock(pBuffer, nFileSize), nBPP, 
 						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
-					request->Image->SetJPEGComment(Helpers::GetJPEGComment(pBuffer, nFileSize));
+					// F-H10: preserve the source JPEG's APP/COM segments for saving.
+					CString sJPEGComment = Helpers::GetJPEGComment(pBuffer, nFileSize);
+					request->Image->SetJPEGComment(sJPEGComment);
+					int nSegSize = 0, nSegBeforeEXIF = 0;
+					void* pSegments = Helpers::FindPreservedJPEGSegments(pBuffer, nFileSize, nSegSize, nSegBeforeEXIF, !sJPEGComment.IsEmpty());
+					request->Image->SetJPEGSegments(pSegments, nSegSize, nSegBeforeEXIF);
 					request->Image->SetJPEGChromoSampling(eChromoSubSampling);
 				} else if (bOutOfMemory) {
 					request->OutOfMemory = true;
@@ -1455,6 +1470,13 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 		}
 	}
 	uint8_t* pBuffer = NULL; // JxlReader takes ownership and releases with delete[]
+	// R-20: set once ReadImage has been called (ownership moved to the
+	// reader cache); the catch below frees pBuffer only while this is false.
+	bool bJxlReaderOwnsBuffer = false;
+	// R-20: hoisted from the decode block below so the catch can free the
+	// EXIF chunk when the CJPEGImage constructor throws after ReadImage
+	// handed it out (free(NULL) is safe when ReadImage never ran).
+	void* pEXIFData = NULL;
 	CErrorModeGuard errorModeGuard;
 	try {
 		long long nFileSize = 0;
@@ -1478,7 +1500,10 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 		if (bUseCachedDecoder || (::ReadFile(hFile, pBuffer, nFileSize, (LPDWORD)&nNumBytesRead, NULL) && nNumBytesRead == nFileSize)) {
 			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
 			bool bHasAnimation;
-			void* pEXIFData;
+			// R-20: ownership of pBuffer passes to the JXL reader inside
+			// ReadImage (JXLWrapper.cpp:48-64); set the flag before the
+			// call so the catch below never frees a buffer the reader owns.
+			bJxlReaderOwnsBuffer = true;
 			uint8* pPixelData = (uint8*)m_jxlReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
@@ -1506,10 +1531,27 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 		delete request->Image;
 		request->Image = NULL;
 		request->ExceptionError = true;
+		// R-20 residual: free the file buffer only when the JXL reader
+		// never took ownership of it (an exception before ReadImage).
+		// After ReadImage the buffer belongs to the reader cache
+		// (JXLWrapper.cpp:48-64): it is freed by DeleteCachedJxlDecoder
+		// on the failure path, by DeleteCache inside ReadImage for still
+		// images, or kept for the next animation frame. Freeing it here
+		// would double-free, and clearing the cache here would destroy a
+		// valid animation decoder on the cached path. The EXIF chunk is
+		// likewise freed here only when ReadImage handed it out and the
+		// CJPEGImage constructor never took it (free(NULL) is safe).
+		if (!bJxlReaderOwnsBuffer) {
+			delete[] pBuffer;
+		}
+		free(pEXIFData);
 	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
-		// delete[] pBuffer;
+		// R-20: pBuffer is NOT freed here: ownership passed to the JXL
+		// reader inside ReadImage (see the catch above), and the reader
+		// cache releases it. (The old commented-out delete[] here would
+		// have double-freed on the success path.)
 	}
 }
 #endif

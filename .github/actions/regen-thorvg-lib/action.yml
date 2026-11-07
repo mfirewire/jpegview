@@ -67,7 +67,7 @@ runs:
 
     - name: Upload regenerated Win32 ThorVG import library
       if: ${{ inputs.platform-arch == 'Win32' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: thorvg-importlib-Win32-${{ inputs.build-config }}
         path: src/JPEGView/libthorvg/lib/libthorvg-1.lib
@@ -75,7 +75,7 @@ runs:
 
     - name: Upload regenerated x64 ThorVG import library
       if: ${{ inputs.platform-arch == 'x64' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: thorvg-importlib-x64-${{ inputs.build-config }}
         path: src/JPEGView/libthorvg/lib64/libthorvg-1.lib

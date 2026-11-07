@@ -79,7 +79,8 @@ void * TurboJpeg::Compress(const void *source,
 					  int height,
 					  int &len,
 					  bool &outOfMemory,
-					  int quality)
+					  int quality,
+					  TJSAMP subsampling)
 {
 	outOfMemory = false;
 	len = 0;
@@ -90,7 +91,10 @@ void * TurboJpeg::Compress(const void *source,
 
 	unsigned char* pJPEGCompressed = NULL;
 	size_t nCompressedLen = 0;
-	tj3Set(hEncoder, TJPARAM_SUBSAMP, TJSAMP_420);
+	// F-H09: was hardcoded TJSAMP_420; now from the JPEGSaveSubsampling
+	// INI setting (444/422/420, default 420). The EXIF thumbnail below
+	// keeps 420 via the default argument.
+	tj3Set(hEncoder, TJPARAM_SUBSAMP, subsampling);
 	tj3Set(hEncoder, TJPARAM_QUALITY, quality);
 	int nResult = tj3Compress8(hEncoder, (unsigned char*)source, width, TJPAD(width * 3), height, TJPF_BGR,
 		&pJPEGCompressed, &nCompressedLen);

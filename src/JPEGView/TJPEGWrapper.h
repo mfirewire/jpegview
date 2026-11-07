@@ -23,7 +23,8 @@ public:
 						 int height, // height of image in pixels.
 						 int &len, // returns length of compressed data
 						 bool &outOfMemory, // returns if out of memory
-						 int quality=75); // image quality as a percentage
+						 int quality=75, // image quality as a percentage
+						 TJSAMP subsampling = TJSAMP_420); // F-H09: chroma subsampling, default 420 (unchanged behaviour)
 
 	// Free buffer allocated by Compress
 	static void Free(void* buffer);

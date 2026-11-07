@@ -53,6 +53,14 @@ jobs:
         platform-arch: ${{ inputs.platform-arch }}
         build-config: ${{ inputs.build-config }}
 
+    # R-06 verification: the Win32 exe must carry a Safe Exception Handler
+    # table. No-op on x64 (/SAFESEH is x86-only). Same step as release.yml;
+    # the Debug|Win32 build used to have no such check.
+    - uses: ./.github/actions/verify-safeseh
+      with:
+        platform-arch: ${{ inputs.platform-arch }}
+        build-config: ${{ inputs.build-config }}
+
     - uses: ./.github/actions/upload-some-artifacts
       with:
         platform-arch: ${{ inputs.platform-arch }}

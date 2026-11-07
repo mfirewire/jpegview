@@ -434,6 +434,133 @@ void* FindEXIFBlock(void* pJPEGStream, int nStreamLength) {
 	return pEXIFBlock;
 }
 
+// F-H10: the largest preserved-segments blob we keep. 16 MB matches the
+// ICC cap below (MAX_ICC_PROFILE_SIZE): a real file carries far less than
+// that in its header, so anything beyond it is a malformed length field,
+// not metadata worth keeping.
+static const int MAX_PRESERVED_SEGMENTS_SIZE = 16 * 1024 * 1024;
+
+// Walks the JPEG marker chain from the SOI, collecting the APP/COM segments
+// worth preserving on save (see FindPreservedJPEGSegments). When pDest is
+// NULL the walk only measures; otherwise each kept segment is copied to
+// pDest at the running offset. Returns the total kept size, or -1 when the
+// stream is malformed (a truncated segment, a length below 2, an absurd
+// header) - the caller then keeps nothing rather than a partial header.
+// nSegmentsBeforeEXIF is set to the kept size at the moment the EXIF APP1
+// is passed (the total size when there is no EXIF block).
+// The loop mirrors FindJPEGMarker above: it stops at the first non-APP/COM
+// marker (DQT, SOF, SOS, ...) and treats 0xFF 0x00 as scan data.
+static int WalkPreservedJPEGSegments(uint8* pStream, int nStreamLength, unsigned char* pDest, int& nSegmentsBeforeEXIF, bool bExcludeCOM) {
+	nSegmentsBeforeEXIF = 0;
+	bool bSeenEXIF = false;
+	int nKeptSize = 0;
+	int nIndex = 2;
+	while (nIndex < nStreamLength) {
+		if (pStream[nIndex] != 0xFF) {
+			break; // scan data (or SOS): no more header segments
+		}
+		// Skip padding 0xFF bytes; the byte before the marker is its 0xFF.
+		while (nIndex < nStreamLength && pStream[nIndex] == 0xFF) nIndex++;
+		if (nIndex >= nStreamLength) {
+			break;
+		}
+		unsigned char nMarker = pStream[nIndex];
+		if (nMarker == 0x00 || nMarker == 0x01 || (nMarker >= 0xD0 && nMarker <= 0xD9)) {
+			break; // stuffed byte, TEM, RSTn, SOI/EOI: not a header segment
+		}
+		int nSegStart = nIndex - 1; // the 0xFF
+		nIndex++;
+		if (nIndex + 1 >= nStreamLength) {
+			return -1;
+		}
+		int nBlockLength = pStream[nIndex] * 256 + pStream[nIndex + 1];
+		if (nBlockLength < 2) {
+			return -1; // malformed: a length below 2 would not advance the index
+		}
+		int nSegLen = 2 + nBlockLength; // marker (2) + length field (counts itself)
+		if (nSegStart + nSegLen > nStreamLength) {
+			return -1; // truncated segment
+		}
+		bool bKeep = false;
+		if (nMarker == 0xE0) {
+			// APP0: only JFIF (density info); JFXX and friends are skipped.
+			bKeep = nBlockLength >= 7 && memcmp(pStream + nSegStart + 4, "JFIF\0", 5) == 0;
+		} else if (nMarker == 0xE1) {
+			// APP1: the EXIF block itself is handled separately (it is
+			// rewritten on save); every other APP1 (XMP, extended XMP) is kept.
+			if (nBlockLength >= 8 && memcmp(pStream + nSegStart + 4, "Exif\0\0", 6) == 0) {
+				if (!bSeenEXIF) {
+					nSegmentsBeforeEXIF = nKeptSize;
+					bSeenEXIF = true;
+				}
+				bKeep = false;
+			} else {
+				bKeep = true;
+			}
+		} else if (nMarker == 0xE2) {
+			// APP2: only ICC_PROFILE chunks (a profile may span several).
+			bKeep = nBlockLength >= 14 && memcmp(pStream + nSegStart + 4, "ICC_PROFILE\0", 12) == 0;
+		} else if (nMarker == 0xED) {
+			// APP13: only Photoshop 3.0 (IPTC).
+			bKeep = nBlockLength >= 16 && memcmp(pStream + nSegStart + 4, "Photoshop 3.0\0", 14) == 0;
+		} else if (nMarker == 0xFE) {
+			// COM: kept unless the caller already has the comment as a
+			// string (it is re-inserted from the string on save).
+			bKeep = !bExcludeCOM;
+		} else if (nMarker >= 0xE0 && nMarker <= 0xEF) {
+			// Other APPn: not in the preserved set (e.g. APP14 Adobe).
+			bKeep = false;
+		} else {
+			// DQT, DHT, SOF, SOS, ...: the header ends here.
+			break;
+		}
+		if (bKeep) {
+			if (nKeptSize + nSegLen > MAX_PRESERVED_SEGMENTS_SIZE) {
+				return -1; // absurd header, keep nothing
+			}
+			if (pDest != NULL) {
+				memcpy(pDest + nKeptSize, pStream + nSegStart, nSegLen);
+			}
+			nKeptSize += nSegLen;
+		}
+		nIndex += nBlockLength;
+	}
+	if (!bSeenEXIF) {
+		// No EXIF block: everything kept stood "before" it.
+		nSegmentsBeforeEXIF = nKeptSize;
+	}
+	return nKeptSize;
+}
+
+void* FindPreservedJPEGSegments(void* pJPEGStream, int nStreamLength, int& nSegmentsSize, int& nSegmentsBeforeEXIF, bool bExcludeCOM) {
+	nSegmentsSize = 0;
+	nSegmentsBeforeEXIF = 0;
+	uint8* pStream = (uint8*)pJPEGStream;
+	if (pStream == NULL || nStreamLength < 3 || pStream[0] != 0xFF || pStream[1] != 0xD8) {
+		return NULL; // not a JPEG
+	}
+	// Two passes over a header that is at most a few KB: measure, then copy.
+	int nMeasured = WalkPreservedJPEGSegments(pStream, nStreamLength, NULL, nSegmentsBeforeEXIF, bExcludeCOM);
+	if (nMeasured <= 0) {
+		return NULL;
+	}
+	unsigned char* pSegments = new(std::nothrow) unsigned char[nMeasured];
+	if (pSegments == NULL) {
+		return NULL;
+	}
+	int nBeforeEXIF = 0;
+	int nCopied = WalkPreservedJPEGSegments(pStream, nStreamLength, pSegments, nBeforeEXIF, bExcludeCOM);
+	if (nCopied != nMeasured || nBeforeEXIF != nSegmentsBeforeEXIF) {
+		// Cannot happen (the stream is unchanged between the two walks);
+		// keep nothing rather than a half-copied header.
+		delete[] pSegments;
+		return NULL;
+	}
+	nSegmentsSize = nMeasured;
+	return pSegments;
+}
+
+
 // A profile of this size is not something a camera or an editor produces; it is
 // a broken length field that would otherwise make us allocate a lot of memory.
 static const int MAX_ICC_PROFILE_SIZE = 16 * 1024 * 1024;

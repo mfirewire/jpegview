@@ -94,6 +94,11 @@ CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, 
 		m_pEXIFReader = NULL;
 	}
 
+	// F-H10: no preserved segments until the loader sets them (SetJPEGSegments).
+	m_pJPEGSegments = NULL;
+	m_nJPEGSegmentsSize = 0;
+	m_nJPEGSegmentsBeforeEXIF = 0;
+
 	m_pRawMetadata = pRawMetadata;
 
 	m_nPixelHash = nJPEGHash;
@@ -181,6 +186,8 @@ CJPEGImage::~CJPEGImage(void) {
 	m_pLastDIB = NULL;
 	delete[] m_pEXIFData;
 	m_pEXIFData = NULL;
+	delete[] m_pJPEGSegments; // F-H10
+	m_pJPEGSegments = NULL;
 	delete m_pEXIFReader;
 	m_pEXIFReader = NULL;
 	delete[] m_pDimRects;

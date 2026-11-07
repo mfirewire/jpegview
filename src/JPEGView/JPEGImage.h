@@ -281,6 +281,23 @@ public:
 	// Gets the size of the EXIF data block in bytes, including the APP1 marker (2 bytes)
 	int GetEXIFDataLength() { return m_nEXIFSize; }
 
+	// Gets the preserved JPEG APP/COM segments of the source file (JFIF APP0,
+	// XMP APP1, ICC APP2, IPTC APP13, COM), in source order and excluding the
+	// EXIF APP1, which is handled separately. NULL when the image has none.
+	void* GetJPEGSegments() { return m_pJPEGSegments; }
+
+	// Gets the size of the preserved-segments block in bytes.
+	int GetJPEGSegmentsLength() { return m_nJPEGSegmentsSize; }
+
+	// Gets the length of the preserved segments that stood before the EXIF
+	// block in the source file; the rest stood after it. Used to keep the
+	// original segment order when saving.
+	int GetJPEGSegmentsBeforeEXIF() { return m_nJPEGSegmentsBeforeEXIF; }
+
+	// Takes ownership of a segments buffer from Helpers::FindPreservedJPEGSegments
+	// (allocated with new[]); NULL clears it. Any previously held block is freed.
+	void SetJPEGSegments(void* pSegments, int nSize, int nBeforeEXIF) { delete[] m_pJPEGSegments; m_pJPEGSegments = (char*)pSegments; m_nJPEGSegmentsSize = nSize; m_nJPEGSegmentsBeforeEXIF = nBeforeEXIF; }
+
 	// Gets the EXIF reader for this image if the image contains EXIF data, NULL if not.
 	CEXIFReader* GetEXIFReader() { return m_pEXIFReader; }
 
@@ -352,6 +369,9 @@ private:
 	void* m_pEXIFData;
 	CRawMetadata* m_pRawMetadata;
 	int m_nEXIFSize;
+	char* m_pJPEGSegments; // F-H10: preserved APP/COM segments, NULL when none
+	int m_nJPEGSegmentsSize;
+	int m_nJPEGSegmentsBeforeEXIF;
 	CEXIFReader* m_pEXIFReader;
 	CString m_sJPEGComment;
 	int m_nOrigWidth, m_nOrigHeight; // these may changes by rotation
