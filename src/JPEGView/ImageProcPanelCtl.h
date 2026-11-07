@@ -36,7 +36,6 @@ public:
 private:
 	bool m_bEnabled;
 	bool m_bVisible;
-	bool m_bPinned; // true when shown by an explicit menu / KeyMap command (Ctrl+E): stays visible until toggled off, mouse-leave auto-hide is suppressed
 	int m_nOldMouseY;
 	CImageProcessingPanel* m_pImageProcPanel;
 
