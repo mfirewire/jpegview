@@ -23,6 +23,7 @@ CImageProcPanelCtl::CImageProcPanelCtl(CMainDlg* pMainDlg, CImageProcessingParam
 : CPanelController(pMainDlg, false) {
 	m_bEnabled = CSettingsProvider::This().ShowBottomPanel();
 	m_bVisible = false;
+	m_bPinned = false;
 	m_nOldMouseY = 0;
 	m_pPanel = m_pImageProcPanel = new CImageProcessingPanel(pMainDlg->GetHWND(), this, pParams, pEnableLDC, pEnableContrastCorr);
 	m_pImageProcPanel->GetBtnUnsharpMask()->SetButtonPressedHandler(&OnUnsharpMask, this);
@@ -67,15 +68,21 @@ void CImageProcPanelCtl::SetActive(bool bActive) {
 	}
 	if (bActive) {
 		m_bEnabled = true;
+		// Pinned by an explicit menu / KeyMap command: the panel stays
+		// visible until toggled off again. Without this the mouse-leave
+		// auto-hide in OnMouseMove would hide it on the next mouse move
+		// (menu checkmark on, panel gone).
+		m_bPinned = true;
 		// Show it right away if the window allows (same conditions
 		// as the mouse-hover auto-show).
 		if (CanMakeVisible()) {
 			SetVisible(true);
 		}
 	} else {
-		// Hide first while still enabled, so the navigation panel
-		// fades back in and tooltips are cleared; disabling alone
+		// Unpin first, then hide while still enabled, so the navigation
+		// panel fades back in and tooltips are cleared; disabling alone
 		// would skip that (SetVisible only acts when enabled).
+		m_bPinned = false;
 		SetVisible(false);
 		m_bEnabled = false;
 	}
@@ -132,6 +139,14 @@ bool CImageProcPanelCtl::OnMouseMove(int nX, int nY) {
 		return false;
 	}
 
+	// Pinned by menu / KeyMap: re-show after the window was widened (or a
+	// modal panel closed) and stay visible; the mouse-leave auto-hide below
+	// is suppressed while pinned. Note the hide above stays unconditional,
+	// so a narrow window still hides the panel even when pinned.
+	if (m_bPinned && !m_bVisible) {
+		SetVisible(true);
+	}
+
 	bool bHandled = false;
 	if (!m_bVisible) {
 		int nIPAreaStart= m_pMainDlg->ClientRect().bottom - m_pImageProcPanel->SliderAreaHeight();
@@ -153,7 +168,7 @@ bool CImageProcPanelCtl::OnMouseMove(int nX, int nY) {
 		}
 	} else {
 		if (!(bHandled = m_pImageProcPanel->OnMouseMove(nX, nY))) {
-			if (nY < m_pMainDlg->GetNavPanelCtl()->PanelRect().top) {
+			if (!m_bPinned && nY < m_pMainDlg->GetNavPanelCtl()->PanelRect().top) {
 				SetVisible(false);
 			}
 		}
