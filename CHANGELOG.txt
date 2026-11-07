@@ -20,6 +20,7 @@ Bugs fixed:
 - Deleting the current file externally no longer shows the false "does not contain any image files" message when the folder still has images; the missing file is named and every page-turn input (arrow keys, other mapped keys, mouse wheel, navigation panel buttons) moves on to the neighbouring image instead of doing nothing
 - RAW loading: some RAW files (e.g. Nikon D5000 NEF, Sony A100 ARW) were wrongly rejected by the TIFF gate because the next-IFD chain pointer after a SubIFD was followed without validation; manufacturers do not maintain that pointer, so the gate now only follows it when it lands on a structurally plausible IFD
 - RAW loading: a Nikon D60 NEF was still wrongly rejected by the TIFF gate because the next-IFD pointer after a SubIFD can point inside the file at raw image data that parses as an IFD with insane dimensions; the gate now only follows the next-IFD chain at the top level (IFD0), matching dcraw, which never reads a SubIFD's next pointer
+- Page turn no longer shows a black bar: GotoImage no longer clears the current image before the new image arrives; the old image stays displayed during the load wait (which pumps WM_PAINT) and is swapped only when the new image is ready, so OnPaint no longer paints a black "no image" frame that stayed as a stale black strip in the navigation panel area
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 
