@@ -2787,37 +2787,19 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	} else {
 		InitParametersForNewImage();
 	}
-	// Candidate 1 (black bar): do NOT NULL the current image before the new
-	// image arrives. The load wait pumps WM_PAINT, and a NULL current image
-	// makes OnPaint fill the whole window with the background color (a black
-	// frame), which then stays as a stale black strip in the nav panel area.
-	// Keep showing the old image during the wait; swap when the new image is
-	// ready. The old image is marked not-in-use only after the swap, so the
-	// provider cannot free it while OnPaint still draws it (the OOM retry
-	// inside RequestImage frees unused images and waits again).
-	CJPEGImage* pOldImage = m_pCurrentImage;
+	m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
 	if (ePos == POS_Current || ePos == POS_AwayFromCurrent) {
 		// POS_Current is the reload path. It must release the locked file too:
 		// otherwise the animated-WebP/APNG/JXL/AVIF decoders stay keyed on the old
 		// file name and serve frames from the previous contents after an external
 		// edit. Parameters-only reloads pay one extra file read, which the OS
 		// cache absorbs.
-		// ClearRequest deletes the old image, so there is nothing left to keep
-		// displaying: NULL it (as before) and do not mark it unused again below.
-		m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
 		m_pJPEGProvider->ClearRequest(m_pCurrentImage, true);
-		m_pCurrentImage = NULL;
-		pOldImage = NULL;
 	}
+	m_pCurrentImage = NULL;
 
 	// do not perform a new image request if flagged
 	if (nFlags & NO_REQUEST) {
-		// No new image is requested: clear the display (as before) and mark
-		// the old image unused.
-		if (pOldImage != NULL) {
-			m_pJPEGProvider->NotifyNotUsed(pOldImage);
-		}
-		m_pCurrentImage = NULL;
 		return;
 	}
 
@@ -2850,12 +2832,6 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 		} else {
 			m_nLastLoadError = HelpersGUI::FileLoad_NoFilesInDirectory;
 		}
-	}
-	// The new image arrived (or the load failed): the old image is no longer
-	// displayed, mark it unused so the provider can evict it. Skip when the
-	// request returned the same image (it is still current).
-	if (pOldImage != NULL && pOldImage != m_pCurrentImage) {
-		m_pJPEGProvider->NotifyNotUsed(pOldImage);
 	}
 	double minimalDisplayTime = CSettingsProvider::This().MinimalDisplayTime();
 	bool bSynchronize = (nFlags & KEEP_PARAMETERS) == 0;
