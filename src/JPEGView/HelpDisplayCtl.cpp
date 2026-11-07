@@ -9,6 +9,7 @@
 #include "ProcessParams.h"
 #include "EXIFDisplayCtl.h"
 #include "NavigationPanelCtl.h"
+#include "ImageProcPanelCtl.h"
 #include "FileList.h"
 #include "SettingsProvider.h"
 #include "KeyMap.h"
