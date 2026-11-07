@@ -42,12 +42,6 @@ private:
 		CPanel* DisplayRegion;
 		float DimFactor;
 		bool Blend;
-		// True once BlitImageToMemDC has filled this region with the
-		// image during the current paint. A blended region that was
-		// never filled holds only the background fill (no image, no
-		// buttons) and must not be stamped to the screen; see
-		// PaintMemDCToScreen.
-		bool ImageBlitted;
 		CDC MemoryDC;
 		HBITMAP OffscreenBitmap;
 		CRect DisplayRect;

@@ -8,7 +8,6 @@ CPaintMemDCMgr::CPaintMemDCMgr(CPaintDC& paintDC) : m_paintDC(paintDC) {
 	m_nNumElems = 0;
 	for (int i = 0; i < MAX_REGIONS_CPaintMemDCMgr; i++) {
 		m_managedRegions[i].MemoryDC = CDC();
-		m_managedRegions[i].ImageBlitted = false;
 	}
 }
 
@@ -114,7 +113,6 @@ CRect CPaintMemDCMgr::CreatePanelRegion(CPanel* pPanel, float fDimFactor, bool b
 	m_managedRegions[m_nNumElems].DisplayRegion = pPanel;
 	m_managedRegions[m_nNumElems].DimFactor = fDimFactor;
 	m_managedRegions[m_nNumElems].Blend = bBlendPanel;
-	m_managedRegions[m_nNumElems].ImageBlitted = false;
 	m_managedRegions[m_nNumElems].OffscreenBitmap = PrepareRectForMemDCPainting(m_managedRegions[m_nNumElems].MemoryDC, m_paintDC, displayRect);
 
 	m_nNumElems++;
@@ -135,10 +133,6 @@ void CPaintMemDCMgr::BlitImageToMemDC(void* pDIBData, BITMAPINFO* pBitmapInfo, C
 				BitBltBlended(m_managedRegions[i].MemoryDC, m_paintDC, CSize(rect.Width(), rect.Height()), pDIBData, pBitmapInfo, 
 							  CPoint(destination.x - rect.left, destination.y - rect.top), bitmapSize, m_managedRegions[i].DimFactor);
 			}
-			// The image (and, for blended regions, the panel itself)
-			// has now been painted into this region's memory DC for
-			// this frame.
-			m_managedRegions[i].ImageBlitted = true;
 		}
 	}
 }
@@ -150,18 +144,8 @@ void CPaintMemDCMgr::PaintMemDCToScreen() {
 		if (!m_managedRegions[i].Blend) {
 			m_managedRegions[i].DisplayRegion->OnPaint(m_managedRegions[i].MemoryDC, CPoint(-rect.left, -rect.top));
 		}
-		// Blit the memory DC to the screen. A blended region that never
-		// received the image this frame (pDIBData was NULL, so
-		// BlitImageToMemDC never ran) holds only the background fill -
-		// no image, no buttons. Stamping it would flash a solid bar
-		// over the previous frame's panel strip, so leave the
-		// on-screen pixels untouched instead; the next paint with a
-		// DIB fills the region and blits it normally. Non-blended
-		// regions paint their own content and never depend on the
-		// DIB, so they are always blitted.
-		if (!m_managedRegions[i].Blend || m_managedRegions[i].ImageBlitted) {
-			m_paintDC.BitBlt(rect.left, rect.top, rect.Width(), rect.Height(), m_managedRegions[i].MemoryDC, 0, 0, SRCCOPY);
-		}
+		// Blit the memory DC to the screen
+		m_paintDC.BitBlt(rect.left, rect.top, rect.Width(), rect.Height(), m_managedRegions[i].MemoryDC, 0, 0, SRCCOPY);
 		// Paint tooltips
 		m_managedRegions[i].DisplayRegion->GetTooltipMgr().OnPaint(m_paintDC);
 	}
