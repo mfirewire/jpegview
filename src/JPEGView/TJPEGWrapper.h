@@ -3,6 +3,11 @@
 
 enum TJSAMP;
 
+// F-H09 fix: the Compress default argument (TJSAMP_420) and callers
+// (SaveImage.cpp) need the enumerators, not just the forward
+// declaration above, so include the TurboJPEG header here.
+#include "libjpeg-turbo\include\turbojpeg.h"
+
 class TurboJpeg
 {
 public:
