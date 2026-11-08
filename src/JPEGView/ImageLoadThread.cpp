@@ -2777,7 +2777,7 @@ public:
 		unsigned long long skippedDimIfds = 0;
 		for (size_t i = 0; i < all.size(); ++i) {
 			const TiffGateIFD& info = all[i];
-			if (info.widthPresent) {
+			if (info.widthPresent || info.heightPresent) {
 				anyDeclared = true;
 			}
 			// Dimensions must come in pairs, and a declared dimension must
