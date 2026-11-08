@@ -4,6 +4,7 @@
 #include "Helpers.h"
 #include "BasicProcessing.h"
 #include "MaxImageDef.h"
+#include "NLS.h"
 #include <gdiplus.h>
 
 static void CopyOriginalFileNameToClipboard(LPCWSTR filename) {
@@ -126,6 +127,74 @@ void CClipboard::CopyPathToClipboard(HWND hWnd, CJPEGImage* pImage, LPCTSTR file
 	pImage->EnableDimming(true);
 }
 
+// L-D06: validate the layout of a clipboard DIB before GDI+ sees it. The
+// block belongs to another process, so biSize / biWidth / biHeight /
+// biBitCount / biClrUsed are all untrusted: GDI+ would otherwise read a
+// header larger than the block, a palette past its end, or a pixel area
+// that runs off the buffer. On success nNumColors is the palette entry
+// count (0 for >8 bpp unless BI_BITFIELDS masks follow a plain header).
+static bool ValidateClipboardDIB(const BITMAPINFO* pbmInfo, SIZE_T nMemSize, int& nNumColors) {
+	nNumColors = 0;
+	if (pbmInfo == NULL || nMemSize < sizeof(BITMAPINFOHEADER)) {
+		return false;
+	}
+	const BITMAPINFOHEADER& hdr = pbmInfo->bmiHeader;
+	if (hdr.biSize < sizeof(BITMAPINFOHEADER) || (SIZE_T)hdr.biSize > nMemSize) {
+		return false;
+	}
+	if (hdr.biPlanes != 1 || hdr.biWidth <= 0) {
+		return false;
+	}
+	const long long nHeight = (long long)hdr.biHeight;
+	if (nHeight == 0) {
+		return false;
+	}
+	const long long nAbsHeight = (nHeight < 0) ? -nHeight : nHeight;
+	if ((unsigned int)hdr.biWidth > MAX_IMAGE_DIMENSION || nAbsHeight > (long long)MAX_IMAGE_DIMENSION) {
+		return false;
+	}
+	switch (hdr.biBitCount) {
+		case 1: case 4: case 8: case 16: case 24: case 32:
+			break;
+		default:/r/n			return false;
+	}
+	// P3-4 keeps the clamp on biClrUsed; the block bound below is what
+	// makes the resulting pointer safe.
+	int nColors = hdr.biClrUsed;
+	if (nColors < 0) {
+		nColors = 0;
+	}
+	if (hdr.biBitCount <= 8) {
+		const int nMaxColors = 1 << hdr.biBitCount;
+		if (nColors == 0) {
+			nColors = nMaxColors;
+		} else if (nColors > nMaxColors) {
+			nColors = nMaxColors;
+		}
+	} else {
+		nColors = 0;
+	}
+	if (hdr.biCompression == BI_BITFIELDS && hdr.biSize == sizeof(BITMAPINFOHEADER)) {
+		nColors = 3;   // three colour masks stored after a plain v1 header
+	}
+	const SIZE_T nHeaderBytes = (SIZE_T)hdr.biSize + (SIZE_T)nColors * sizeof(RGBQUAD);
+	if (nHeaderBytes >= nMemSize) {
+		return false;
+	}
+	if (hdr.biCompression == BI_RGB || hdr.biCompression == BI_BITFIELDS) {
+		const SIZE_T nStride = (((SIZE_T)hdr.biWidth * hdr.biBitCount + 31) / 32) * 4;
+		if (nStride > nMemSize) {
+			return false;
+		}
+		const SIZE_T nPixels = nStride * (SIZE_T)nAbsHeight;
+		if (nPixels > nMemSize - nHeaderBytes) {
+			return false;
+		}
+	}
+	nNumColors = nColors;
+	return true;
+}
+
 CJPEGImage* CClipboard::PasteImageFromClipboard(HWND hWnd, const CImageProcessingParams& procParams, 
 												EProcessingFlags eFlags) {
 	if (!::OpenClipboard(hWnd)) {
@@ -137,33 +206,15 @@ CJPEGImage* CClipboard::PasteImageFromClipboard(HWND hWnd, const CImageProcessin
 	if (handle != NULL) {
 		BITMAPINFO* pbmInfo = (BITMAPINFO*)::GlobalLock(handle);
 		if (pbmInfo != NULL) {
-			int nNumColors = pbmInfo->bmiHeader.biClrUsed;
-			if (nNumColors == 0 && pbmInfo->bmiHeader.biBitCount <= 8) {
-				nNumColors = 1 << pbmInfo->bmiHeader.biBitCount;
+			// L-D06: validate the whole layout against GlobalSize before
+			// GDI+ reads the header and the pixel area.
+			SIZE_T nMemSize = ::GlobalSize(handle);
+			int nNumColors = 0;
+			char* pDIBBits = NULL;
+			if (ValidateClipboardDIB(pbmInfo, nMemSize, nNumColors)) {
+				pDIBBits = (char*)pbmInfo + pbmInfo->bmiHeader.biSize + nNumColors*sizeof(RGBQUAD);
 			}
-			// P3-4: biClrUsed comes from the clipboard DIB header and is
-			// attacker-controlled; an unbounded value pushes pDIBBits past
-			// the end of the buffer (on Win32 the nNumColors*sizeof(RGBQUAD)
-			// product can also wrap). Clamp to the palette size the format
-			// can actually have: at most 1 << biBitCount entries for
-			// <= 8 bpp, at most 256 otherwise. (BI_BITFIELDS below still
-			// overrides this with 3.)
-			if (nNumColors < 0) {
-				nNumColors = 0;
-			} else if (pbmInfo->bmiHeader.biBitCount <= 8) {
-				int nMaxColors = 1 << pbmInfo->bmiHeader.biBitCount;
-				if (nNumColors > nMaxColors) {
-					nNumColors = nMaxColors;
-				}
-			} else if (nNumColors > 256) {
-				nNumColors = 256;
-			}
-			if (pbmInfo->bmiHeader.biCompression == BI_BITFIELDS) {
-				nNumColors = 3;
-			}
-			char* pDIBBits = (char*)pbmInfo + pbmInfo->bmiHeader.biSize + nNumColors*sizeof(RGBQUAD);
-
-			if (pbmInfo->bmiHeader.biWidth <= MAX_IMAGE_DIMENSION && abs(pbmInfo->bmiHeader.biHeight) <= MAX_IMAGE_DIMENSION) {
+			if (pDIBBits != NULL) {
 				// R-10: 'new Gdiplus::Bitmap' and 'new CJPEGImage' below (its
 				// CLocalDensityCorr member) can throw on allocation failure;
 				// this runs on the UI thread (GotoImage, no try/catch above).
@@ -234,7 +285,7 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 		// P3-5: DoCopy returns void and the callers do not check for
 		// failure, so report the failure here. The clipboard has not
 		// been emptied yet (see below), so its previous contents survive.
-		::MessageBox(hWnd, _T("Not enough memory to copy the image to the clipboard."), _T("JPEGView"), MB_OK | MB_ICONERROR);
+		::MessageBox(hWnd, CNLS::GetString(_T("Not enough memory to copy the image to the clipboard.")), _T("JPEGView"), MB_OK | MB_ICONERROR);
 		::CloseClipboard();
 		return;
 	}
@@ -244,7 +295,7 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 	// class as the GlobalAlloc failure above).
 	void* pMemory = ::GlobalLock(hMem);
 	if (pMemory == NULL) {
-		::MessageBox(hWnd, _T("Not enough memory to copy the image to the clipboard."), _T("JPEGView"), MB_OK | MB_ICONERROR);
+		::MessageBox(hWnd, CNLS::GetString(_T("Not enough memory to copy the image to the clipboard.")), _T("JPEGView"), MB_OK | MB_ICONERROR);
 		::GlobalFree(hMem);
 		::CloseClipboard();
 		return;
@@ -271,7 +322,11 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 	CBasicProcessing::Convert32bppTo24bppDIB(nWidth, nHeight, pDIBPixelsTarget, pSourceImageDIB32, true);
 
 	::GlobalUnlock(hMem); 
-	::SetClipboardData(CF_DIB, hMem);
+	if (::SetClipboardData(CF_DIB, hMem) == NULL) {
+		// The handle belongs to the clipboard only on success; on
+		// failure it is still ours and must be freed.
+		::GlobalFree(hMem);
+	}
 
 	if (fileName != NULL) {
 		CopyOriginalFileNameToClipboard(fileName);

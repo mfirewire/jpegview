@@ -504,6 +504,10 @@ Zoom to Selection	縮放到選擇內容
 //! Lanczos/Bicubic
 
 // ::: STATUS: Last Checked/Updated by Script ::: 2023-10-07T05:14:21.946511+00:00 //
+Image size exceeds the limit (MaxImagePixelsMP)	影像尺寸超過上限 (MaxImagePixelsMP)
+Failed to save settings to the INI file.	儲存設定到 INI 檔案失敗。
+Failed to set the desktop wallpaper.	設定桌面壁紙失敗。
+Not enough memory to copy the image to the clipboard.	記憶體不足，無法將影像複製到剪貼簿。
 //! Translation Progress: 99%
 //! * Total (Strings + Menu) = 429
 //! * Done = 425

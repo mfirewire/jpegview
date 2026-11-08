@@ -238,7 +238,7 @@
 #define IDM_LANDSCAPE_MODE	10700		// :KeyMap: toogle landscape picture enhancement mode
 #define IDM_KEEP_PARAMETERS	11000		// :KeyMap: toogle keep parameters between images
 #define IDM_SAVE_PARAMETERS 11010		// :KeyMap: save to parameter DB
-#define IDM_SAVE_PARAM_DB   11500		// :KeyMap: delete from parameter DB
+#define IDM_SAVE_PARAM_DB   11500		// :KeyMap: save to parameter DB
 #define IDM_CLEAR_PARAM_DB  11510		// :KeyMap: delete from parameter DB
 #define IDM_FIT_TO_SCREEN	12000		// :KeyMap: fit image to screen
 #define IDM_FILL_WITH_CROP	12001		// :KeyMap: fit image to fill screen with crop

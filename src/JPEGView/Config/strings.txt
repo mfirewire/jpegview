@@ -477,3 +477,7 @@ Crop Mode
 Free	
 Fixed size...	
 Zoom to Selection	
+Image size exceeds the limit (MaxImagePixelsMP)	
+Failed to save settings to the INI file.	
+Failed to set the desktop wallpaper.	
+Not enough memory to copy the image to the clipboard.	

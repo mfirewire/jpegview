@@ -241,7 +241,12 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 			if (bHasGAMA) {
 				png_get_gAMA(png_ptr, info_ptr, &dFileGamma);
 			}
-			if (!bHasICCP && (bHasSRGB || (bHasGAMA && dFileGamma > 0.0))) {
+			// N-06: gamma is part of the embedded-colour handling, so it follows
+			// UseEmbeddedColorProfiles. With the switch off the gAMA/sRGB chunk
+			// is ignored and the raw values are displayed, which is what
+			// "ignore embedded colour information" is supposed to mean.
+			if (CSettingsProvider::This().UseEmbeddedColorProfiles()
+				&& !bHasICCP && (bHasSRGB || (bHasGAMA && dFileGamma > 0.0))) {
 				// Screen gamma 2.2 approximates sRGB; an sRGB chunk means the file
 				// gamma is 1/2.2 regardless of what gAMA says.
 				png_set_gamma(png_ptr, 2.2, bHasSRGB ? 0.45455 : dFileGamma);
