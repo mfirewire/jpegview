@@ -818,6 +818,13 @@ double GetExactTickCount() {
 	}
 }
 
+// sRGB (8-bit, display-referred) -> linear light, gamma 2.2.
+// Shared by the HDR writer (SaveImage.cpp) and the EXR writer
+// (SaveEXR.cpp); see the declaration in Helpers.h.
+float LinearFromSRGB(unsigned char v) {
+	return (float)pow((double)v / 255.0, 2.2);
+}
+
 int GetWindowCaptionSize() {
 	return ::GetSystemMetrics(SM_CYCAPTION);
 }

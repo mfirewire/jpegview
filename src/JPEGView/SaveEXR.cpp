@@ -48,25 +48,27 @@
 // Encoding choices (all fixed by tinyexr, nothing configurable here):
 // - Components: 3 (RGB), no alpha -- the DIB has none.
 // - Precision: fp16 (save_as_fp16 = 1). An 8-bit source value v is
-//   stored as the fp16 nearest to v/255. fp16 is lossless for 8-bit
-//   data on the way back: the largest fp16 rounding error in [0, 1]
-//   is half an ulp near 1.0, about 2^-11 (~0.0005), while half an
-//   8-bit step is 0.5/255 (~0.00196), so re-quantising to 8-bit
-//   recovers v exactly for every v in 0..255. fp32 would double the
+//   stored as the fp16 nearest to its linear-light value
+//   (v/255)^2.2 in [0, 1] (see Helpers::LinearFromSRGB). The
+//   round trip back to 8-bit is pixel-identical: verified over all
+//   256 values, every v reloads as v (the worst-case decoded value
+//   sits 0.46 of an 8-bit step from a rounding boundary, so fp16 /
+//   powf rounding cannot flip a value). fp32 would double the
 //   file size for no extra information.
 // - Compression: chosen inside tinyexr (SaveEXRToMemory,
 //   tinyexr.h): ZIP (via the vendored miniz) whenever width >= 16 or
 //   height >= 16, NONE when both dimensions are < 16. There is no
 //   parameter to change it.
-// - Dynamic range: none beyond 8-bit. The float buffer holds
-//   v/255.0f in [0, 1]; the values are linear-light numbers only by
-//   convention -- no tone curve is applied on save. NOTE the round
-//   trip is not pixel-identical by design: the decode side
-//   (EXRWrapper::ReadImage) tone-maps EXR back to 8-bit with
-//   gamma 2.2, so saving an 8-bit image as EXR and reloading it
-//   brightens it. That matches the HDR wrapper's decode behaviour
-//   and is a property of the EXR decode path, not of this writer;
-//   do not "fix" it here.
+// - Dynamic range: none beyond 8-bit. The float buffer holds the
+//   linear-light values (v/255)^2.2 in [0, 1]: EXR is a linear-light
+//   format, so the 8-bit sRGB input must be linearised on save --
+//   the same conversion SaveHDR applies (Helpers::LinearFromSRGB).
+//   The earlier note claiming the round trip was "not pixel-
+//   identical by design" and "a property of the EXR decode path"
+//   was wrong: the asymmetry was on this writer's side (it stored
+//   v/255, i.e. sRGB values labelled as linear light), while the
+//   decode side correctly applied gamma 2.2. With the writer fixed
+//   the round trip IS pixel-identical (see the Precision bullet).
 //
 // Row order / channels: the DIB is top-down (row 0 = top) and BGR.
 // SaveEXRToMemory expects interleaved RGB float, row-major, pixel
@@ -136,12 +138,14 @@ bool SaveEXRFile(LPCTSTR sFileName, void* pData24bppBGR, int nWidth, int nHeight
 		const unsigned char* pSrcRow = pSrc + (size_t)y * (size_t)nSrcStride;
 		float* pDstRow = pFloatRGB + (size_t)y * (size_t)nWidth * 3;
 		for (int x = 0; x < nWidth; x++) {
-			// DIB is BGR; EXR wants RGB. 1/255.0f: keep the division
-			// in float (the double constant would be needless work;
-			// the fp16 rounding below dominates the error anyway).
-			pDstRow[x * 3 + 0] = (float)pSrcRow[x * 3 + 2] * (1.0f / 255.0f); // R
-			pDstRow[x * 3 + 1] = (float)pSrcRow[x * 3 + 1] * (1.0f / 255.0f); // G
-			pDstRow[x * 3 + 2] = (float)pSrcRow[x * 3 + 0] * (1.0f / 255.0f); // B
+			// DIB is BGR (8-bit sRGB, display-referred); EXR wants RGB
+			// linear light. Linearise with the shared Helpers helper
+			// (gamma 2.2), the same conversion SaveHDR applies -- the
+			// exact inverse of the decode side's pow(v, 1/2.2) * 255
+			// (EXRWrapper::ReadImage), so save -> reload round-trips.
+			pDstRow[x * 3 + 0] = Helpers::LinearFromSRGB(pSrcRow[x * 3 + 2]); // R
+			pDstRow[x * 3 + 1] = Helpers::LinearFromSRGB(pSrcRow[x * 3 + 1]); // G
+			pDstRow[x * 3 + 2] = Helpers::LinearFromSRGB(pSrcRow[x * 3 + 0]); // B
 		}
 	}
 

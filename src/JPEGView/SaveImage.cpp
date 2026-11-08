@@ -12,7 +12,6 @@
 #include "QOIWrapper.h"
 #include "SaveJP2.h"
 #include "SaveEXR.h"
-#include <math.h> // pow (SaveHDR: sRGB -> linear light)
 
 // stb_image_write (batch 5, save only): HDR + TGA. The implementation
 // lives in this translation unit only, mirroring PPMWrapper.cpp's
@@ -325,16 +324,6 @@ static bool HasFileExtension(LPCTSTR sFileName, LPCTSTR sExtension) {
 // and the PBM black/white decision, so a .pgm and a .pbm of one image agree.
 static unsigned char LuminanceFromBGR(unsigned char b, unsigned char g, unsigned char r) {
 	return (unsigned char)((299 * r + 587 * g + 114 * b + 500) / 1000);
-}
-
-// sRGB (8-bit, display-referred) -> linear light, for HDR storage.
-// This is the exact inverse of the gamma stb_image applies when
-// loading HDR as 8-bit (stbi__hdr_to_ldr: pow(v, 1/2.2) * 255, the
-// defaults), so a file saved here reloads in JPEGView with the same
-// pixels; it is also the correct value for a Radiance file, which
-// stores scene-referred linear light.
-static float LinearFromSRGB(unsigned char v) {
-	return (float)pow((double)v / 255.0, 2.2);
 }
 
 // F-H09: maps the JPEGSaveSubsampling INI value (444/422/420) to
@@ -892,7 +881,7 @@ static bool SavePNM(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 // pData must point to 24 bit BGR DIB (top-down, rows padded to 4 bytes,
 // same layout SaveWebP/SaveQOI receive).
 // Radiance RGBE via stb_image_write. The float input is linear light
-// (see LinearFromSRGB); stb stores it as-is, top-down, no gamma of
+// (see Helpers::LinearFromSRGB); stb stores it as-is, top-down, no gamma of
 // its own. stb's HDR writer reports only its own success, so the
 // callback's write flag is part of the result.
 static bool SaveHDR(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
@@ -916,9 +905,9 @@ static bool SaveHDR(LPCTSTR sFileName, void* pData, int nWidth, int nHeight) {
 		float* pFloatData = new float[nPixels * 3];
 		for (size_t i = 0; i < nPixels; i++) {
 			size_t nSrc = (i / (size_t)nWidth) * (size_t)nPaddedStride + (i % (size_t)nWidth) * 3;
-			pFloatData[i * 3] = LinearFromSRGB(pSourcePixels[nSrc + 2]);
-			pFloatData[i * 3 + 1] = LinearFromSRGB(pSourcePixels[nSrc + 1]);
-			pFloatData[i * 3 + 2] = LinearFromSRGB(pSourcePixels[nSrc]);
+			pFloatData[i * 3] = Helpers::LinearFromSRGB(pSourcePixels[nSrc + 2]);
+			pFloatData[i * 3 + 1] = Helpers::LinearFromSRGB(pSourcePixels[nSrc + 1]);
+			pFloatData[i * 3 + 2] = Helpers::LinearFromSRGB(pSourcePixels[nSrc]);
 		}
 		StbiWriteFileContext ctx(fptr);
 		bool bStbiOk = stbi_write_hdr_to_func(StbiWriteToFile, &ctx, nWidth, nHeight, 3, pFloatData) != 0;

@@ -221,6 +221,14 @@ namespace Helpers {
 		return (padvalue - ((value & (padvalue - 1)))) & (padvalue - 1);
 	}
 
+	// sRGB (8-bit, display-referred) -> linear light, gamma 2.2.
+	// Shared by the HDR writer (SaveImage.cpp) and the EXR writer
+	// (SaveEXR.cpp): both store scene-referred linear light, and
+	// both decode sides apply the inverse gamma (pow(v, 1/2.2) * 255),
+	// so a file saved through either writer reloads with the same
+	// pixels. Defined in Helpers.cpp (it needs <math.h> for pow).
+	float LinearFromSRGB(unsigned char v);
+
 	// calculate CRC table for a CRC check
 	void CalcCRCTable(unsigned int crc_table[256]);
 
