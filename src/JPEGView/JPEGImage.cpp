@@ -736,6 +736,14 @@ bool CJPEGImage::Rotate(int nRotation) {
 	}
 	m_rotationParams.Rotation = (m_rotationParams.Rotation + nRotation) % 360;
 
+	// F-M27: the original pixels no longer match the JPEG on disk, so the
+	// lossless-transform gate must not rewrite the file and throw away this
+	// unsaved edit. Set the flag directly instead of calling
+	// MarkAsDestructivelyProcessed(): that helper also clears FreeRotation
+	// and Flags, which VerifyRotation() reads right after Rotate() and
+	// would otherwise apply the free rotation a second time.
+	m_bIsDestructivelyProcessed = true;
+
 	m_dLastOpTickCount = Helpers::GetExactTickCount() - dStartTickCount;
 	return true;
 }

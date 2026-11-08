@@ -63,7 +63,7 @@ private:
 // content) is never served a stale verdict, and releasing a file for reload
 // (CImageLoadThread::ReleaseFile) drops its entries. OOM is never memoized:
 // it is transient, and a retry after freeing memory must re-decode.
-// R-16/E19: bBad is recorded only for a genuine decode failure. Four
+// R-16/E19: bBad is recorded only for a genuine decode failure. Five
 // failures are NOT decode failures and are never recorded, so they can
 // never poison the memo: (1) the image decoded fine but ProcessImageAfterLoad
 // failed (VerifyRotation failure, DIB size-limit trip - both depend on the
@@ -74,7 +74,10 @@ private:
 // hiccup - the file is re-checked with GetFileIdentity before recording),
 // (4) a TIFF gate rejection (P0: the gate runs before any decoder, so a
 // retry re-runs only the cheap header parse, while memoizing a false
-// rejection would lock the file out for the whole session).
+// rejection would lock the file out for the whole session),
+// (5) R-1: a load aborted by an unhandled exception caught in a reader's
+// catch(...). Like OOM it depends on the environment/state, not on a
+// verdict about the file's contents, so a retry must re-decode.
 // No settings-generation stamp is kept: with (1) and (2) excluded at the
 // source, no settings-dependent verdict ever enters the memo, so there is
 // nothing for a stamp to invalidate; the probe conclusions are file-content
@@ -818,7 +821,9 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 		// re-attempt re-runs only the cheap header parse), while memoizing
 		// it would lock the file out for the whole session on a single
 		// false rejection.
-		if (!rq.OutOfMemory && !bAfterLoadFailed && !rq.SizeLimitExceeded && !rq.GateRejected) {
+		// R-1: ExceptionError is the same kind of transient, state-dependent
+		// failure as OOM - do not turn it into a permanent bad-file verdict.
+		if (!rq.OutOfMemory && !bAfterLoadFailed && !rq.SizeLimitExceeded && !rq.GateRejected && !rq.ExceptionError) {
 			__int64 nRecheckSize = 0;
 			FILETIME ftRecheck = { 0, 0 };
 			if (GetFileIdentity(rq.FileName, nRecheckSize, ftRecheck)) {
