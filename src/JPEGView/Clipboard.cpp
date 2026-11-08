@@ -156,7 +156,8 @@ static bool ValidateClipboardDIB(const BITMAPINFO* pbmInfo, SIZE_T nMemSize, int
 	switch (hdr.biBitCount) {
 		case 1: case 4: case 8: case 16: case 24: case 32:
 			break;
-		default:/r/n			return false;
+		default:
+			return false;
 	}
 	// P3-4 keeps the clamp on biClrUsed; the block bound below is what
 	// makes the resulting pointer safe.
