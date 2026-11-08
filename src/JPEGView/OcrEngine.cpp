@@ -630,7 +630,10 @@ std::wstring SelectedText(const std::vector<Word>& words, const std::vector<bool
             // 引号（said 'hello'）与词间横线（A - B）不会被错误粘连。
             const Word& directPrev = words[i - 1];
             if (words[i].line != lastLine) {
-                out += L"\r\n";
+                // N-03: one newline per skipped line, so selecting lines 0
+                // and 2 keeps the blank line 1 instead of collapsing it.
+                const int nSteps = (words[i].line > lastLine) ? int(words[i].line - lastLine) : 1;
+                for (int k = 0; k < nSteps; ++k) out += L"\r\n";
             } else if (NeedsSpaceBetween(out.back(), text.front())
                        && !SplitInsideLatinWord(directPrev, words[i])
                        && !PunctJoinsWithoutSpace(directPrev, words[i])) {

@@ -356,6 +356,9 @@ private:
 	int m_nTransitionTime;
 	DWORD m_nLastSlideShowImageTickCount;
 	bool m_bUseLosslessWEBP;
+	bool m_bUseLosslessJXL;
+	bool m_bUseLosslessJP2;
+	bool m_bSaveLossless;   // S-7: lossless variant chosen for the save in progress
 	bool m_isBeforeFileSelected;
 	double m_dLastImageDisplayTime;
 	bool m_bWindowBorderless;

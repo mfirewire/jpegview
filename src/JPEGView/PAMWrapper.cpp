@@ -226,15 +226,25 @@ void* PAMReader::ReadImage(int& width,
 	// Zero the row padding so no uninitialised bytes reach the DIB.
 	memset(pPixelData, 0, allocSize);
 	// PAM raster is RGB (DEPTH 3) or RGBA (DEPTH 4), top row first;
-	// alpha is dropped. JPEGView pixels are BGR.
+	// JPEGView pixels are BGR. S-6: RGBA is composited over white, like
+	// the SVG and EXR decoders, instead of dropping alpha (transparent
+	// pixels used to show their raw, often black, colour).
+	const bool bHasAlpha = (nDepth == 4);
 	for (int y = 0; y < height; y++) {
 		const unsigned char* pRow = pMagic + pos + (size_t)y * rowBytes;
 		unsigned char* pDst = pPixelData + (size_t)y * padded_stride;
 		for (int x = 0; x < width; x++) {
 			const unsigned char* pSrc = pRow + (size_t)x * (size_t)nDepth;
-			pDst[x * 3] = pSrc[2];
-			pDst[x * 3 + 1] = pSrc[1];
-			pDst[x * 3 + 2] = pSrc[0];
+			if (bHasAlpha) {
+				const int a = pSrc[3];
+				pDst[x * 3] = (unsigned char)((pSrc[2] * a + 255 * (255 - a) + 127) / 255);
+				pDst[x * 3 + 1] = (unsigned char)((pSrc[1] * a + 255 * (255 - a) + 127) / 255);
+				pDst[x * 3 + 2] = (unsigned char)((pSrc[0] * a + 255 * (255 - a) + 127) / 255);
+			} else {
+				pDst[x * 3] = pSrc[2];
+				pDst[x * 3 + 1] = pSrc[1];
+				pDst[x * 3 + 2] = pSrc[0];
+			}
 		}
 	}
 	return (void*)pPixelData;

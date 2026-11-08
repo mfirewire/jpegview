@@ -206,6 +206,15 @@ void* JP2Reader::ReadImage(int& width,
 		memset(pDst, 0, allocSize);
 		bool isYCbCr = (image->color_space == OPJ_CLRSPC_SYCC || image->color_space == OPJ_CLRSPC_EYCC);
 		bool isGray = (image->numcomps == 1 || image->numcomps == 2);
+		// S-6: find the alpha component (OpenJPEG marks it) so it can be
+		// composited over white instead of being dropped. The per-pixel
+		// buffer holds at most 8 components; a file declaring more used
+		// to overflow it, so the loop is capped as well.
+		const OPJ_UINT32 nComps = (image->numcomps > 8) ? 8 : image->numcomps;
+		int nAlphaComp = -1;
+		for (OPJ_UINT32 c = 0; c < nComps; c++) {
+			if (image->comps[c].alpha != 0) { nAlphaComp = (int)c; break; }
+		}
 		for (int y = 0; y < height; y++) {
 			for (int x = 0; x < width; x++) {
 				// Map the output pixel to each component's sample grid.
@@ -213,8 +222,8 @@ void* JP2Reader::ReadImage(int& width,
 				// sample index is ((x0 + x) - comp->x0) / dx, clamped; this
 				// is exact for dx == dy == 1 and nearest-neighbour
 				// upsampling for subsampled components.
-				unsigned char v[4] = { 0, 0, 0, 0 };
-				for (OPJ_UINT32 c = 0; c < image->numcomps; c++) {
+				unsigned char v[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+				for (OPJ_UINT32 c = 0; c < nComps; c++) {
 					opj_image_comp_t* comp = &image->comps[c];
 					// A1-2: x0/y0 and comp->x0/comp->y0 are OPJ_UINT32; casting
 					// them to int wraps at 2^31. Compute the sample index in
@@ -237,11 +246,10 @@ void* JP2Reader::ReadImage(int& width,
 					v[c] = JP2SampleTo8(comp->data[(size_t)row * comp->w + (size_t)col], comp->prec, comp->sgnd);
 				}
 				size_t dstIdx = (size_t)y * padded_stride + (size_t)x * 3;
+				int r, g, b;
 				if (isGray) {
-					// BGR, all three channels from the gray component.
-					pDst[dstIdx] = v[0];
-					pDst[dstIdx + 1] = v[0];
-					pDst[dstIdx + 2] = v[0];
+					// All three channels from the gray component.
+					r = g = b = v[0];
 				} else if (isYCbCr) {
 					// BT.601 YCbCr -> RGB (Cb/Cr centred on 128). EYCC uses
 					// the same coefficients here; that is an approximation,
@@ -249,20 +257,30 @@ void* JP2Reader::ReadImage(int& width,
 					int yv = v[0];
 					int cb = (int)v[1] - 128;
 					int cr = (int)v[2] - 128;
-					int r = yv + (int)(1.402 * cr);
-					int g = yv - (int)(0.34414 * cb) - (int)(0.71414 * cr);
-					int b = yv + (int)(1.772 * cb);
+					r = yv + (int)(1.402 * cr);
+					g = yv - (int)(0.34414 * cb) - (int)(0.71414 * cr);
+					b = yv + (int)(1.772 * cb);
 					if (r < 0) r = 0; else if (r > 255) r = 255;
 					if (g < 0) g = 0; else if (g > 255) g = 255;
 					if (b < 0) b = 0; else if (b > 255) b = 255;
-					pDst[dstIdx] = (unsigned char)b;
-					pDst[dstIdx + 1] = (unsigned char)g;
-					pDst[dstIdx + 2] = (unsigned char)r;
 				} else {
 					// OpenJPEG returns RGB; JPEGView pixels are BGR.
-					pDst[dstIdx] = v[2];
-					pDst[dstIdx + 1] = v[1];
-					pDst[dstIdx + 2] = v[0];
+					r = v[0];
+					g = v[1];
+					b = v[2];
+				}
+				// S-6: composite over white, like the SVG and EXR decoders.
+				if (nAlphaComp >= 0) {
+					const int a = v[nAlphaComp];
+					if (a != 255) {
+						r = (r * a + 255 * (255 - a) + 127) / 255;
+						g = (g * a + 255 * (255 - a) + 127) / 255;
+						b = (b * a + 255 * (255 - a) + 127) / 255;
+					}
+				}
+				pDst[dstIdx] = (unsigned char)b;
+				pDst[dstIdx + 1] = (unsigned char)g;
+				pDst[dstIdx + 2] = (unsigned char)r;
 				}
 			}
 		}

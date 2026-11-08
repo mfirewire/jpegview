@@ -7,6 +7,12 @@ New features:
 - JPEG saving: ICC profile, XMP metadata, Photoshop/IPTC data, JFIF density and COM comment segments from the original file are now preserved on save, in their original order (previously only the EXIF segment was copied)
 - HDR (.hdr) viewing: the GAMMA header is now honoured when converting to 8-bit, so files written for gamma 0.454545 are no longer displayed far too bright; files without a GAMMA header (or GAMMA=1.0) render byte-identically to before
 Bugs fixed:
+- PNG viewing: the gAMA/sRGB chunk now follows UseEmbeddedColorProfiles; with the switch off the file gamma is ignored (previously the image changed anyway, and a file carrying iCCP lost both the profile and the gamma)
+- Clipboard: a CF_DIB block pasted from another application is validated against GlobalSize before GDI+ reads it (header, palette and pixel extent), so a negative width or an undersized block is rejected instead of being read out of bounds
+- JP2 and PAM viewing: an embedded alpha channel is composited over white, like the SVG and EXR decoders, instead of being dropped (transparent pixels used to show their raw, often black, colour)
+- Saving: the lossless choice is remembered per format; saving a lossless JP2 no longer makes the next WebP/JXL save dialog default to lossless
+- OCR: selecting non-adjacent lines keeps the blank lines between them instead of collapsing them into one newline
+- Localisation: four UI messages (image size limit, settings save failure, wallpaper failure, clipboard out of memory) added to the English, Simplified Chinese and Traditional Chinese string tables; the parameter-DB command that saves was described as "delete from parameter DB" in the generated key map
 - Fixed the navigation-panel black bar that appeared while paging to the next image (the panel rectangle was painted black by FillRect during the wait-phase NULL paint). OnPaint now returns early while waiting for the new image (m_bWaitingForImage flag, RAII-guarded around RequestImage in GotoImage and OpenFile), preserving the previous frame.
 - Saving settings now reports a failure instead of silently discarding it (SaveSettings reports success/failure and a message box shows the INI path on failure)
 - A custom KeyMap.txt stored in AppData is now migrated to the EXE directory like the INI file, instead of being silently discarded in EXE mode

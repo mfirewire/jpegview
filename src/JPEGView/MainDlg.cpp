@@ -276,6 +276,9 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 	m_nLastAnimationOffset = 0;
 	m_nExpectedNextAnimationTickCount = 0;
 	m_bUseLosslessWEBP = false;
+	m_bUseLosslessJXL = false;
+	m_bUseLosslessJP2 = false;
+	m_bSaveLossless = false;
 	m_isBeforeFileSelected = true;
 	m_dLastImageDisplayTime = 0.0;
 	m_isUserFitToScreen = false;
@@ -2471,7 +2474,7 @@ bool CMainDlg::SaveImage(bool bFullSize, bool bJxlTranscode) {
 	} else if (sExtension.CompareNoCase(_T("webp")) == 0) {
 		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessWEBP ? 6 : 5;
 	} else if (sExtension.CompareNoCase(_T("jxl")) == 0) {
-		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessWEBP ? 8 : 7;
+		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessJXL ? 8 : 7;
 	} else if (sExtension.CompareNoCase(_T("qoi")) == 0) {
 		fileDlg.m_ofn.nFilterIndex = 9;
 	} else if (sExtension.CompareNoCase(_T("gif")) == 0) {
@@ -2485,7 +2488,7 @@ bool CMainDlg::SaveImage(bool bFullSize, bool bJxlTranscode) {
 	} else if (sExtension.CompareNoCase(_T("pbm")) == 0) {
 		fileDlg.m_ofn.nFilterIndex = 14;
 	} else if (sExtension.CompareNoCase(_T("jp2")) == 0 || sExtension.CompareNoCase(_T("j2k")) == 0 || sExtension.CompareNoCase(_T("j2c")) == 0) {
-		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessWEBP ? 16 : 15;
+		fileDlg.m_ofn.nFilterIndex = m_bUseLosslessJP2 ? 16 : 15;
 	} else if (sExtension.CompareNoCase(_T("exr")) == 0) {
 		fileDlg.m_ofn.nFilterIndex = 17;
 	}
@@ -2494,7 +2497,12 @@ bool CMainDlg::SaveImage(bool bFullSize, bool bJxlTranscode) {
 	}
 	if (IDOK == fileDlg.DoModal(m_hWnd)) {
 		m_sSaveDirectory = fileDlg.m_szFileName;
-		m_bUseLosslessWEBP = fileDlg.m_ofn.nFilterIndex == 6 || fileDlg.m_ofn.nFilterIndex == 8 || fileDlg.m_ofn.nFilterIndex == 16;
+		// S-7: remember the lossless choice per format. A single shared flag
+		// made a lossless JP2 save flip the next WebP/JXL dialog to lossless.
+		m_bUseLosslessWEBP = fileDlg.m_ofn.nFilterIndex == 6;
+		m_bUseLosslessJXL = fileDlg.m_ofn.nFilterIndex == 8;
+		m_bUseLosslessJP2 = fileDlg.m_ofn.nFilterIndex == 16;
+		m_bSaveLossless = m_bUseLosslessWEBP || m_bUseLosslessJXL || m_bUseLosslessJP2;
 		m_sSaveExtension = m_sSaveDirectory.Right(m_sSaveDirectory.GetLength() - m_sSaveDirectory.ReverseFind(_T('.')) - 1);
 		m_sSaveDirectory = m_sSaveDirectory.Left(m_sSaveDirectory.ReverseFind(_T('\\')) + 1);
 		return SaveImageNoPrompt(fileDlg.m_szFileName, bFullSize, bJxlTranscode);
@@ -2514,7 +2522,7 @@ bool CMainDlg::SaveImageNoPrompt(LPCTSTR sFileName, bool bFullSize, bool bJxlTra
 	bool result;
 	if (!bJxlTranscode) {
 		result = CSaveImage::SaveImage(sFileName, m_pCurrentImage, *m_pImageProcParams,
-			CreateDefaultProcessingFlags(), bFullSize, m_bUseLosslessWEBP);
+			CreateDefaultProcessingFlags(), bFullSize, m_bSaveLossless);
 	} else {
 		result = CSaveImage::ConvertToJXL(sFileName, CurrentFileName(true));
 	}
