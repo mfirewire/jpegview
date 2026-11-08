@@ -508,6 +508,12 @@ Image size exceeds the limit (MaxImagePixelsMP)	影像尺寸超過上限 (MaxIma
 Failed to save settings to the INI file.	儲存設定到 INI 檔案失敗。
 Failed to set the desktop wallpaper.	設定桌面壁紙失敗。
 Not enough memory to copy the image to the clipboard.	記憶體不足，無法將影像複製到剪貼簿。
+The file name contains characters that are not allowed.	檔案名稱包含不允許的字元。
+Some files cannot be renamed or copied. Nothing has been changed:	部分檔案無法重新命名或複製，未做任何修改：
+invalid file name	檔案名稱無效
+target file already exists	目標檔案已存在
+the same target name is used more than once	同一個目標檔案名稱被使用了多次
+%d file operation(s) rolled back.	已回滾 %d 個檔案操作。
 //! Translation Progress: 99%
 //! * Total (Strings + Menu) = 429
 //! * Done = 425

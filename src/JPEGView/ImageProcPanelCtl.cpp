@@ -181,8 +181,12 @@ bool CImageProcPanelCtl::RenameCurrentFile(LPCTSTR sNewFileTitle) {
 		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("The file is read-only!")), CNLS::GetString(_T("Can't rename file")), MB_OK | MB_ICONSTOP);
 		return false;
 	}
-	if (_tcschr(sNewFileTitle, _T('\\')) != NULL) {
-		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("New name contains backslash character!")), CNLS::GetString(_T("Can't rename file")), MB_OK | MB_ICONSTOP);
+	// D2 (L-U03): this used to reject only a backslash, so "a:b.jpg", "a?b.jpg"
+	// or a reserved name went to MoveFileEx and failed with a system message; an
+	// empty title even got the old extension appended and became ".jpg". Validate
+	// one component the same way the batch rename does.
+	if (!Helpers::IsValidFileNameComponent(sNewFileTitle)) {
+		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("The file name contains characters that are not allowed.")), CNLS::GetString(_T("Can't rename file")), MB_OK | MB_ICONSTOP);
 		return false;
 	}
 

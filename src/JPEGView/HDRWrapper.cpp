@@ -21,8 +21,12 @@
 // exactly stb's 1.0f/2.2f, so the output is byte-identical to the old
 // stb 8-bit load (verified against the vendored stb on the test samples).
 static unsigned char ConvertHDRChannel(float fValue, float fInvGamma) {
+	// A2 (R-12 parity): pow() of a negative or NaN sample yields NaN, and both
+	// comparisons below are false for NaN, so the old code fell through to the
+	// int cast (undefined behaviour). !(z >= 0) catches NaN as well as negatives,
+	// which is the same test the EXR decoder uses.
 	float z = (float)pow((double)fValue, (double)fInvGamma) * 255.0f + 0.5f;
-	if (z < 0.0f) z = 0.0f;
+	if (!(z >= 0.0f)) z = 0.0f;
 	if (z > 255.0f) z = 255.0f;
 	return (unsigned char)(int)z;
 }

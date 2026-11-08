@@ -86,6 +86,8 @@ public:
 	int JPEGSaveSubsampling() { return m_nJPEGSaveSubsampling; }
 	int WEBPSaveQuality() { return m_nWEBPSaveQuality; }
 	int JXLSaveQuality() { return m_nJXLSaveQuality; }
+	// A1: compression ratio for lossy JP2 saves (1 = best quality, 100 = smallest).
+	int JP2LossyRate() { return m_nJP2LossyRate; }
 	LPCTSTR DefaultSaveFormat() { return m_sDefaultSaveFormat; }
 	LPCTSTR FilesProcessedByWIC() { return m_sFilesProcessedByWIC; }
 	LPCTSTR FileEndingsRAW() { return m_sFileEndingsRAW; }
@@ -265,6 +267,7 @@ private:
 	int m_nJPEGSaveSubsampling; // F-H09: 444/422/420, default 420
 	int m_nWEBPSaveQuality;
 	int m_nJXLSaveQuality;
+	int m_nJP2LossyRate;
 	CString m_sDefaultSaveFormat;
 	CString m_sFilesProcessedByWIC;
 	CString m_sFileEndingsRAW;

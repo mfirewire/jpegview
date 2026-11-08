@@ -534,6 +534,16 @@ bool Contains(const Word& word, Point point) {
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     };
     const auto& c = word.corners;
+    // C1 (L-O01): a degenerate box (zero width or height) makes every cross
+    // product zero, which used to count as "inside" for any point. Reject it.
+    float fMinX = c[0].x, fMaxX = c[0].x, fMinY = c[0].y, fMaxY = c[0].y;
+    for (int i = 1; i < 4; i++) {
+        if (c[i].x < fMinX) fMinX = c[i].x;
+        if (c[i].x > fMaxX) fMaxX = c[i].x;
+        if (c[i].y < fMinY) fMinY = c[i].y;
+        if (c[i].y > fMaxY) fMaxY = c[i].y;
+    }
+    if (fMaxX - fMinX < 0.5f || fMaxY - fMinY < 0.5f) return false;
     float c1 = cross(c[0], c[1], point);
     float c2 = cross(c[1], c[2], point);
     float c3 = cross(c[2], c[3], point);

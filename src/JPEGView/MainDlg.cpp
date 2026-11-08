@@ -315,6 +315,10 @@ CMainDlg::~CMainDlg() {
 	delete m_pPanelMgr; // this will delete all panel controllers and all panels
 	delete m_pKeyMap;
 	delete m_pOcrController;
+	// E2 (L-U07): these two were only released on their own close paths,
+	// so a session that never closed them leaked at exit.
+	delete m_pHelpDlg;
+	delete m_pPrintImage;
 }
 
 void CMainDlg::SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 

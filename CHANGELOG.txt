@@ -3,10 +3,20 @@ JPEGView Changelog
 
 [Unreleased]
 New features:
+- Saving: the compression ratio of lossy JP2 files is configurable with the JP2LossyRate INI key (1..100, default 10, the historical 10:1); lossless JP2 ignores it
+- Loading: the pixel cap (MaxImagePixelsMP) is off by default now; the hard byte cap (MAX_IMAGE_BYTES) still bounds every allocation. Set 1..4096 megapixels to restore an explicit cap
 - JPEG saving: chroma subsampling is now configurable via the JPEGSaveSubsampling INI key (444/422/420, default 420, the historical behaviour); 444 keeps full chroma resolution for the best quality
 - JPEG saving: ICC profile, XMP metadata, Photoshop/IPTC data, JFIF density and COM comment segments from the original file are now preserved on save, in their original order (previously only the EXIF segment was copied)
 - HDR (.hdr) viewing: the GAMMA header is now honoured when converting to 8-bit, so files written for gamma 0.454545 are no longer displayed far too bright; files without a GAMMA header (or GAMMA=1.0) render byte-identically to before
 Bugs fixed:
+- JP2 viewing: a file whose reference grid has x1 <= x0 (or y1 <= y0) is rejected before the dimension subtraction can wrap
+- HDR viewing: negative or NaN samples no longer reach an undefined float-to-int cast (they clamp to 0, like the EXR decoder)
+- JPEG saving: when the EXIF thumbnail cannot be rebuilt, the old thumbnail is dropped instead of staying in the file and showing the previous picture
+- Renaming: the new name is validated for illegal characters, reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9), a trailing dot or space and an empty title before anything is touched; an empty title no longer becomes ".jpg"
+- Batch rename/copy: the whole batch is pre-checked (invalid names, duplicate targets, targets that already exist) and nothing is changed when a conflict is found; if a later operation fails and the user aborts, the operations already applied are rolled back
+- Lossless JPEG transformations: the private 50 MB file limit was below the loader's own limit, so a file that could be opened could not be rotated or cropped; the loader's limit is used now
+- Resource handling: the wallpaper registry key is closed after use, the shared ICC profiles are created once under a lock, and the help and print objects are released at shutdown
+- Directory watching: a bare drive path ("C:") is normalised to its root, and a path that does not fit MAX_PATH is logged instead of being truncated silently
 - PNG viewing: the gAMA/sRGB chunk now follows UseEmbeddedColorProfiles; with the switch off the file gamma is ignored (previously the image changed anyway, and a file carrying iCCP lost both the profile and the gamma)
 - Clipboard: a CF_DIB block pasted from another application is validated against GlobalSize before GDI+ reads it (header, palette and pixel extent), so a negative width or an undersized block is rejected instead of being read out of bounds
 - JP2 and PAM viewing: an embedded alpha channel is composited over white, like the SVG and EXR decoders, instead of being dropped (transparent pixels used to show their raw, often black, colour)

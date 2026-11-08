@@ -88,8 +88,23 @@ void CDirectoryWatcher::SetCurrentFile(LPCTSTR fileName)
 
 void CDirectoryWatcher::SetCurrentDirectory(LPCTSTR directoryName)
 {
+	CString sDirectory(directoryName == NULL ? _T("") : directoryName);
+	// B3 (L-D05): "C:" means "the current directory on drive C:", not the
+	// root. Normalise a bare drive before resolving it.
+	if (sDirectory.GetLength() == 2 && sDirectory[1] == _T(':')) {
+		sDirectory += _T('\\');
+	}
 	TCHAR fullName[MAX_PATH]{ 0 };
-	GetFullPathName(directoryName, MAX_PATH, (LPTSTR)fullName, NULL);
+	DWORD nFullPathLen = ::GetFullPathName(sDirectory, MAX_PATH, (LPTSTR)fullName, NULL);
+	// B3 (decision 2026-11-08: log only). A path that does not fit stays
+	// truncated exactly as before, but it is no longer silent: the watcher
+	// then fails to arm for that directory, and this line is the only trace.
+	if (nFullPathLen == 0 || nFullPathLen >= MAX_PATH) {
+		CString sLog;
+		sLog.Format(_T("JPEGView: DirectoryWatcher: GetFullPathName returned %u for \"%s\" (MAX_PATH=%d), the path may be truncated\n"),
+			(unsigned int)nFullPathLen, (LPCTSTR)sDirectory, MAX_PATH);
+		::OutputDebugString(sLog);
+	}
 
 	::EnterCriticalSection(&m_lock);
 

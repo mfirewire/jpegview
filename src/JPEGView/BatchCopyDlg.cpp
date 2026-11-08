@@ -4,6 +4,8 @@
 #include "SettingsProvider.h"
 #include "NLS.h"
 #include "HelpersGUI.h"
+#include "Helpers.h" // B4/D2: IsValidFileNameComponent
+#include <vector>     // B4: the plan for the pre-check and the rollback
 
 ///////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -185,69 +187,149 @@ LRESULT CBatchCopyDlg::OnPreview(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*
 	return 0;
 }
 
+namespace {
+// B4 (F-M09): one planned operation, kept for the pre-check and the rollback.
+struct CBatchOp {
+	CString sFrom;
+	CString sTo;
+	CString sCreatedDir;
+	CString sTitle;
+	CString sComponent;
+	bool bCopy;
+};
+}
+
 LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/, BOOL& /*bHandled*/) {
 	m_lblResult.SetWindowText(_T(""));
 	CString strPattern = GetPatternText();
 	if (strPattern.IsEmpty()) return 0;
 
-	HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
+	// B4: phase 1, build the plan and pre-check it. Nothing on disk is touched
+	// here, so a conflict can no longer leave the batch half-applied.
+	std::vector<CBatchOp> ops;
+	std::list<CFileDesc> & fileList = m_fileList.GetFileList();
+	LPCTSTR sDirectory = m_fileList.CurrentDirectory();
+	int nIndex = 0, nSelectedIndex = 0;
+	for (std::list<CFileDesc>::iterator iter = fileList.begin( ); iter != fileList.end( ); iter++ ) {
+		if (m_lvFiles.GetCheckState(nIndex) && iter->GetTitle() != NULL) {
+			CString strNewName = ReplacePlaceholders(strPattern, nSelectedIndex++, *iter, true);
+			CBatchOp op;
+			op.bCopy = IsCopyNeeded(strNewName, sDirectory);
+			op.sFrom = iter->GetName();
+			op.sTo = MakeAbsolutePath(strNewName, sDirectory);
+			op.sTitle = iter->GetTitle();
+			LPCTSTR sSlash = _tcsrchr(op.sTo, _T('\\'));
+			op.sComponent = (sSlash == NULL) ? op.sTo : CString(sSlash + 1);
+			ops.push_back(op);
+		}
+		nIndex++;
+	}
+	if (ops.empty()) return 0;
 
+	CString sConflicts;
+	int nConflicts = 0;
+	for (size_t i = 0; i < ops.size(); i++) {
+		LPCTSTR sReason = NULL;
+		if (!Helpers::IsValidFileNameComponent(ops[i].sComponent)) {
+			sReason = _T("invalid file name");
+		}
+		for (size_t j = 0; j < i && sReason == NULL; j++) {
+			if (ops[j].sTo.CompareNoCase(ops[i].sTo) == 0) {
+				sReason = _T("the same target name is used more than once");
+			}
+		}
+		if (sReason == NULL) {
+			// A pure case change renames the same file onto itself, which the
+			// existence check below must not report as a conflict.
+			bool bCaseOnlyRename = !ops[i].bCopy && ops[i].sFrom.CompareNoCase(ops[i].sTo) == 0;
+			if (!bCaseOnlyRename && ::GetFileAttributes(ops[i].sTo) != INVALID_FILE_ATTRIBUTES) {
+				sReason = _T("target file already exists");
+			}
+		}
+		if (sReason != NULL) {
+			nConflicts++;
+			if (nConflicts <= 10) {
+				sConflicts += _T("  ") + ops[i].sTitle + _T(" -> ") + ops[i].sComponent +
+					_T(": ") + CNLS::GetString(sReason) + _T("\n");
+			}
+		}
+	}
+	if (nConflicts > 0) {
+		CString sMessage(CNLS::GetString(_T("Some files cannot be renamed or copied. Nothing has been changed:")));
+		sMessage += _T("\n\n");
+		sMessage += sConflicts;
+		if (nConflicts > 10) {
+			CString sMore;
+			sMore.Format(_T("... (%d)"), nConflicts);
+			sMessage += sMore;
+		}
+		::MessageBox(m_hWnd, sMessage, CNLS::GetString(_T("Error during rename/copy")), MB_OK | MB_ICONSTOP);
+		return 0;
+	}
+
+	// B4: phase 2, execute. Everything applied is remembered so an abort can
+	// undo it, instead of leaving the first half of the batch renamed.
+	HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
+	std::vector<CBatchOp> done;
 	int nFilesCopied = 0;
 	int nFilesRenamed = 0;
 	int nDirsCreated = 0;
-	std::list<CFileDesc>::iterator iter;
-	std::list<CFileDesc> & fileList = m_fileList.GetFileList();
-	int nIndex = 0, nSelectedIndex = 0;
-	for (iter = fileList.begin( ); iter != fileList.end( ); iter++ ) {
+	bool bAborted = false;
+	size_t nOpIndex = 0;
+	nIndex = 0;
+	for (std::list<CFileDesc>::iterator iter = fileList.begin( ); iter != fileList.end( ); iter++ ) {
 		if (m_lvFiles.GetCheckState(nIndex) && iter->GetTitle() != NULL) {
-			
+			CBatchOp op = ops[nOpIndex++];
 			m_lblResult.SetWindowText(iter->GetTitle());
 			m_lblResult.UpdateWindow();
 
-			CString strNewName = ReplacePlaceholders(strPattern, nSelectedIndex++, *iter, true);
-			bool bCopyNeeded = IsCopyNeeded(strNewName, m_fileList.CurrentDirectory()); // enables to force copy by giving .\ path
-			strNewName = MakeAbsolutePath(strNewName, m_fileList.CurrentDirectory());
 			bool bSuccess = true;
 			DWORD lastError = 0;
-			if (bCopyNeeded) {
-				CString strNewPath(strNewName, (int)(_tcsrchr(strNewName, _T('\\')) - strNewName));
-				// First create directory if it does not yet exist
-				if (::GetFileAttributes(strNewPath) == INVALID_FILE_ATTRIBUTES) {
-					int nErrorCode = ::SHCreateDirectoryEx(NULL, strNewPath, NULL);
-					bSuccess = (nErrorCode == ERROR_SUCCESS);
-					if (bSuccess) nDirsCreated++;
-					else lastError = nErrorCode;
+			if (op.bCopy) {
+				LPCTSTR sSlash = _tcsrchr(op.sTo, _T('\\'));
+				if (sSlash != NULL) {
+					CString strNewPath(op.sTo, (int)(sSlash - (LPCTSTR)op.sTo));
+					if (::GetFileAttributes(strNewPath) == INVALID_FILE_ATTRIBUTES) {
+						int nErrorCode = ::SHCreateDirectoryEx(NULL, strNewPath, NULL);
+						bSuccess = (nErrorCode == ERROR_SUCCESS);
+						if (bSuccess) {
+							nDirsCreated++;
+							op.sCreatedDir = strNewPath;
+						} else {
+							lastError = nErrorCode;
+						}
+					}
 				}
 				if (bSuccess) {
-					bSuccess = ::CopyFile(iter->GetName(), strNewName, TRUE) != 0;
+					bSuccess = ::CopyFile(op.sFrom, op.sTo, TRUE) != 0;
 					if (bSuccess) nFilesCopied++;
 				}
 			} else {
-				bSuccess = ::MoveFile(iter->GetName(), strNewName) != 0;
+				bSuccess = ::MoveFileEx(op.sFrom, op.sTo, 0) != 0;
 				if (bSuccess) {
 					nFilesRenamed++;
-					iter->SetName(strNewName);
+					iter->SetName(op.sTo);
 				}
 			}
-			if (!bSuccess) {
-				// Failure, ask user if to continue
+			if (bSuccess) {
+				done.push_back(op);
+			} else {
 				if (lastError == 0) lastError = ::GetLastError();
 				CString strError;
-				// to make translation easier, the code has been "expanded"
-				//previously: GetString(_T("The file '%s' could not be %s.")), iter->GetTitle(), bCopyNeeded ? GetString(_T("copied")) : GetString(_T("renamed")));
 				strError.Format(
-					bCopyNeeded ? CNLS::GetString(_T("The file '%s' could not be copied!")) : CNLS::GetString(_T("The file '%s' could not be renamed!")),
+					op.bCopy ? CNLS::GetString(_T("The file '%s' could not be copied!")) : CNLS::GetString(_T("The file '%s' could not be renamed!")),
 					iter->GetTitle());
 				strError += _T("\n");
 				strError += CNLS::GetString(_T("Reason:")); strError += _T(" ");
 				LPTSTR lpMsgBuf = NULL;
 				::FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, lastError,
 					MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR) &lpMsgBuf, 0, NULL);
-				strError += lpMsgBuf;
+				if (lpMsgBuf != NULL) strError += lpMsgBuf;
 				LocalFree(lpMsgBuf);
 				strError += _T("\n");
 				strError += CNLS::GetString(_T("Continue rename/copy?"));
 				if (IDNO == ::MessageBox(NULL, strError, CNLS::GetString(_T("Error during rename/copy")), MB_YESNO | MB_ICONSTOP)) {
+					bAborted = true;
 					break;
 				}
 			}
@@ -255,11 +337,31 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 		nIndex++;
 	}
 
+	if (bAborted && !done.empty()) {
+		// Undo in reverse order: delete what was copied, move renames back and
+		// remove directories this run created (only if they are empty now).
+		for (size_t i = done.size(); i-- > 0; ) {
+			if (done[i].bCopy) {
+				::DeleteFile(done[i].sTo);
+			} else {
+				::MoveFileEx(done[i].sTo, done[i].sFrom, 0);
+			}
+			if (!done[i].sCreatedDir.IsEmpty()) {
+				::RemoveDirectory(done[i].sCreatedDir);
+			}
+		}
+		m_fileList.Reload();
+	}
+
 	::SetCursor(hOldCursor);
 
 	CString strResult;
-	strResult.Format(CNLS::GetString(_T("%d file(s) renamed, %d file(s) copied, %d folder(s) created")),
-		nFilesRenamed, nFilesCopied, nDirsCreated);
+	if (bAborted) {
+		strResult.Format(CNLS::GetString(_T("%d file operation(s) rolled back.")), (int)done.size());
+	} else {
+		strResult.Format(CNLS::GetString(_T("%d file(s) renamed, %d file(s) copied, %d folder(s) created")),
+			nFilesRenamed, nFilesCopied, nDirsCreated);
+	}
 	m_lblResult.SetWindowText(strResult);
 
 	// if files were copied, maybe more files are now in the folders, reload file list

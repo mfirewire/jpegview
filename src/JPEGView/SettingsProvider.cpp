@@ -201,16 +201,21 @@ CSettingsProvider::CSettingsProvider(void) {
 		if (m_nNumCores > 16) m_nNumCores = 16;
 	}
 
-	// P2-5: configurable pixel cap, in megapixels. Default 256 MP (raised
-	// from the old Win32 value of 100 MP in 1.3.46-20261107: 100 rejected
-	// real 102/108/200 MP photos); 1..4096 MP covers up to the old x64 cap
-	// of 65535*65535 pixels. The byte cap (MAX_IMAGE_BYTES) still bounds
-	// the allocation whatever this is set to.
+	// B2 (decision 2026-11-08): the pixel cap is OFF by default. The shipped
+	// ini no longer sets MaxImagePixelsMP, and an absent key (0) means "no
+	// pixel cap"; the hard byte cap MAX_IMAGE_BYTES is still enforced by
+	// every decoder, so the allocation stays bounded. A value of 1..4096 MP
+	// restores an explicit cap.
 	// A1-5: compute in 64-bit, then clamp to SIZE_MAX. On Win32 size_t is
 	// 32-bit, so 4096*1024*1024 (= 2^32) used to wrap to 0 and every image
 	// was wrongly rejected as over the size limit.
-	unsigned __int64 v = (unsigned __int64)GetInt(_T("MaxImagePixelsMP"), 256, 1, 4096) * 1024 * 1024;
-	m_nMaxImagePixels = (v > (size_t)-1) ? (size_t)-1 : (size_t)v;
+	int nMaxImagePixelsMP = GetInt(_T("MaxImagePixelsMP"), 0, 0, 4096);
+	if (nMaxImagePixelsMP <= 0) {
+		m_nMaxImagePixels = (size_t)-1;
+	} else {
+		unsigned __int64 v = (unsigned __int64)nMaxImagePixelsMP * 1024 * 1024;
+		m_nMaxImagePixels = (v > (size_t)-1) ? (size_t)-1 : (size_t)v;
+	}
 
 	CString sDownSampling = GetString(_T("DownSamplingFilter"), _T("BestQuality"));
 	if (sDownSampling.CompareNoCase(_T("NoAliasing")) == 0) {
@@ -238,7 +243,7 @@ CSettingsProvider::CSettingsProvider(void) {
 	}
 
 	m_nMaxSlideShowFileListSize = GetInt(_T("MaxSlideShowFileListSizeKB"), 200, 100, 10000);
-	m_nSlideShowEffectTimeMs = GetInt(_T("SlideShowEffectTime"), 200, 100, 5000);
+	m_nSlideShowEffectTimeMs = GetInt(_T("SlideShowEffectTime"), 250, 100, 5000); // F1: 250, the shipped ini value
 	m_bForceGDIPlus = GetBool(_T("ForceGDIPlus"), false);
 	m_bSingleInstance = GetBool(_T("SingleInstance"), false);
 	m_bSingleFullScreenInstance = GetBool(_T("SingleFullScreenInstance"), true);
@@ -249,6 +254,9 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_nJPEGSaveSubsampling = GetInt(_T("JPEGSaveSubsampling"), 420, 400, 444);
 	m_nWEBPSaveQuality = GetInt(_T("WEBPSaveQuality"), 85, 0, 100);
 	m_nJXLSaveQuality = GetInt(_T("JXLSaveQuality"), 85, 0, 100);
+	// A1: lossy JP2 used a fixed 10:1 rate; expose it like the other save
+	// qualities. 1 = best quality, 100 = smallest file. Lossless JP2 ignores it.
+	m_nJP2LossyRate = GetInt(_T("JP2LossyRate"), 10, 1, 100);
 	m_sDefaultSaveFormat = GetString(_T("DefaultSaveFormat"), _T("jpg"));
 	m_sFilesProcessedByWIC = GetString(_T("FilesProcessedByWIC"), _T("*.wdp;*.mdp;*.hdp;*.jxr;*.dds"));
 	m_sFileEndingsRAW = GetString(_T("FileEndingsRAW"), _T("*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.srf;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw"));
@@ -275,7 +283,7 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_nDisplayMonitor = GetInt(_T("DisplayMonitor"), -1, -1, 16);
 	m_dAutoContrastAmount = GetDouble(_T("AutoContrastCorrectionAmount"), 0.5, 0.0, 1.0);
 	m_dAutoBrightnessAmount = GetDouble(_T("AutoBrightnessCorrectionAmount"), 0.2, 0.0, 1.0);
-	m_sLandscapeModeParams = GetString(_T("LandscapeModeParams"), _T("-1 -1 -1 -1 0.5 1.0 0.75 0.4 -1 -1 -1"));
+	m_sLandscapeModeParams = GetString(_T("LandscapeModeParams"), _T("-1 -1 -1 -1 0.5 1.0 0.75 0.4 -1 -1 -1 -1")); // F1: 12th value (saturation) was missing
 	m_bLandscapeMode = GetBool(_T("LandscapeMode"), false);
 	m_sCopyRenamePattern = GetString(_T("CopyRenamePattern"), _T(""));
 	m_defaultWindowRect = GetRect(_T("DefaultWindowRect"), CRect(0, 0, 0, 0));
@@ -327,7 +335,7 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_bRTShowGridLines = GetBool(_T("RTShowGridLines"), true);
 	m_bRTAutoCrop = GetBool(_T("RTAutoCrop"), true);
 	m_bRTPreserveAspectRatio = GetBool(_T("RTPreserveAspectRatio"), true);
-	m_sFileNameFormat = GetString(_T("FileNameFormat"), _T("%index% %filepath%"));
+	m_sFileNameFormat = GetString(_T("FileNameFormat"), _T("%index%  %filepath%")); // F1: two spaces, as in the ini
 	m_sFileNameFormat = ReplacePlaceholdersFileNameFormat(m_sFileNameFormat);
 	m_bReloadWhenDisplayedImageChanged = GetBool(_T("ReloadWhenDisplayedImageChanged"), true);
 	m_bAllowEditGlobalSettings = GetBool(_T("AllowEditGlobalSettings"), false);

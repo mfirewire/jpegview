@@ -481,3 +481,9 @@ Image size exceeds the limit (MaxImagePixelsMP)
 Failed to save settings to the INI file.	
 Failed to set the desktop wallpaper.	
 Not enough memory to copy the image to the clipboard.	
+The file name contains characters that are not allowed.	
+Some files cannot be renamed or copied. Nothing has been changed:	
+invalid file name	
+target file already exists	
+the same target name is used more than once	
+%d file operation(s) rolled back.	

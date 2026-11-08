@@ -1322,4 +1322,37 @@ int GetWindowsVersion() {
 	return osvi.dwMajorVersion * 100 + osvi.dwMinorVersion;
 }
 
+
+// D2/B4 (L-U03, F-M09): see Helpers.h. Empty, too long, control characters,
+// the reserved characters, a trailing dot/space and the reserved device names
+// (CON, PRN, AUX, NUL, COM1-9, LPT1-9) are rejected; everything else is left
+// to the file system.
+bool IsValidFileNameComponent(LPCTSTR sName) {
+	if (sName == NULL) return false;
+	size_t nLen = _tcslen(sName);
+	if (nLen == 0 || nLen > 255) return false;
+	if (sName[nLen - 1] == _T('.') || sName[nLen - 1] == _T(' ')) return false;
+	for (size_t i = 0; i < nLen; i++) {
+		TCHAR c = sName[i];
+		if (c < 32) return false;
+		if (_tcschr(_T("\\/:*?\"<>|"), c) != NULL) return false;
+	}
+	TCHAR sBase[16];
+	size_t nBase = 0;
+	while (nBase < nLen && nBase < 15 && sName[nBase] != _T('.')) {
+		sBase[nBase] = sName[nBase];
+		nBase++;
+	}
+	sBase[nBase] = 0;
+	CString sUpper(sBase);
+	sUpper.MakeUpper();
+	if (sUpper == _T("CON") || sUpper == _T("PRN") || sUpper == _T("AUX") || sUpper == _T("NUL")) {
+		return false;
+	}
+	if (sUpper.GetLength() == 4 && sUpper[3] >= _T('1') && sUpper[3] <= _T('9') &&
+		(sUpper.Left(3) == _T("COM") || sUpper.Left(3) == _T("LPT"))) {
+		return false;
+	}
+	return true;
+}
 }

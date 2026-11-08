@@ -295,6 +295,11 @@ namespace Helpers {
 	// file size for file with handle
 	__int64 GetFileSize(HANDLE hFile);
 
+	// D2/B4 (L-U03, F-M09): true when sName is one path component Windows
+	// accepts as a file name (no separators, no reserved characters or device
+	// names, no trailing dot/space). The callers pass a title, not a path.
+	bool IsValidFileNameComponent(LPCTSTR sName);
+
 	// Gets the frame index of the next frame, depending on the index of the last image (relevant if the image is a multiframe image)
 	int GetFrameIndex(CJPEGImage* pImage, bool bNext, bool bPlayAnimation, bool & switchImage);
 

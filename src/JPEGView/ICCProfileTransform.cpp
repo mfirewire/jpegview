@@ -4,6 +4,7 @@
 #include "SettingsProvider.h"
 #include <string.h>
 #include <math.h>
+#include <mutex> // E3: std::call_once for the shared profiles
 
 
 #ifndef WINXP
@@ -20,31 +21,33 @@
 void* ICCProfileTransform::sRGBProfile = NULL;
 void* ICCProfileTransform::LabProfile = NULL;
 void* ICCProfileTransform::CMYKProfile = NULL;
+// E3 (S-L3): two decoder threads could enter the lazy initialisers at the
+// same time and both create (and leak) a profile. Guard each one with
+// call_once; the profiles are process-wide and never freed by design.
+static std::once_flag s_sRGBProfileOnce, s_LabProfileOnce, s_CMYKProfileOnce;
 
 
 void* ICCProfileTransform::GetsRGBProfile() {
-	if (sRGBProfile == NULL) {
+	std::call_once(s_sRGBProfileOnce, []() {
 		// Use try-catch to avoid crash if lcms2.dll not present
 		try {
 			sRGBProfile = cmsCreate_sRGBProfile();
 		} catch (...) {}
-	}
+	});
 	return sRGBProfile;
 }
 
 void* ICCProfileTransform::GetLabProfile() {
-	if (LabProfile == NULL) {
-		// Use try-catch to avoid crash if lcms2.dll not present
+	std::call_once(s_LabProfileOnce, []() {
 		try {
 			LabProfile = cmsCreateLab4Profile(cmsD50_xyY());
 		} catch (...) {}
-	}
+	});
 	return LabProfile;
 }
 
 void* ICCProfileTransform::GetCMYKProfile() {
-	if (CMYKProfile == NULL) {
-		// Use try-catch to avoid crash if lcms2.dll not present
+	std::call_once(s_CMYKProfileOnce, []() {
 		try {
 			CHAR path[MAX_PATH + 16];
 		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -54,7 +57,7 @@ void* ICCProfileTransform::GetCMYKProfile() {
 			CMYKProfile = cmsOpenProfileFromFile(path, "r");
 		}
 		} catch (...) {}
-	}
+	});
 	return CMYKProfile;
 }
 

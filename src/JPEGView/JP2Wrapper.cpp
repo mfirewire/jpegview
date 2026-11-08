@@ -139,6 +139,12 @@ void* JP2Reader::ReadImage(int& width,
 	if (!opj_read_header(stream, codec, &image) || image == NULL) {
 		goto cleanup;
 	}
+	// A3: reject an inverted reference grid BEFORE the subtraction; (int)(x1-x0)
+	// with x1 < x0 wraps to a value that can pass the positivity test below on a
+	// 32-bit build. The post-decode re-check further down stays as it is.
+	if (image->x1 <= image->x0 || image->y1 <= image->y0) {
+		goto cleanup;
+	}
 	width = (int)(image->x1 - image->x0);
 	height = (int)(image->y1 - image->y0);
 	if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {

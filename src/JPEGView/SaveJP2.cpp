@@ -7,6 +7,7 @@
 // untouched. Declared in SaveImage.h, defined in SaveImage.cpp.
 #include "SaveImage.h"
 #include "MaxImageDef.h" // IsImageBufferSizeOk
+#include "SettingsProvider.h" // A1: JP2LossyRate
 // OpenJPEG 2.5, vendored under libopenjpeg/ (official Windows binaries,
 // v2.5.4): include/openjpeg-2.5/openjpeg.h, openjp2.lib in lib (Win32) /
 // lib64 (x64), openjp2.dll delay-loaded via the vcxproj DelayLoadDLLs entry,
@@ -113,7 +114,9 @@ bool SaveJP2File(LPCTSTR sFileName, void* pData24bppBGR, int nWidth, int nHeight
 		// The other defaults (6 resolutions, 64x64 code-blocks, LRCP
 		// progression, single tile, MCT on) are kept.
 		params.tcp_numlayers = 1;
-		params.tcp_rates[0] = 10.0f;
+		// A1: the rate used to be hard-coded at 10:1; it follows the
+		// JP2LossyRate setting now (1 = best quality, 100 = smallest).
+		params.tcp_rates[0] = (float)CSettingsProvider::This().JP2LossyRate();
 		params.cp_disto_alloc = 1;
 		params.irreversible = 1;
 	}

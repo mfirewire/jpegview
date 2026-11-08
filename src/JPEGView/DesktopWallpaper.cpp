@@ -12,7 +12,11 @@ namespace SetDesktopWallpaper {
 		HKEY key;
 		if (RegOpenKeyEx(HKEY_CURRENT_USER, _T("Control Panel\\Desktop"), 0, KEY_READ | KEY_WRITE, &key) != ERROR_SUCCESS)
 			return false;
-		return RegSetValueEx(key, name, 0, REG_SZ, (const BYTE *)stringValue, ((int)_tcslen(stringValue) + 1) * sizeof(TCHAR)) == ERROR_SUCCESS;
+		// E1 (F-L01): the key was never closed, so every wallpaper change
+		// leaked one handle. Close it on both outcomes.
+		LSTATUS status = RegSetValueEx(key, name, 0, REG_SZ, (const BYTE *)stringValue, ((int)_tcslen(stringValue) + 1) * sizeof(TCHAR));
+		RegCloseKey(key);
+		return status == ERROR_SUCCESS;
 	}
 
 	// F-M02: validate first, then set the registry, then apply. The old

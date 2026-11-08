@@ -3,6 +3,7 @@
 #include "Helpers.h"
 #include "SaveImage.h"
 #include "libjpeg-turbo\include\turbojpeg.h"
+#include "MaxImageDef.h" // A4: MAX_JPEG_FILE_SIZE
 
 CJPEGLosslessTransform::EResult _DoTransformation(LPCTSTR sInputFile, LPCTSTR sOutputFile, tjtransform &transform);
 unsigned char* _ReadFile(LPCTSTR sFileName, unsigned int & nLengthBytes);
@@ -67,7 +68,10 @@ static CJPEGLosslessTransform::EResult _DoTransformation(LPCTSTR sInputFile, LPC
 }
 
 static unsigned char* _ReadFile(LPCTSTR sFileName, unsigned int & nLengthBytes) {
-	const unsigned int MAX_JPEG_FILE_SIZE = 1024*1024*50; // 50 MB
+	// A4: this used to be a private 50 MB cap, below the loader's own limit, so
+	// a JPEG that JPEGView could open could not be rotated or cropped. Use the
+	// same per-file limit the loader applies (MaxImageDef.h: 300 MB on x64,
+	// 50 MB on Win32). The decoded frame still has to fit MAX_IMAGE_BYTES.
 
 	nLengthBytes = 0;
 	HANDLE hFile = ::CreateFile(sFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);

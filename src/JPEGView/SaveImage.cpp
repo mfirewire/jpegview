@@ -541,6 +541,7 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 			exifReader.DeleteThumbnail();
 		} else if (exifReader.HasJPEGCompressedThumbnail()) {
 			// recreate EXIF thumbnail image
+			bool bThumbRebuilt = false;
 			CSize sizeThumb;
 			void* pDIBThumb = GetThumbnailDIB(pImage, sizeThumb);
 			if (pDIBThumb != NULL) {
@@ -551,12 +552,20 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 					nEXIFBlockLenCorrection = nJPEGThumbStreamLen - nThumbJFIFLen - exifReader.GetJPEGThumbStreamLen();
 					if (nEXIFBlockLenCorrection <= cnAdditionalThumbBytes && pImage->GetEXIFDataLength() + nEXIFBlockLenCorrection < 65536) {
 						exifReader.UpdateJPEGThumbnail(pJPEGThumb + 2 + nThumbJFIFLen, nJPEGThumbStreamLen - 2 - nThumbJFIFLen, nEXIFBlockLenCorrection, sizeThumb);
+						bThumbRebuilt = true;
 					} else {
 						nEXIFBlockLenCorrection = 0;
 					}
 					TurboJpeg::Free(pJPEGThumb);
 				}
 				delete[] pDIBThumb;
+			}
+			// A5: a failed rebuild must not leave the previous image's thumbnail
+			// in the file (it would show the old picture in Explorer). Dropping
+			// the thumbnail only zeroes IFD0's next-IFD pointer; the bytes stay in
+			// the block, so nEXIFBlockLenCorrection remains 0.
+			if (!bThumbRebuilt) {
+				exifReader.DeleteThumbnail();
 			}
 		}
 

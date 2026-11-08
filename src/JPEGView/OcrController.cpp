@@ -11,6 +11,7 @@
 #include <mutex>
 #include <thread>
 #include <cmath>
+#include <vector> // C2: one pass over the words for the fill and the border
 
 struct COcrController::Job {
     std::mutex mutex;
@@ -324,9 +325,19 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
     HBRUSH hOldBrush = (HBRUSH)::SelectObject(dc, GetStockObject(NULL_BRUSH));
     ::SetBkMode(dc, TRANSPARENT);
 
+    // C2 (L-O02): map every word once, fill all selected boxes with a single
+    // GDI+ Graphics (it used to be constructed per word), then draw borders
+    // and text with GDI. GDI+ and GDI do not share a DC well when interleaved,
+    // so the two passes are kept apart.
+    struct CWordBox {
+        POINT pts[4];
+        size_t nIndex;
+        bool bSelected;
+    };
+    std::vector<CWordBox> boxes;
+    boxes.reserve(m_result.words.size());
     for (size_t i = 0; i < m_result.words.size(); ++i) {
         const auto& w = m_result.words[i];
-        // Map the four corners from image space to screen space
         POINT pts[4];
         bool ok = true;
         for (int k = 0; k < 4; ++k) {
@@ -336,37 +347,57 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
             pts[k].y = (LONG)std::round(y);
         }
         if (!ok) continue;
-
-        bool selected = dragging ? (int(i) >= dragFirst && int(i) <= dragLast) : IsSelected(i);
-        if (selected) {
-            ::SelectObject(dc, hSelPen);
-            ::SelectObject(dc, GetStockObject(NULL_BRUSH));
-            // 半透明填充：GDI 的 brush 没有 alpha，RGB 宏也没有第 4 个参数，
-            // 所以这里用 GDI+ 画淡蓝填充，边框仍由上面的 pen 描。
-            Gdiplus::Graphics g(dc);
-            Gdiplus::SolidBrush fill(Gdiplus::Color(60, 0, 120, 215));
-            Gdiplus::PointF gp[4] = {
-                { (float)pts[0].x, (float)pts[0].y },
-                { (float)pts[1].x, (float)pts[1].y },
-                { (float)pts[2].x, (float)pts[2].y },
-                { (float)pts[3].x, (float)pts[3].y },
-            };
-            g.FillPolygon(&fill, gp, 4);
-        } else {
-            ::SelectObject(dc, hBoxPen);
-            ::SelectObject(dc, GetStockObject(NULL_BRUSH));
-        }
-
-        ::Polygon(dc, pts, 4);
-
-        if (selected && !w.text.empty()) {
-            // Draw the selected word text on top of the highlight
-            RECT textRect = {pts[0].x, pts[0].y, pts[2].x, pts[2].y};
-            ::SetTextColor(dc, RGB(255, 255, 255));
-            ::DrawTextW(dc, w.text.c_str(), (int)w.text.size(), &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        }
+        CWordBox box;
+        for (int k = 0; k < 4; ++k) box.pts[k] = pts[k];
+        box.nIndex = i;
+        box.bSelected = dragging ? (int(i) >= dragFirst && int(i) <= dragLast) : IsSelected(i);
+        boxes.push_back(box);
     }
 
+    {
+        Gdiplus::Graphics g(dc);
+        Gdiplus::SolidBrush fill(Gdiplus::Color(60, 0, 120, 215));
+        for (size_t i = 0; i < boxes.size(); ++i) {
+            if (!boxes[i].bSelected) continue;
+            Gdiplus::PointF gp[4];
+            for (int k = 0; k < 4; ++k) {
+                gp[k] = Gdiplus::PointF((float)boxes[i].pts[k].x, (float)boxes[i].pts[k].y);
+            }
+            g.FillPolygon(&fill, gp, 4);
+        }
+        g.Flush();
+    }
+
+    for (size_t i = 0; i < boxes.size(); ++i) {
+        const CWordBox& box = boxes[i];
+        const auto& w = m_result.words[box.nIndex];
+        POINT pts[4];
+        for (int k = 0; k < 4; ++k) pts[k] = box.pts[k];
+
+        if (box.bSelected) {
+            ::SelectObject(dc, hSelPen);
+        } else {
+            ::SelectObject(dc, hBoxPen);
+        }
+        ::SelectObject(dc, GetStockObject(NULL_BRUSH));
+        ::Polygon(dc, pts, 4);
+
+        if (box.bSelected && !w.text.empty()) {
+            // The rect is normalised (a rotated quad can have right < left) and
+            // DrawText clips to it, so a small box no longer spills the text.
+            int nLeft = pts[0].x, nRight = pts[0].x, nTop = pts[0].y, nBottom = pts[0].y;
+            for (int k = 1; k < 4; ++k) {
+                if (pts[k].x < nLeft) nLeft = pts[k].x;
+                if (pts[k].x > nRight) nRight = pts[k].x;
+                if (pts[k].y < nTop) nTop = pts[k].y;
+                if (pts[k].y > nBottom) nBottom = pts[k].y;
+            }
+            RECT textRect = { nLeft, nTop, nRight, nBottom };
+            ::SetTextColor(dc, RGB(255, 255, 255));
+            ::DrawTextW(dc, w.text.c_str(), (int)w.text.size(), &textRect,
+                        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
+    }
     ::SelectObject(dc, hOldPen);
     ::SelectObject(dc, hOldBrush);
     ::DeleteObject(hBoxPen);
