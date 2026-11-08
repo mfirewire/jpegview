@@ -2087,7 +2087,8 @@ enum TiffGateRejectReason {
 	GateReject_CheckDeclaredBytes,  // CheckIFD uncompressed: declaredBytes > fileSize
 	GateReject_CheckPixelsFloor,    // CheckIFD: fileSize < pixels/8
 	GateReject_CheckStripPair,      // CheckIFD compressed: strip offset/count pair invalid
-	GateReject_CheckTilePair        // CheckIFD compressed: tile offset/count pair invalid
+	GateReject_CheckTilePair,       // CheckIFD compressed: tile offset/count pair invalid
+	GateReject_DimAllSkipped       // every dimension-declaring IFD was skipped as a thumbnail
 };
 
 // How CollectIFDTree failed. Fix 2 treats the two failures differently:
@@ -2124,6 +2125,7 @@ static LPCTSTR TiffGateRejectReasonName(TiffGateRejectReason reason) {
 		case GateReject_CheckPixelsFloor: return _T("check-pixels-floor");
 		case GateReject_CheckStripPair: return _T("check-strip-pair");
 		case GateReject_CheckTilePair: return _T("check-tile-pair");
+		case GateReject_DimAllSkipped: return _T("dim-all-skipped");
 		default: return _T("unknown");
 	}
 }
@@ -2218,6 +2220,7 @@ struct TiffGateIFD {
 	unsigned long long bits;
 	unsigned long long photometric;
 	unsigned long long offset; // file offset of this IFD (set by CollectIFDTree; only for the rejection log)
+	unsigned long long newSubfileType; // tag 254 (NewSubfileType; bit 0 = reduced-resolution image)
 	bool samplesPresent;
 	bool bitsPresent;
 	bool photometricPresent;
@@ -2228,7 +2231,7 @@ struct TiffGateIFD {
 	TiffGateArray tileOff;
 	TiffGateArray tileCnt;
 	std::vector<unsigned long long> subIFDs;
-	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0), photometric(0), offset(0),
+	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0), photometric(0), offset(0), newSubfileType(0),
 		samplesPresent(false), bitsPresent(false), photometricPresent(false),
 		widthPresent(false), heightPresent(false) {}
 };
@@ -2425,6 +2428,7 @@ public:
 				}
 			}
 			switch (tag) {
+				case 254: info.newSubfileType = ReadScalar(dataOff, type); break;
 				case 256: info.width = ReadScalar(dataOff, type); break;
 				case 257: info.height = ReadScalar(dataOff, type); break;
 				case 259: info.compression = ReadScalar(dataOff, type); break;
@@ -2659,8 +2663,11 @@ public:
 	// DNG's 160x120 thumbnail IFD has a BitsPerSample offset pointing at
 	// "Canon " text, so its bits read as 28271, while the 3656x2744 full
 	// IFD is perfectly plausible and LibRaw decodes it. Dimension bounds
-	// and dimension pairing are still checked for EVERY IFD, so a
-	// malformed dimension hidden in any SubIFD still fails closed; only
+	// and dimension pairing are checked for every IFD, except that an IFD
+	// with explicit preview/thumbnail evidence (NewSubfileType bit 0 or
+	// JPEG compression) and bad dimensions is skipped instead of vetoing
+	// the file (converged Fix 1); without that evidence a malformed
+	// dimension hidden in any SubIFD still fails closed. Only
 	// the per-channel/strip detail verdict is limited to the largest IFD,
 	// whose declarations govern the full decode. An IFD declaring neither
 	// dimension is a pointer block (NEF JpgFromRaw, NRW IFD0) and skips
@@ -2765,29 +2772,44 @@ public:
 		}
 		const TiffGateIFD* largest = NULL;
 		unsigned long long largestPixels = 0;
+		// Converged Fix 1: whether any IFD declared dimensions at all.
+		bool anyDeclared = false;
+		unsigned long long skippedDimIfds = 0;
 		for (size_t i = 0; i < all.size(); ++i) {
 			const TiffGateIFD& info = all[i];
+			if (info.widthPresent) {
+				anyDeclared = true;
+			}
 			// Dimensions must come in pairs, and a declared dimension must
 			// be sane. A present-but-unreadable dimension reads as 0 and
 			// therefore fails here, as before.
-			if (info.widthPresent != info.heightPresent) {
-				SetRejection(GateReject_DimUnpaired, info.offset, info.width, info.height);
-				return false;
-			}
-			if (info.widthPresent && info.width == 0) {
-				SetRejection(GateReject_DimZero, info.offset, info.width, info.height);
-				return false;
-			}
-			if (info.widthPresent && info.width > 65535) {
-				SetRejection(GateReject_DimTooBig, info.offset, info.width, info.height);
-				return false;
-			}
-			if (info.heightPresent && info.height == 0) {
-				SetRejection(GateReject_DimZero, info.offset, info.width, info.height);
-				return false;
-			}
-			if (info.heightPresent && info.height > 65535) {
-				SetRejection(GateReject_DimTooBig, info.offset, info.width, info.height);
+			bool badDim = (info.widthPresent != info.heightPresent)
+				|| (info.widthPresent && (info.width == 0 || info.width > 65535))
+				|| (info.heightPresent && (info.height == 0 || info.height > 65535));
+			if (badDim) {
+				// Converged Fix 1: skip this IFD only with explicit
+				// preview/thumbnail evidence: NewSubfileType bit 0
+				// (tag 254, reduced-resolution image) or JPEG
+				// compression (tag 259 == 6/7). Without either, the
+				// rejection stands exactly as before.
+				// KNOWN RESIDUAL (accepted): if a main-image IFD is
+				// JPEG-compressed and has broken dimensions, it is
+				// skipped and the gate validates the thumbnail instead,
+				// so the actually-decoded image's broken dimensions go
+				// unchecked.
+				if ((info.newSubfileType & 1) != 0 || info.compression == 6 || info.compression == 7) {
+					++skippedDimIfds;
+					continue;
+				}
+				TiffGateRejectReason reason = GateReject_DimUnpaired;
+				if (info.widthPresent == info.heightPresent) {
+					if ((info.widthPresent && info.width == 0) || (info.heightPresent && info.height == 0)) {
+						reason = GateReject_DimZero;
+					} else {
+						reason = GateReject_DimTooBig;
+					}
+				}
+				SetRejection(reason, info.offset, info.width, info.height);
 				return false;
 			}
 			if (info.widthPresent) {
@@ -2801,6 +2823,13 @@ public:
 			}
 		}
 		if (largest == NULL) {
+			if (anyDeclared) {
+				// Dimensions were declared, but every declaring IFD was
+				// skipped as a thumbnail: no plausible image IFD is left
+				// to validate, so the file is rejected.
+				SetRejection(GateReject_DimAllSkipped, 0, skippedDimIfds);
+				return false;
+			}
 			return true; // no IFD declares dimensions: pointer blocks only
 		}
 		return CheckIFD(*largest);
