@@ -331,4 +331,11 @@ namespace Helpers {
 	private:
 		CRITICAL_SECTION & m_cs;
 	};
+
+	// TEMPORARY count log for the black-bar fix (F0) verification: appends
+	// one timestamped line to JPEGView_panelprobe.log in the exe directory.
+	// Used only by the ONPAINT_DIBNULL / ONPAINT_CATCH count logs in
+	// MainDlg.cpp. Silent on failure. Remove after device verification
+	// confirms whether DIB NULL actually occurs.
+	void LogPanelProbe(LPCTSTR sLine);
 }

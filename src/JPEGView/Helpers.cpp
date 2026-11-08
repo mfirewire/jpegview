@@ -1312,4 +1312,52 @@ int GetWindowsVersion() {
 	return osvi.dwMajorVersion * 100 + osvi.dwMinorVersion;
 }
 
+// TEMPORARY count log for the black-bar fix (F0) verification. Appends
+// timestamped lines to JPEGView_panelprobe.log in the exe directory, one
+// line per call, flushed by closing the file, so lines survive a crash.
+// All call sites run on the UI thread; the file is opened, written and
+// closed on every call. Failures are silent on purpose: a probe must
+// never pop a dialog. Remove after device verification confirms whether
+// DIB NULL actually occurs.
+void LogPanelProbe(LPCTSTR sLine) {
+	TCHAR sPath[MAX_PATH];
+	DWORD nLen = ::GetModuleFileName(NULL, sPath, MAX_PATH);
+	if (nLen == 0 || nLen >= MAX_PATH) {
+		return;
+	}
+	TCHAR* pSlash = _tcsrchr(sPath, _T('\\'));
+	if (pSlash == NULL) {
+		return;
+	}
+	*(pSlash + 1) = 0;
+	CString sFileName = CString(sPath) + _T("JPEGView_panelprobe.log");
+	HANDLE hFile = ::CreateFile(sFileName, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	// New file: write a UTF-8 BOM so the log opens as UTF-8 everywhere
+	// (lines are UTF-8; file names in them may be non-ASCII).
+	bool bNewFile = (::GetFileSize(hFile, NULL) == 0);
+	::SetFilePointer(hFile, 0, NULL, FILE_END);
+	DWORD nWritten = 0;
+	if (bNewFile) {
+		static const BYTE bom[3] = { 0xEF, 0xBB, 0xBF };
+		::WriteFile(hFile, bom, 3, &nWritten, NULL);
+	}
+	CString sOut;
+	// NOTE: GetTickCount64 is not used on purpose: the project still targets
+	// XP (see DirectoryWatcher.h), and GetTickCount64 needs Vista+. The
+	// 32-bit GetTickCount wraps every 49.7 days; differences over the short
+	// windows this probe cares about are still correct in DWORD arithmetic.
+	sOut.Format(_T("[%u] %s\r\n"), ::GetTickCount(), sLine);
+	// Convert to UTF-8 into a stack buffer; lines are short (a file title
+	// is at most MAX_PATH), so 2048 bytes cannot overflow.
+	char sUtf8[2048];
+	int nBytes = ::WideCharToMultiByte(CP_UTF8, 0, (LPCTSTR)sOut, sOut.GetLength(), sUtf8, 2048, NULL, NULL);
+	if (nBytes > 0) {
+		::WriteFile(hFile, sUtf8, (DWORD)nBytes, &nWritten, NULL);
+	}
+	::CloseHandle(hFile);
+}
+
 }

@@ -223,6 +223,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 	m_pFileList = NULL;
 	m_pJPEGProvider = NULL;
 	m_pCurrentImage = NULL;
+	m_bWaitingForImage = false;
 	m_bOutOfMemoryLastImage = false;
 	m_bExceptionErrorLastImage = false;
 	m_bSizeLimitExceededLastImage = false;
@@ -447,6 +448,33 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 	return TRUE;
 }
 
+// TEMPORARY count log for the black-bar fix (F0) verification. Kept in this
+// build only to detect whether DIB NULL actually occurs during device
+// testing (it was 0 in 164 probe-log lines); remove after verification.
+// Rate-limited to one line per (id, file) per 250 ms so a pumped wait or a
+// resize drag cannot flood the log. Logging only; no behaviour change.
+// nId: 1 = ONPAINT_CATCH (GetDIB threw in OnPaint), 2 = ONPAINT_DIBNULL
+// (GetDIB returned NULL). ONPAINT_NULL is deliberately not logged here
+// (the F0 early return makes the wait-phase NULL paint a non-event), and
+// the PaintToDC catch is not logged (PaintToDC is untouched by this fix).
+static void ProbeLogOnPaintState(LPCTSTR sPrefix, int nId, LPCTSTR sFileName, LPCTSTR sSuffix) {
+	static DWORD s_nProbeLastTick[4] = { 0, 0, 0, 0 };
+	static CString s_sProbeLastFile[4];
+	if (nId < 0 || nId > 3) {
+		return;
+	}
+	DWORD nNow = ::GetTickCount();
+	CString sFile = (sFileName != NULL) ? sFileName : _T("<<none>>");
+	if (nNow - s_nProbeLastTick[nId] < 250 && sFile == s_sProbeLastFile[nId]) {
+		return;
+	}
+	s_nProbeLastTick[nId] = nNow;
+	s_sProbeLastFile[nId] = sFile;
+	CString sLine;
+	sLine.Format(_T("%s file=%s%s"), sPrefix, sFile, sSuffix);
+	Helpers::LogPanelProbe(sLine);
+}
+
 LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/)
 {
 	static bool s_bFirst = true;
@@ -488,6 +516,13 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 	CPaintMemDCMgr memDCMgr(dc);
 
 	if (m_pCurrentImage == NULL) {
+		// F0: waiting for the new image - paint nothing and keep the
+		// previous frame on screen. CPaintDC (constructed above) already
+		// ran BeginPaint, so the update region is validated and EndPaint
+		// in its destructor completes the paint.
+		if (m_bWaitingForImage) {
+			return 0;
+		}
 		m_pPanelMgr->OnPrePaint(dc);
 		m_pPanelMgr->PrepareMemDCMgr(memDCMgr, excludedClippingRects);
 		memDCMgr.ExcludeFromClippingRegion(dc, excludedClippingRects);
@@ -532,6 +567,8 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 					CreateProcessingFlags(m_bHQResampling && !m_bTemporaryLowQ && !m_bZoomMode, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
 			}
 		} catch (...) {
+			// TEMPORARY count log (F0 verification): GetDIB threw.
+			ProbeLogOnPaintState(_T("ONPAINT_CATCH"), 1, CurrentFileName(true), _T(" GetDIB threw"));
 			// R-10: a throwing allocation inside the DIB path (LUTs,
 			// resampling, LDC, ...) must not kill the UI thread: no caller
 			// above this paint handler catches. A failed DIB is painted as
@@ -555,6 +592,10 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 			CPoint ptDIBStart = HelpersGUI::DrawDIB32bppWithBlackBorders(dc, bmInfo, pDIBData, backBrush, m_clientRect, clippedSize, m_DIBOffsets);
 			// The DIB is also blitted into the memory DCs of the panels
 			memDCMgr.BlitImageToMemDC(pDIBData, &bmInfo, ptDIBStart, m_pNavPanelCtl->CurrentBlendingFactor());
+		} else {
+			// TEMPORARY count log (F0 verification): image present but
+			// GetDIB returned NULL.
+			ProbeLogOnPaintState(_T("ONPAINT_DIBNULL"), 2, CurrentFileName(true), _T(" GetDIB returned NULL"));
 		}
 		if (m_bZoomMode) m_offsets = unlimitedOffsets;
 	}
@@ -2360,6 +2401,21 @@ void CMainDlg::ShowEditFailedMessage() {
 		_T(JPEGVIEW_TITLE), MB_OK | MB_ICONSTOP);
 }
 
+// RAII guard for CMainDlg::m_bWaitingForImage: sets the flag on construction
+// and clears it on destruction, so no early return inserted later between
+// set and clear can leave the flag true (a flag left true would make every
+// later NULL paint return early and leave the screen frozen on the previous
+// frame). Used around the image-request wait in GotoImage and OpenFile.
+class CWaitingForImageGuard {
+public:
+	explicit CWaitingForImageGuard(bool& bFlag) : m_bFlag(bFlag) { m_bFlag = true; }
+	~CWaitingForImageGuard() { m_bFlag = false; }
+private:
+	bool& m_bFlag;
+	CWaitingForImageGuard(const CWaitingForImageGuard&);
+	CWaitingForImageGuard& operator=(const CWaitingForImageGuard&);
+};
+
 void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	StopMovieMode();
 	StopAnimation();
@@ -2378,11 +2434,16 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	// P2-1: NULL the current image before ClearAllRequests: it deletes the
 	// image and pumps WM_PAINT while waiting, and OnPaint would otherwise
 	// draw the freed image (its NULL checks do not guard a dangling pointer).
-	m_pCurrentImage = NULL;
-	m_pJPEGProvider->ClearAllRequests(true);
-	m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
-		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode && (bAfterStartup || IsAdjustWindowToImage())),
-		m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, false, &m_bSizeLimitExceededLastImage);
+	// F0: the flag must already be set here so the wait-phase paint inside
+	// ClearAllRequests / RequestImage preserves the previous frame.
+	{
+		CWaitingForImageGuard waitingGuard(m_bWaitingForImage);
+		m_pCurrentImage = NULL;
+		m_pJPEGProvider->ClearAllRequests(true);
+		m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
+			m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode && (bAfterStartup || IsAdjustWindowToImage())),
+			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, false, &m_bSizeLimitExceededLastImage);
+	}
 	m_nLastLoadError = GetLoadErrorAfterOpenFile();
 	if (bAfterStartup) CheckIfApplyAutoFitWndToImage(false);
 	AfterNewImageLoaded(true, false, false);
@@ -2816,9 +2877,14 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 			m_nLastLoadError = HelpersGUI::FileLoad_PasteFromClipboardFailed;
 		}
 	} else {
-		m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, (ePos == POS_AwayFromCurrent) ? CJPEGProvider::NONE : eDirection,  
-			m_pFileList->Current(), nFrameIndex, procParams,
-			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0, &m_bSizeLimitExceededLastImage);
+		// F0: wait for the new image with the flag set, so the wait-phase
+		// paint preserves the previous frame instead of blacking the panel.
+		{
+			CWaitingForImageGuard waitingGuard(m_bWaitingForImage);
+			m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, (ePos == POS_AwayFromCurrent) ? CJPEGProvider::NONE : eDirection,  
+				m_pFileList->Current(), nFrameIndex, procParams,
+				m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0, &m_bSizeLimitExceededLastImage);
+		}
 		if (m_pCurrentImage != NULL) {
 			m_nLastLoadError = HelpersGUI::FileLoad_Ok;
 		} else if (m_pFileList->Current() != NULL) {

@@ -302,6 +302,17 @@ private:
 	bool m_bFullScreenMode;
 	bool m_bAutoFitWndToImage;
 	bool m_bLockPaint;
+	// F0: true while GotoImage/OpenFile is waiting for the new image;
+	// OnPaint returns early in that case to preserve the previous frame.
+	// Precondition: a frame must already have been painted when the wait
+	// starts, so there is a previous frame to preserve. All current paths
+	// satisfy this (startup is covered by m_bLockPaint; every other entry
+	// has painted at least one background frame before initiating a load).
+	// A future entry point that loads before the window has ever painted
+	// would expose an unpainted surface for that brief interval. If a
+	// safety net is ever wanted, a single && m_bHasPaintedFrame bool would
+	// suffice - do NOT add a CRect-based check.
+	bool m_bWaitingForImage;
 	int m_nCurrentTimeout;
 	POINT m_startMouse;
 	CSize m_virtualImageSize;
