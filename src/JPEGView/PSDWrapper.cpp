@@ -308,7 +308,14 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			if (nColorMode == MODE_Lab) {
 				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 4 ? ICCProfileTransform::FORMAT_LabA : ICCProfileTransform::FORMAT_Lab);
 				if (transform == NULL) {
-					// If we can't convert Lab to sRGB then just use the Lightness channel as grayscale
+					// F-M22 (reviewed): fall back to the Lightness plane as
+					// grayscale. This is set BEFORE nRowSize and the decompress
+					// loops below, so only channel 0 is read and CJPEGImage's
+					// Convert1To4Channels uses the same DoPadding(nWidth,4)
+					// stride: the row layouts do match. The old report's
+					// "channel count changed without repacking pixels" was
+					// incorrect. The only real limitation is a silent loss of
+					// the a/b channels, with no user-visible warning.
 					nChannels = 1;
 				}
 			} else if (nColorMode == MODE_RGB) {
@@ -471,8 +478,38 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				}
 				nChannels -= 1;
 			} else {
-				// Blend K channel for CMYK images if ICC profiles not supported
-				backgroundColor = 0;
+				// F-M23: no ICC transform available. Convert the inverted YMCK
+				// plane with the same naive ink formula as the JPEG CMYK fallback
+				// (ConvertYmckInkToRgbNaive in ImageLoadThread.cpp), instead of
+				// treating the K channel as alpha over a black background.
+				uint32* pImage32 = (uint32*)pPixelData;
+				for (size_t i = 0; i < (size_t)nWidth * nHeight; i++) {
+					*pImage32++ = ~(*pImage32);
+				}
+				const size_t outStride = (size_t)Helpers::DoPadding((int)nWidth * 3, 4);
+				size_t outBytes = 0;
+				unsigned char* pRgb = NULL;
+				if (IsImageBufferSizeOk(outStride, (size_t)nHeight, &outBytes))
+					pRgb = new(std::nothrow) unsigned char[outBytes];
+				if (pRgb != NULL) {
+					const unsigned char* p = (const unsigned char*)pPixelData;
+					for (size_t y = 0; y < (size_t)nHeight; y++) {
+						unsigned char* q = pRgb + y * outStride;
+						for (size_t x = 0; x < (size_t)nWidth; x++, p += 4) {
+							const unsigned int inkK = 255 - p[3];
+							q[x*3+0] = (unsigned char)((255 - p[0]) * inkK / 255); // B from Y
+							q[x*3+1] = (unsigned char)((255 - p[1]) * inkK / 255); // G from M
+							q[x*3+2] = (unsigned char)((255 - p[2]) * inkK / 255); // R from C
+						}
+					}
+					delete[] (char*)pPixelData;
+					pPixelData = pRgb;
+					// nChannels MUST become 3: the 4-channel alpha blend below
+					// would otherwise read BGR triples as BGRA quads.
+					nChannels = 3;
+				} else {
+					backgroundColor = 0; // keep the old fallback on allocation failure
+				}
 			}
 		} else {
 			ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, nWidth, nHeight, nRowSize);

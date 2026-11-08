@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 #include <mutex> // E3: std::call_once for the shared profiles
+#include "MaxImageDef.h" // F-M24: IsImageBufferSizeOk / MAX_IMAGE_BYTES
 
 
 #ifndef WINXP
@@ -128,8 +129,9 @@ void* ICCProfileTransform::CreateTransform(const void* profile, unsigned int siz
 	return transform;
 }
 
-bool ICCProfileTransform::DoTransform(void* transform, const void* inputBuffer, void* outputBuffer, unsigned int width, unsigned int height, unsigned int stride) {
-	unsigned int numPixels = width * height;
+bool ICCProfileTransform::DoTransform(void* transform, const void* inputBuffer, void* outputBuffer,
+	unsigned int width, unsigned int height, unsigned int stride, unsigned int strideOut) {
+	const size_t numPixels = (size_t)width * height;
 	if (transform == NULL || inputBuffer == NULL || outputBuffer == NULL || numPixels == 0)
 		return false;
 
@@ -137,10 +139,26 @@ bool ICCProfileTransform::DoTransform(void* transform, const void* inputBuffer, 
 	cmsUInt32Number bppIn = T_CHANNELS(inFormat) + T_EXTRA(inFormat);
 	cmsUInt32Number outFormat = cmsGetTransformOutputFormat(transform);
 	cmsUInt32Number bppOut = T_CHANNELS(outFormat) + T_EXTRA(outFormat);
-	cmsUInt32Number bytesPerLineOut = Helpers::DoPadding(width * bppOut, 4);
+	// S-L2: the output row stride used to be derived only from bppOut. A
+	// caller with padded output rows (e.g. a future 5-channel PSD path) can
+	// now pass it explicitly; 0 keeps the historical tight/4-aligned value.
+	const size_t lineOut = (size_t)width * bppOut;
+	size_t bytesPerLineOut = (strideOut != 0) ? (size_t)strideOut : ((lineOut + 3) & ~(size_t)3);
 	if (stride == 0)
-		stride = width * bppIn;
-	cmsDoTransformLineStride(transform, inputBuffer, outputBuffer, width, height, stride, bytesPerLineOut, stride * height, bytesPerLineOut * height);
+		stride = (unsigned int)((size_t)width * bppIn);
+	// F-M24: lcms2 takes 32-bit plane sizes. Do the arithmetic in 64 bits
+	// and refuse anything that would wrap or exceed the image byte cap -
+	// a wrapped plane size could make cmsDoTransform write past the buffer.
+	const size_t planeIn = (size_t)stride * height;
+	const size_t planeOut = bytesPerLineOut * height;
+	const size_t maxPlane = (size_t)0xFFFFFFFFu;
+	if (planeIn > maxPlane || planeOut > maxPlane ||
+		!IsImageBufferSizeOk((size_t)stride, (size_t)height) ||
+		!IsImageBufferSizeOk(bytesPerLineOut, (size_t)height)) {
+		return false;
+	}
+	cmsDoTransformLineStride(transform, inputBuffer, outputBuffer, width, height, stride,
+		(cmsUInt32Number)bytesPerLineOut, (cmsUInt32Number)planeIn, (cmsUInt32Number)planeOut);
 	return true;
 }
 
@@ -223,7 +241,7 @@ void* ICCProfileTransform::CreateTransform(const void* /* profile */, unsigned i
 	return NULL;
 }
 
-bool ICCProfileTransform::DoTransform(void* /* transform */, const void* /* inputBuffer */, void* /* outputBuffer */, unsigned int /* width */, unsigned int /* height */, unsigned int /* stride */) {
+bool ICCProfileTransform::DoTransform(void* /* transform */, const void* /* inputBuffer */, void* /* outputBuffer */, unsigned int /* width */, unsigned int /* height */, unsigned int /* stride */, unsigned int /* strideOut */) {
 	return false;
 }
 

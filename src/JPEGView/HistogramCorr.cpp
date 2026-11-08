@@ -199,10 +199,14 @@ static void CalculateLUT(uint8* pTarget, float fBlackPt, float fWhitePt, float f
 		} else {
 			float fTarget;
 			if (fX < fMidPt) {
-				float fVal = (fX - fMidPt)/(fMidPt - fBlackPt);
+				// S-L4: fMidPt is the mean midpoint of all three channels, so on
+				// extremely tinted images it can coincide with this channel's
+				// black/white point. Guard the denominator: 0/0 gives NaN and
+				// the float->uint8 cast below is undefined behaviour.
+				float fVal = (fX - fMidPt)/max(0.001f, fMidPt - fBlackPt);
 				fTarget = fY + fBrightnessCorr*(1.0f - fVal*fVal);
 			} else {
-				float fVal = (fX - fMidPt)/(fWhitePt - fMidPt);
+				float fVal = (fX - fMidPt)/max(0.001f, fWhitePt - fMidPt);
 				fTarget = fY + fBrightnessCorr*(1.0f - fVal*fVal);
 			}
 
