@@ -46,18 +46,17 @@ const unsigned int MAX_BMP_FILE_SIZE = 1024 * 1024 * 500;
 const unsigned int MAX_BMP_FILE_SIZE = 1024 * 1024 * 100;
 #endif
 
-// P2-5: the pixel cap. It used to be 65535*65535 (4.29e9) on x64, which is
-// effectively no cap: a 40000x30000 JPEG passed every header check and then
-// sat in the UI wait for minutes while the decoder chewed on it. The default
-// was 100 megapixels (the old Win32 value) until 1.3.46-20261107, when it was
-// raised to 256: 100 rejected real photos (102 MP medium format, 108 MP
-// phones, 200 MP phones), while 256 covers every single-shot camera (the
-// largest, a 200 MP phone sensor, is 201 MP) with headroom. It is
-// configurable with the MaxImagePixelsMP INI setting (megapixels, default
-// 256); CSettingsProvider::MaxImagePixels() returns the effective cap and
-// every in-process decoder gates on that (R-04/P2-5), so this constant is
-// now only the documented default value, not a live cap. MAX_IMAGE_BYTES
-// below stays the hard byte cap whatever the pixel cap is set to.
+// P2-5 / B2: the historical pixel cap. It used to be 65535*65535 (4.29e9)
+// on x64, which was effectively no cap: a 40000x30000 JPEG passed every
+// header check and then sat in the UI wait for minutes while the decoder
+// chewed on it. The default was 100 megapixels (the old Win32 value) until
+// 1.3.46-20261107, when it was raised to 256 MP. Since B2 (2026-11-08) the
+// pixel cap is OFF by default: CSettingsProvider::MaxImagePixels() returns
+// SIZE_MAX unless MaxImagePixelsMP (1..4096) is set in the INI, and every
+// in-process decoder gates on that value (R-04/P2-5). This constant is now
+// only documentation plus the fixed cap used by WICLoader.dll, which has no
+// settings channel. Whatever the pixel cap is, MAX_IMAGE_BYTES below stays
+// the hard byte cap, and MAX_IMAGE_DIMENSION still bounds each side.
 #ifdef _WIN64
 const unsigned int MAX_IMAGE_PIXELS = 1024 * 1024 * 256;
 #else

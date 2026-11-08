@@ -4,7 +4,7 @@ JPEGView Changelog
 [Unreleased]
 New features:
 - Saving: the compression ratio of lossy JP2 files is configurable with the JP2LossyRate INI key (1..100, default 10, the historical 10:1); lossless JP2 ignores it
-- Loading: the pixel cap (MaxImagePixelsMP) is off by default now; the hard byte cap (MAX_IMAGE_BYTES) still bounds every allocation. Set 1..4096 megapixels to restore an explicit cap
+- Loading: the pixel cap (MaxImagePixelsMP) is off by default now; the hard byte cap (MAX_IMAGE_BYTES) and the 65535-pixel dimension limit still bound every allocation. Set 1..4096 megapixels to restore an explicit cap. WIC-only formats (*.wdp/*.jxr/*.dds) keep WICLoader.dll's own fixed 256 MP cap, which this setting cannot change
 - JPEG saving: chroma subsampling is now configurable via the JPEGSaveSubsampling INI key (444/422/420, default 420, the historical behaviour); 444 keeps full chroma resolution for the best quality
 - JPEG saving: ICC profile, XMP metadata, Photoshop/IPTC data, JFIF density and COM comment segments from the original file are now preserved on save, in their original order (previously only the EXIF segment was copied)
 - HDR (.hdr) viewing: the GAMMA header is now honoured when converting to 8-bit, so files written for gamma 0.454545 are no longer displayed far too bright; files without a GAMMA header (or GAMMA=1.0) render byte-identically to before

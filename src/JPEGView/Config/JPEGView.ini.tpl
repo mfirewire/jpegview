@@ -67,10 +67,12 @@ CPUCoresUsed=0
 
 ; Maximum image size in megapixels. Images larger than this are rejected
 ; with a "size exceeds the limit" error instead of being decoded (P2-5).
-; Default 256, range 1 to 4096.
-; B2 (2026-11-08): the pixel cap is off by default now; the hard byte cap
-; (MAX_IMAGE_BYTES) still bounds every allocation. Uncomment and set a value
-; in megapixels (1..4096) to restore a cap, e.g. MaxImagePixelsMP=256
+; B2 (2026-11-08): the pixel cap is OFF by default. The hard byte cap
+; (MAX_IMAGE_BYTES) and the 65535-pixel dimension limit still bound every
+; allocation. Uncomment and set a value in megapixels (1..4096) to restore
+; an explicit cap, e.g. MaxImagePixelsMP=256.
+; Note: WIC-only formats (*.wdp/*.jxr/*.dds) keep their own 256 MP hard cap
+; inside WICLoader.dll; this setting does not reach that DLL.
 ;MaxImagePixelsMP=256
 
 ; Editor for INI files
@@ -631,6 +633,11 @@ JPEGSaveQuality=85
 ; (best quality, larger files), 422 halves it horizontally, 420 (default)
 ; halves it in both directions (smallest files, the historical behaviour)
 JPEGSaveSubsampling=420
+
+; Compression ratio for lossy JP2 saves (1..100). 1 = best quality / largest
+; file, 100 = smallest file. Default 10 (the historical 10:1). Lossless JP2
+; saves ignore this setting.
+JP2LossyRate=10
 
 ; Quality when saving WEBP files with lossy compression (in 0..100 where 100 is the highest quality)
 WEBPSaveQuality=85

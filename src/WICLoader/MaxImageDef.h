@@ -3,9 +3,10 @@
 #include <stddef.h>
 
 // R-04/P2-5: the WIC DLL has no settings channel (separate binary, it only
-// ever sees a file name), so it cannot read MaxImagePixelsMP. Its cap is the
-// same 256 MP default as the main program on both architectures, and the live
-// setting has NO effect on this path in either direction: lowering it does
+// ever sees a file name), so it cannot read MaxImagePixelsMP. Its cap is a
+// fixed 256 MP on both architectures, while the main program has NO pixel cap
+// by default since B2 (2026-11-08); the live setting has NO effect on this
+// path in either direction: lowering it does
 // not reject WIC-only images below 256 MP, and raising it above 256 MP does
 // NOT admit larger WIC-only images (*.wdp/*.mdp/*.hdp/*.jxr/*.dds) -- the DLL
 // refuses those first, as a plain load error. The DIB prefetch gate in
