@@ -281,7 +281,6 @@ void* JP2Reader::ReadImage(int& width,
 				pDst[dstIdx] = (unsigned char)b;
 				pDst[dstIdx + 1] = (unsigned char)g;
 				pDst[dstIdx + 2] = (unsigned char)r;
-				}
 			}
 		}
 	}
