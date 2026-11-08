@@ -488,7 +488,10 @@ static int WalkPreservedJPEGSegments(uint8* pStream, int nStreamLength, unsigned
 		} else if (nMarker == 0xE1) {
 			// APP1: the EXIF block itself is handled separately (it is
 			// rewritten on save); every other APP1 (XMP, extended XMP) is kept.
-			if (nBlockLength >= 8 && memcmp(pStream + nSegStart + 4, "Exif\0\0", 6) == 0) {
+			// S-5: match FindEXIFBlock (length >= 6, first 4 bytes "Exif"),
+			// not just a well-formed "Exif\0\0" block, so a malformed EXIF
+			// APP1 is excluded here instead of being kept AND rewritten.
+			if (nBlockLength >= 6 && memcmp(pStream + nSegStart + 4, "Exif", 4) == 0) {
 				if (!bSeenEXIF) {
 					nSegmentsBeforeEXIF = nKeptSize;
 					bSeenEXIF = true;
