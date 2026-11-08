@@ -28,6 +28,7 @@ Bugs fixed:
 - A custom KeyMap.txt stored in AppData is now migrated to the EXE directory like the INI file, instead of being silently discarded in EXE mode
 - Setting the desktop wallpaper now shows an error message when it fails instead of only writing a debug log line
 - Post-build script: Config and LICENSE.txt copy failures now fail the build (exit-code check like the DLL copies) instead of being silently ignored
+- Slide show lists: a list holding two files with the same name in different folders no longer jumps to the wrong image after a reload or a sort; the current file is found by its full path instead of its title only
 - JXL loading: the exception handler no longer leaks the file buffer or the EXIF chunk, and no longer risks freeing a buffer owned by the JXL reader cache (double-free)
 - SVG viewing: rapid paging through SVG files no longer crashes (access violation in libthorvg-1.dll); the whole ThorVG session is now serialised across load threads instead of only init/term
 - Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the missing-file state is shown instead (or the empty state when the folder really has no images) (F-H02)

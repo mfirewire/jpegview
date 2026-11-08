@@ -14,6 +14,12 @@
 # files and `git add --renormalize` rewrites their blobs to CRLF.
 * -text -eol
 
+# Files marked -text -eol keep their CRLF in the blob (CHANGELOG.txt, the
+# CP1251 docs). Without this, git diff --check reports every edited line in
+# them as "trailing whitespace" because it treats the CR as ordinary space.
+# cr-at-eol only excuses the CR; real trailing blanks are still reported.
+* whitespace=cr-at-eol
+
 # ---------------------------------------------------------------- project text
 # Root dotfiles have no extension, so list them explicitly.
 /.gitignore     text eol=crlf

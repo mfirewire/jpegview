@@ -1073,18 +1073,53 @@ void CFileList::MoveIterToLast() {
 	m_nCurrentIndex = (m_iter == m_fileList.end()) ? -1 : (int)m_fileList.size() - 1;
 }
 
-std::list<CFileDesc>::iterator CFileList::FindFile(const CString& sName) {
-	int nStart = sName.ReverseFind(_T('\\')) + 1;
-	if (nStart == sName.GetLength()) {
-		return m_fileList.end();
+// L-D04: compare a caller-supplied name with a CFileDesc path.
+// CFindFile::GetFilePath() always writes backslashes, while a command line
+// or a slide show list may use forward slashes; letter case may differ too.
+// The fast path allocates nothing, which matters for large folder lists.
+static bool IsSameFilePath(const CString& sName, LPCTSTR sEntry) {
+	if (_tcsicmp(sName, sEntry) == 0) {
+		return true;
 	}
+	if (sName.Find(_T('/')) < 0 && _tcschr(sEntry, _T('/')) == NULL) {
+		return false;
+	}
+	CString sA(sName), sB(sEntry);
+	sA.Replace(_T('/'), _T('\\'));
+	sB.Replace(_T('/'), _T('\\'));
+	return _tcsicmp(sA, sB) == 0;
+}
+
+std::list<CFileDesc>::iterator CFileList::FindFile(const CString& sName) {
+	int nStart = max(sName.ReverseFind(_T('\\')), sName.ReverseFind(_T('/'))) + 1;
+	if (nStart == sName.GetLength()) {
+		return m_fileList.end(); // a directory path (trailing separator) is never an entry
+	}
+	// L-D04: a slide show list may hold two files with the same title in
+	// different folders (C:\A\p.jpg and C:\B\p.jpg). Matching only the
+	// title anchored Reload()/SetSorting() on the first match, so the viewer
+	// silently jumped to the wrong image. The full path is unique, and all
+	// callers pass the very path CFileDesc stores (GetName()), so the strings
+	// are spelled the same way (up to case and slash direction).
 	std::list<CFileDesc>::iterator iter;
-	for (iter = m_fileList.begin( ); iter != m_fileList.end( ); iter++ ) {
-		if (_tcsicmp((LPCTSTR)sName + nStart, iter->GetTitle()) == 0) {
+	for (iter = m_fileList.begin(); iter != m_fileList.end(); ++iter) {
+		if (IsSameFilePath(sName, iter->GetName())) {
 			return iter;
 		}
 	}
-	return m_fileList.end(); // F-H02: not found is distinguishable from the first image; each caller falls back explicitly
+	// A bare file name has no directory to disambiguate with: keep the old
+	// title-only lookup. A path-qualified name that matched nothing is
+	// genuinely absent; guessing by title here would re-introduce L-D04 and
+	// would hide the F-H02 empty state when the current file was deleted
+	// while a same-named file remains in another folder.
+	if (nStart == 0) {
+		for (iter = m_fileList.begin(); iter != m_fileList.end(); ++iter) {
+			if (_tcsicmp(sName, iter->GetTitle()) == 0) {
+				return iter;
+			}
+		}
+	}
+	return m_fileList.end(); // F-H02: each caller handles not-found explicitly
 }
 
 CFileList* CFileList::WrapToNextImage() {
