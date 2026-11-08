@@ -1,0 +1,21 @@
+name: EOL / encoding guard
+
+# Every push and PR must satisfy .gitattributes: no mixed line endings, no CRLF
+# in the index for text files, no legacy single-byte encodings outside the
+# explicit whitelist.  Runs on Linux so it also proves the checkout is
+# deterministic without relying on the local core.autocrlf setting.
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    name: Check line endings and encodings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+      - name: Verify .gitattributes policy
+        run: python3 .github/scripts/check_eol.py

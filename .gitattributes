@@ -1,5 +1,82 @@
-# Unified diffs are consumed byte for byte by `patch`. With core.autocrlf=true a
-# checkout on Windows turns them into CRLF and the context lines stop matching,
-# which is exactly how the libpng build breaks for local developers while still
-# working on the CI runners.
+# Line-ending policy for this branch and everything built on it.
+#
+# Index (blob): always LF.  Worktree and shipped portable build: always CRLF.
+# core.autocrlf is a LOCAL setting that does not travel with the repository,
+# so these attributes are the single source of truth.  With "text eol=crlf",
+# git add normalises CRLF *and* stray LF-only lines to LF, and checkout writes
+# CRLF back: a mixed-EOL file can never reach the index again, and editors on
+# Windows always see CRLF.  This is what makes the fix one-time rather than
+# something every contributor has to remember.
+#
+# Default: touch nothing.  This protects binaries (.dll/.lib/.png/.icm...),
+# gitlinks (submodules) and vendored third-party trees from any conversion.
+# `-eol` matters: without it an inherited eol=crlf still applies to -text
+# files and `git add --renormalize` rewrites their blobs to CRLF.
+* -text -eol
+
+# ---------------------------------------------------------------- project text
+# Root dotfiles have no extension, so list them explicitly.
+/.gitignore     text eol=crlf
+/.gitmodules    text eol=crlf
+
+*.c        text eol=crlf
+*.cc       text eol=crlf
+*.cpp      text eol=crlf
+*.h        text eol=crlf
+*.hh       text eol=crlf
+*.hpp      text eol=crlf
+*.inl      text eol=crlf
+*.rc       text eol=crlf
+*.rc2      text eol=crlf
+*.idl      text eol=crlf
+*.def      text eol=crlf
+*.ini      text eol=crlf
+*.tpl      text eol=crlf
+*.txt      text eol=crlf
+*.md       text eol=crlf
+*.yml      text eol=crlf
+*.yaml     text eol=crlf
+*.xml      text eol=crlf
+*.props    text eol=crlf
+*.targets  text eol=crlf
+*.vcxproj  text eol=crlf
+*.filters  text eol=crlf
+*.sln      text eol=crlf
+*.wxs      text eol=crlf
+*.wxl      text eol=crlf
+*.wixproj  text eol=crlf
+*.html     text eol=crlf
+*.ps1      text eol=crlf
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+# Scripts that may execute on Unix (shebang, /bin/sh) must stay LF.
+*.py       text eol=lf
+*.sh       text eol=lf
+*.bash     text eol=lf
+*.cmake    text eol=crlf
+*.mak      text eol=crlf
+
+# ---------------------------------------------------------------- vendored code
+# Keep upstream bytes exactly as delivered; no renormalisation of third-party
+# sources, docs or binaries.
+extras/third_party/** -text -eol
+# These two upstream getopt.c copies arrived with mixed EOL.  Normalise just
+# them (line endings only) so the whole tree is free of mixed line endings.
+extras/third_party/libde265-1.1.3-src/extra/getopt.c text eol=crlf
+extras/third_party/libheif-1.23.7-src/extra/getopt.c text eol=crlf
+
+# ---------------------------------------------------------------- non-UTF-8 docs
+# These files contain legacy single-byte encodings (Latin-1 / CP1251) or stray
+# non-UTF-8 bytes.  A text editor that assumes UTF-8 corrupts them, so mark
+# them -text: Git will never convert them, and check_eol.py whitelists them.
+/CHANGELOG.txt -text -eol
+/HowToInstall_ru.txt -text -eol
+src/JPEGView/Config/KeyMap-README_ru.html -text -eol
+src/JPEGView/ZoomNavigator.h -text -eol
+src/WICLoader/stdafx.cpp -text -eol
+
+# ---------------------------------------------------------------- patches
+# Unified diffs are consumed byte for byte by `patch`.  With core.autocrlf=true
+# a Windows checkout turns them into CRLF and the context lines stop matching,
+# which breaks the libpng build locally while still working on CI runners.
 *.patch text eol=lf
