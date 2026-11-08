@@ -166,6 +166,7 @@ jobs:
       with:
         tag_name: ${{ github.ref_name }}
         name: "${{ github.ref_name }}"
+        body_path: .github/release-notes.md
         draft: false
         prerelease: false
         files: |

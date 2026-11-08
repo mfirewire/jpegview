@@ -2170,6 +2170,12 @@ static void LogTiffGateRejectionOnce(LPCTSTR sFileName, __int64 nSize, const FIL
 		if (s_tiffGateLogged.find(key) != s_tiffGateLogged.end()) {
 			return;
 		}
+		// Bound the set like the bad-file memo (32 entries). A folder full
+		// of rejected files must not grow it without limit; clearing at the
+		// cap only costs one extra log line per file afterwards.
+		if (s_tiffGateLogged.size() >= 32) {
+			s_tiffGateLogged.clear();
+		}
 		s_tiffGateLogged.insert(key);
 	}
 	CString sMsg;
@@ -2783,31 +2789,41 @@ public:
 			// Dimensions must come in pairs, and a declared dimension must
 			// be sane. A present-but-unreadable dimension reads as 0 and
 			// therefore fails here, as before.
+			// A dimension above MAX_IMAGE_DIMENSION is the hard upper
+			// bound and is never skippable, not even with thumbnail
+			// evidence: a decoder that adopts those dimensions would
+			// allocate and read far beyond anything the file can hold.
+			// Only a missing or zero dimension can be a malformed
+			// thumbnail, so only that may be skipped below.
+			bool dimTooBig = (info.widthPresent && info.width > 65535)
+				|| (info.heightPresent && info.height > 65535);
 			bool badDim = (info.widthPresent != info.heightPresent)
-				|| (info.widthPresent && (info.width == 0 || info.width > 65535))
-				|| (info.heightPresent && (info.height == 0 || info.height > 65535));
+				|| (info.widthPresent && info.width == 0)
+				|| (info.heightPresent && info.height == 0)
+				|| dimTooBig;
 			if (badDim) {
 				// Converged Fix 1: skip this IFD only with explicit
 				// preview/thumbnail evidence: NewSubfileType bit 0
 				// (tag 254, reduced-resolution image) or JPEG
 				// compression (tag 259 == 6/7). Without either, the
 				// rejection stands exactly as before.
-				// KNOWN RESIDUAL (accepted): if a main-image IFD is
-				// JPEG-compressed and has broken dimensions, it is
-				// skipped and the gate validates the thumbnail instead,
-				// so the actually-decoded image's broken dimensions go
-				// unchecked.
-				if ((info.newSubfileType & 1) != 0 || info.compression == 6 || info.compression == 7) {
+				// KNOWN RESIDUAL (accepted): a JPEG-compressed main-image
+				// IFD with a missing or zero dimension is skipped too, so
+				// the gate then validates the thumbnail while the
+				// actually-decoded image's dimensions go unchecked. An
+				// over-limit dimension is NOT part of that residual: it
+				// rejects above, unconditionally.
+				if (!dimTooBig && ((info.newSubfileType & 1) != 0 || info.compression == 6 || info.compression == 7)) {
 					++skippedDimIfds;
 					continue;
 				}
-				TiffGateRejectReason reason = GateReject_DimUnpaired;
-				if (info.widthPresent == info.heightPresent) {
-					if ((info.widthPresent && info.width == 0) || (info.heightPresent && info.height == 0)) {
-						reason = GateReject_DimZero;
-					} else {
-						reason = GateReject_DimTooBig;
-					}
+				TiffGateRejectReason reason;
+				if (dimTooBig) {
+					reason = GateReject_DimTooBig;
+				} else if (info.widthPresent != info.heightPresent) {
+					reason = GateReject_DimUnpaired;
+				} else {
+					reason = GateReject_DimZero;
 				}
 				SetRejection(reason, info.offset, info.width, info.height);
 				return false;
