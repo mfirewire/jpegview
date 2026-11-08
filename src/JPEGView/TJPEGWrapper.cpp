@@ -74,6 +74,26 @@ void * TurboJpeg::ReadImage(int &width,
 	return pPixelData;
 }
 
+TJSAMP TurboJpeg::GetSubsampling(const void *buffer, int sizebytes) {
+	TJSAMP eSampling = TJSAMP_420;
+	if (buffer == NULL || sizebytes <= 0) {
+		return eSampling;
+	}
+	tjhandle hDecoder = tj3Init(TJINIT_DECOMPRESS);
+	if (hDecoder == NULL) {
+		return eSampling;
+	}
+	if (tj3DecompressHeader(hDecoder, (unsigned char*)buffer, sizebytes) == 0) {
+		eSampling = (TJSAMP)tj3Get(hDecoder, TJPARAM_SUBSAMP);
+		// UNKNOWN would index tjMCUWidth[-1] in CJPEGImage (R-06).
+		if (eSampling == TJSAMP_UNKNOWN) {
+			eSampling = TJSAMP_444;
+		}
+	}
+	tj3Destroy(hDecoder);
+	return eSampling;
+}
+
 void * TurboJpeg::Compress(const void *source,
 					  int width,
 					  int height,

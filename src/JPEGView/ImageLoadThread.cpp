@@ -1102,6 +1102,11 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 		}
 		pBuffer = pReadBuffer;
 		if (nNumBytesRead == nFileSize) {
+			// F-M26: GDI+ does not expose chroma subsampling. Parse the JPEG
+			// header once here, while the compressed stream is available, so
+			// every GDI+ path can tag the image with the real MCU size
+			// instead of leaving CJPEGImage at its 420 default.
+			const TJSAMP eHeaderSampling = TurboJpeg::GetSubsampling(pBuffer, (int)nFileSize);
 			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseGDIPlus) {
 				// E8: the stream needs a moveable global, so the GDI+ path
@@ -1130,6 +1135,7 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 							int nSegSize = 0, nSegBeforeEXIF = 0;
 							void* pSegments = Helpers::FindPreservedJPEGSegments(pBuffer, nFileSize, nSegSize, nSegBeforeEXIF, !sJPEGComment.IsEmpty());
 							request->Image->SetJPEGSegments(pSegments, nSegSize, nSegBeforeEXIF);
+							request->Image->SetJPEGChromoSampling(eHeaderSampling);
 						}
 						pStream->Release();
 						delete pBitmap;
@@ -1204,6 +1210,14 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 						ProcessReadGDIPlusRequest(request,
 							Helpers::FindEXIFBlock(pBuffer, nFileSize),
 							Helpers::CalculateJPEGFileHash(pBuffer, nFileSize));
+						if (request->Image != NULL) {
+							request->Image->SetJPEGChromoSampling(eHeaderSampling);
+							CString sJPEGComment = Helpers::GetJPEGComment(pBuffer, nFileSize);
+							request->Image->SetJPEGComment(sJPEGComment);
+							int nSegSize = 0, nSegBeforeEXIF = 0;
+							void* pSegments = Helpers::FindPreservedJPEGSegments(pBuffer, nFileSize, nSegSize, nSegBeforeEXIF, !sJPEGComment.IsEmpty());
+							request->Image->SetJPEGSegments(pSegments, nSegSize, nSegBeforeEXIF);
+						}
 #else
 						// On builds with lcms2 the naive conversion
 						// only fails when its output buffer cannot be
@@ -1233,7 +1247,21 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 				} else {
 					// failed, try GDI+
 					delete[] pPixelData;
-					ProcessReadGDIPlusRequest(request);
+					// F-M25: the plain GDI+ call used to pass the default NULL/0,
+					// dropping the EXIF block and the file hash (the hash then
+					// degraded to a hash of the decompressed pixels). F-M26/F-H10:
+					// also restore the real sampling and the APP/COM segments.
+					ProcessReadGDIPlusRequest(request,
+						Helpers::FindEXIFBlock(pBuffer, nFileSize),
+						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize));
+					if (request->Image != NULL) {
+						request->Image->SetJPEGChromoSampling(eHeaderSampling);
+						CString sJPEGComment = Helpers::GetJPEGComment(pBuffer, nFileSize);
+						request->Image->SetJPEGComment(sJPEGComment);
+						int nSegSize = 0, nSegBeforeEXIF = 0;
+						void* pSegments = Helpers::FindPreservedJPEGSegments(pBuffer, nFileSize, nSegSize, nSegBeforeEXIF, !sJPEGComment.IsEmpty());
+						request->Image->SetJPEGSegments(pSegments, nSegSize, nSegBeforeEXIF);
+					}
 				}
 			}
 		}

@@ -21,6 +21,14 @@ public:
 						 const void *buffer, // memory address containing jpeg compressed data.
 						 int sizebytes); // size of jpeg compressed data.
 
+	// F-M26: read only the JPEG header to obtain the real chroma
+	// subsampling. GDI+ does not expose it, so the GDI+ paths use this to
+	// tag the image for CanUseLosslessJPEGTransformations / MCU trimming.
+	// Returns TJSAMP_420 when the header cannot be parsed (the historical
+	// default) and normalizes TJSAMP_UNKNOWN to 444 (no negative index
+	// into tjMCUWidth/tjMCUHeight).
+	static TJSAMP GetSubsampling(const void *buffer, int sizebytes);
+
 	// Compress image data into JPEG stream, returns compressed data.
 	// The returned buffer must be freed with Free()!
 	static void * Compress(const void *buffer, // address of image in memory, format must be 3 bytes per pixel BRGBGR with padding to 4 byte boundary
