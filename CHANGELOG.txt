@@ -7,7 +7,7 @@ New features:
 - JPEG saving: ICC profile, XMP metadata, Photoshop/IPTC data, JFIF density and COM comment segments from the original file are now preserved on save, in their original order (previously only the EXIF segment was copied)
 - HDR (.hdr) viewing: the GAMMA header is now honoured when converting to 8-bit, so files written for gamma 0.454545 are no longer displayed far too bright; files without a GAMMA header (or GAMMA=1.0) render byte-identically to before
 Bugs fixed:
-- Fixed the navigation-panel black bar that appeared while paging to the next image (the panel rectangle was painted black by FillRect during the wait-phase NULL paint). OnPaint now returns early while waiting for the new image (m_bWaitingForImage flag, RAII-guarded around RequestImage in GotoImage and OpenFile), preserving the previous frame. Temporary ONPAINT_DIBNULL / ONPAINT_CATCH count logs are kept in this build to confirm whether DIB NULL ever occurs; they will be removed after verification.
+- Fixed the navigation-panel black bar that appeared while paging to the next image (the panel rectangle was painted black by FillRect during the wait-phase NULL paint). OnPaint now returns early while waiting for the new image (m_bWaitingForImage flag, RAII-guarded around RequestImage in GotoImage and OpenFile), preserving the previous frame.
 - Saving settings now reports a failure instead of silently discarding it (SaveSettings reports success/failure and a message box shows the INI path on failure)
 - A custom KeyMap.txt stored in AppData is now migrated to the EXE directory like the INI file, instead of being silently discarded in EXE mode
 - Setting the desktop wallpaper now shows an error message when it fails instead of only writing a debug log line

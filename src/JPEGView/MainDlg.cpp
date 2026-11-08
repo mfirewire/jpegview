@@ -448,33 +448,6 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 	return TRUE;
 }
 
-// TEMPORARY count log for the black-bar fix (F0) verification. Kept in this
-// build only to detect whether DIB NULL actually occurs during device
-// testing (it was 0 in 164 probe-log lines); remove after verification.
-// Rate-limited to one line per (id, file) per 250 ms so a pumped wait or a
-// resize drag cannot flood the log. Logging only; no behaviour change.
-// nId: 1 = ONPAINT_CATCH (GetDIB threw in OnPaint), 2 = ONPAINT_DIBNULL
-// (GetDIB returned NULL). ONPAINT_NULL is deliberately not logged here
-// (the F0 early return makes the wait-phase NULL paint a non-event), and
-// the PaintToDC catch is not logged (PaintToDC is untouched by this fix).
-static void ProbeLogOnPaintState(LPCTSTR sPrefix, int nId, LPCTSTR sFileName, LPCTSTR sSuffix) {
-	static DWORD s_nProbeLastTick[4] = { 0, 0, 0, 0 };
-	static CString s_sProbeLastFile[4];
-	if (nId < 0 || nId > 3) {
-		return;
-	}
-	DWORD nNow = ::GetTickCount();
-	CString sFile = (sFileName != NULL) ? sFileName : _T("<<none>>");
-	if (nNow - s_nProbeLastTick[nId] < 250 && sFile == s_sProbeLastFile[nId]) {
-		return;
-	}
-	s_nProbeLastTick[nId] = nNow;
-	s_sProbeLastFile[nId] = sFile;
-	CString sLine;
-	sLine.Format(_T("%s file=%s%s"), sPrefix, sFile, sSuffix);
-	Helpers::LogPanelProbe(sLine);
-}
-
 LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/)
 {
 	static bool s_bFirst = true;
@@ -567,8 +540,6 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 					CreateProcessingFlags(m_bHQResampling && !m_bTemporaryLowQ && !m_bZoomMode, m_bAutoContrast, m_bAutoContrastSection, m_bLDC, false, m_bLandscapeMode));
 			}
 		} catch (...) {
-			// TEMPORARY count log (F0 verification): GetDIB threw.
-			ProbeLogOnPaintState(_T("ONPAINT_CATCH"), 1, CurrentFileName(true), _T(" GetDIB threw"));
 			// R-10: a throwing allocation inside the DIB path (LUTs,
 			// resampling, LDC, ...) must not kill the UI thread: no caller
 			// above this paint handler catches. A failed DIB is painted as
@@ -592,10 +563,6 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 			CPoint ptDIBStart = HelpersGUI::DrawDIB32bppWithBlackBorders(dc, bmInfo, pDIBData, backBrush, m_clientRect, clippedSize, m_DIBOffsets);
 			// The DIB is also blitted into the memory DCs of the panels
 			memDCMgr.BlitImageToMemDC(pDIBData, &bmInfo, ptDIBStart, m_pNavPanelCtl->CurrentBlendingFactor());
-		} else {
-			// TEMPORARY count log (F0 verification): image present but
-			// GetDIB returned NULL.
-			ProbeLogOnPaintState(_T("ONPAINT_DIBNULL"), 2, CurrentFileName(true), _T(" GetDIB returned NULL"));
 		}
 		if (m_bZoomMode) m_offsets = unlimitedOffsets;
 	}
