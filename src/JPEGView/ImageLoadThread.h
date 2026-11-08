@@ -79,6 +79,7 @@ private:
 			OutOfMemory = false;
 			ExceptionError = false;
 			SizeLimitExceeded = false;
+			GateRejected = false;
 			ForceFullSizeRAW = forceFullSizeRAW;
 		}
 
@@ -91,6 +92,7 @@ private:
 		bool OutOfMemory;  // load caused an out of memory condition
 		bool ExceptionError;  // an unhandled exception caused the load to fail
 		bool SizeLimitExceeded;  // P2-5: image exceeded the pixel cap (not OOM)
+		bool GateRejected;  // TIFF gate rejected the file (not a decode failure: never memoized)
 		bool ForceFullSizeRAW;  // one-shot: load this request in full size, ignoring DisplayFullSizeRAW
 	};
 

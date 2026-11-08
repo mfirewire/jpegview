@@ -3,6 +3,7 @@
 #include "ImageLoadThread.h"
 #include <gdiplus.h>
 #include <vector>
+#include <set>
 #include "JPEGImage.h"
 #include "MessageDef.h"
 #include "Helpers.h"
@@ -62,7 +63,7 @@ private:
 // content) is never served a stale verdict, and releasing a file for reload
 // (CImageLoadThread::ReleaseFile) drops its entries. OOM is never memoized:
 // it is transient, and a retry after freeing memory must re-decode.
-// R-16/E19: bBad is recorded only for a genuine decode failure. Three
+// R-16/E19: bBad is recorded only for a genuine decode failure. Four
 // failures are NOT decode failures and are never recorded, so they can
 // never poison the memo: (1) the image decoded fine but ProcessImageAfterLoad
 // failed (VerifyRotation failure, DIB size-limit trip - both depend on the
@@ -70,7 +71,10 @@ private:
 // size-limit rejection anywhere (it depends on the MaxImagePixelsMP setting,
 // so raising the cap must retry the file), (3) a failure to even open the
 // file at record time (locked by another program, antivirus scan, network
-// hiccup - the file is re-checked with GetFileIdentity before recording).
+// hiccup - the file is re-checked with GetFileIdentity before recording),
+// (4) a TIFF gate rejection (P0: the gate runs before any decoder, so a
+// retry re-runs only the cheap header parse, while memoizing a false
+// rejection would lock the file out for the whole session).
 // No settings-generation stamp is kept: with (1) and (2) excluded at the
 // source, no settings-dependent verdict ever enters the memo, so there is
 // nothing for a stamp to invalidate; the probe conclusions are file-content
@@ -809,7 +813,12 @@ void CImageLoadThread::ProcessRequest(CRequestBase& request) {
 		// the failure path only; a lock that clears between the decode and
 		// this check can still be recorded - that race is unavoidable here,
 		// the flags alone cannot tell an open failure from a decode failure.
-		if (!rq.OutOfMemory && !bAfterLoadFailed && !rq.SizeLimitExceeded) {
+		// P0: a TIFF gate rejection is also never memoized. The gate runs
+		// before any decoder, so rejecting costs nothing to retry (a
+		// re-attempt re-runs only the cheap header parse), while memoizing
+		// it would lock the file out for the whole session on a single
+		// false rejection.
+		if (!rq.OutOfMemory && !bAfterLoadFailed && !rq.SizeLimitExceeded && !rq.GateRejected) {
 			__int64 nRecheckSize = 0;
 			FILETIME ftRecheck = { 0, 0 };
 			if (GetFileIdentity(rq.FileName, nRecheckSize, ftRecheck)) {
@@ -2049,6 +2058,124 @@ void CImageLoadThread::ProcessReadSVGRequest(CRequest* request) {
 	::CloseHandle(hFile);
 }
 
+// TIFF gate rejection reasons (P0-2). The gate returns only a bool, so
+// without a reason a gate rejection and a genuinely corrupt file look
+// identical upstream. Each rejection is logged once per file (see
+// LogTiffGateRejectionOnce) with the reason, the IFD offset and the
+// offending values, so the next false rejection can be diagnosed from
+// the debug log instead of from a user report that "a RAW won't open".
+// A non-TIFF file passing through the gate is NOT a rejection and is
+// never logged.
+enum TiffGateRejectReason {
+	GateReject_None = 0,
+	GateReject_OpenFailed,          // CreateFile failed (locked / missing)
+	GateReject_SizeInvalid,         // GetFileSizeEx failed or size <= 0
+	GateReject_HeaderReadFailed,    // first 8 bytes unreadable
+	GateReject_IfdOffsetZero,       // TIFF header declares IFD0 offset 0
+	GateReject_IfdUnreadable,       // ReadIFD: entry count unreadable / entry block outside file
+	GateReject_IfdEmpty,            // ReadIFD: entry count == 0
+	GateReject_SubIfdBad,           // tag 330: count > 1024, bad type, or element unreadable
+	GateReject_NodeCapExceeded,     // > 4096 nodes collected (fail-closed cap, never skipped)
+	GateReject_DimUnpaired,         // width declared without height or vice versa
+	GateReject_DimZero,             // declared width or height == 0
+	GateReject_DimTooBig,           // declared width or height > 65535
+	GateReject_CheckDimInvalid,     // CheckIFD: largest IFD dimensions invalid
+	GateReject_CheckSamplesTooMany, // CheckIFD: samples > 8
+	GateReject_CheckBitsTooMany,    // CheckIFD: bits > 64
+	GateReject_CheckBitsMissing,    // CheckIFD uncompressed: BitsPerSample missing
+	GateReject_CheckSamplesMissing, // CheckIFD uncompressed: SamplesPerPixel missing, photometric not mono/CFA
+	GateReject_CheckDeclaredBytes,  // CheckIFD uncompressed: declaredBytes > fileSize
+	GateReject_CheckPixelsFloor,    // CheckIFD: fileSize < pixels/8
+	GateReject_CheckStripPair,      // CheckIFD compressed: strip offset/count pair invalid
+	GateReject_CheckTilePair        // CheckIFD compressed: tile offset/count pair invalid
+};
+
+// How CollectIFDTree failed. Fix 2 treats the two failures differently:
+// an unreadable IFD is skippable outside IFD0 (dcraw breaks the chain /
+// skips the SubIFD and keeps decoding), while the 4096-node cap is a
+// fail-closed resource bound and is NEVER skipped (Fix 8 territory,
+// explicitly not done). The cap is therefore a separate result, never
+// confused with an unreadable IFD.
+enum TiffGateCollectResult {
+	TiffGateCollect_Ok,         // tree collected (possibly with skipped IFDs)
+	TiffGateCollect_BadIfd,     // an IFD that must be read was unreadable
+	TiffGateCollect_CapExceeded // > 4096 nodes: fail closed, never skipped
+};
+
+static LPCTSTR TiffGateRejectReasonName(TiffGateRejectReason reason) {
+	switch (reason) {
+		case GateReject_OpenFailed: return _T("open-failed");
+		case GateReject_SizeInvalid: return _T("size-invalid");
+		case GateReject_HeaderReadFailed: return _T("header-read-failed");
+		case GateReject_IfdOffsetZero: return _T("ifd-offset-zero");
+		case GateReject_IfdUnreadable: return _T("ifd-unreadable");
+		case GateReject_IfdEmpty: return _T("ifd-empty");
+		case GateReject_SubIfdBad: return _T("subifd-bad");
+		case GateReject_NodeCapExceeded: return _T("node-cap-exceeded");
+		case GateReject_DimUnpaired: return _T("dim-unpaired");
+		case GateReject_DimZero: return _T("dim-zero");
+		case GateReject_DimTooBig: return _T("dim-too-big");
+		case GateReject_CheckDimInvalid: return _T("check-dim-invalid");
+		case GateReject_CheckSamplesTooMany: return _T("check-samples-too-many");
+		case GateReject_CheckBitsTooMany: return _T("check-bits-too-many");
+		case GateReject_CheckBitsMissing: return _T("check-bits-missing");
+		case GateReject_CheckSamplesMissing: return _T("check-samples-missing");
+		case GateReject_CheckDeclaredBytes: return _T("check-declared-bytes");
+		case GateReject_CheckPixelsFloor: return _T("check-pixels-floor");
+		case GateReject_CheckStripPair: return _T("check-strip-pair");
+		case GateReject_CheckTilePair: return _T("check-tile-pair");
+		default: return _T("unknown");
+	}
+}
+
+// One log line per rejected file identity. P0-1 stopped memoizing gate
+// rejections, so a rejected file is re-attempted on every visit and would
+// spam the log without dedup. Keyed by path + size + mtime, like the
+// bad-file memo, so an edited file logs again. The set only ever holds
+// rejected files, so it stays tiny and is never pruned. Guarded by its
+// own CRITICAL_SECTION (same pattern as the memo lock): the two load
+// threads can reject concurrently.
+struct TiffGateLoggedFile {
+	CString sPath;
+	__int64 nSize;
+	FILETIME ftWrite;
+	bool operator<(const TiffGateLoggedFile& other) const {
+		int c = sPath.CompareNoCase(other.sPath);
+		if (c != 0) return c < 0;
+		if (nSize != other.nSize) return nSize < other.nSize;
+		if (ftWrite.dwHighDateTime != other.ftWrite.dwHighDateTime)
+			return ftWrite.dwHighDateTime < other.ftWrite.dwHighDateTime;
+		return ftWrite.dwLowDateTime < other.ftWrite.dwLowDateTime;
+	}
+};
+static std::set<TiffGateLoggedFile> s_tiffGateLogged;
+struct CTiffGateLogLockHolder {
+	CRITICAL_SECTION cs;
+	CTiffGateLogLockHolder() { ::InitializeCriticalSection(&cs); }
+	~CTiffGateLogLockHolder() { ::DeleteCriticalSection(&cs); }
+};
+static CTiffGateLogLockHolder& TiffGateLogLock() { static CTiffGateLogLockHolder lock; return lock; }
+
+static void LogTiffGateRejectionOnce(LPCTSTR sFileName, __int64 nSize, const FILETIME& ftWrite,
+	TiffGateRejectReason reason, unsigned long long ifdOff,
+	unsigned long long aux1, unsigned long long aux2) {
+	TiffGateLoggedFile key;
+	key.sPath = sFileName;
+	key.nSize = nSize;
+	key.ftWrite = ftWrite;
+	{
+		Helpers::CAutoCriticalSection lock(TiffGateLogLock().cs);
+		if (s_tiffGateLogged.find(key) != s_tiffGateLogged.end()) {
+			return;
+		}
+		s_tiffGateLogged.insert(key);
+	}
+	CString sMsg;
+	sMsg.Format(_T("JPEGView: TIFF gate rejected \"%s\" reason=%s ifdOff=%I64u aux1=%I64u aux2=%I64u size=%I64d\n"),
+		sFileName, TiffGateRejectReasonName(reason), ifdOff, aux1, aux2, nSize);
+	::OutputDebugString(sMsg);
+}
+
 // Decoder-independent RAW gate. Both libraw and dcraw_mod allocate and read the
 // image according to the dimensions the file declares, and neither checks those
 // dimensions against the file's real size. A DNG that declares 65535x21846 but
@@ -2090,6 +2217,7 @@ struct TiffGateIFD {
 	unsigned long long samples;
 	unsigned long long bits;
 	unsigned long long photometric;
+	unsigned long long offset; // file offset of this IFD (set by CollectIFDTree; only for the rejection log)
 	bool samplesPresent;
 	bool bitsPresent;
 	bool photometricPresent;
@@ -2100,7 +2228,7 @@ struct TiffGateIFD {
 	TiffGateArray tileOff;
 	TiffGateArray tileCnt;
 	std::vector<unsigned long long> subIFDs;
-	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0), photometric(0),
+	TiffGateIFD() : width(0), height(0), compression(1), samples(0), bits(0), photometric(0), offset(0),
 		samplesPresent(false), bitsPresent(false), photometricPresent(false),
 		widthPresent(false), heightPresent(false) {}
 };
@@ -2108,7 +2236,17 @@ struct TiffGateIFD {
 class TiffGateReader {
 public:
 	TiffGateReader(HANDLE hFile, unsigned long long fileSize, bool little, bool isKdc = false, bool isSrf = false)
-		: m_hFile(hFile), m_fileSize(fileSize), m_little(little), m_isKdc(isKdc), m_isSrf(isSrf) {}
+		: m_hFile(hFile), m_fileSize(fileSize), m_little(little), m_isKdc(isKdc), m_isSrf(isSrf),
+		m_rejectReason(GateReject_None), m_rejectIfdOff(0), m_rejectAux1(0), m_rejectAux2(0) {}
+
+	// Last rejection, for the one-line reason log (P0-2). Only meaningful
+	// when CheckIFDTree returned false. A skipped (non-fatal) failure may
+	// leave a stale reason behind; every fatal failure site sets it first,
+	// so a stale reason is never reported.
+	TiffGateRejectReason GetRejectReason() const { return m_rejectReason; }
+	unsigned long long GetRejectIfdOff() const { return m_rejectIfdOff; }
+	unsigned long long GetRejectAux1() const { return m_rejectAux1; }
+	unsigned long long GetRejectAux2() const { return m_rejectAux2; }
 
 	// Seek-read exactly n bytes. Fails closed on any short read, so a
 	// truncated file can never yield a half-read value that looks valid.
@@ -2234,19 +2372,23 @@ public:
 	bool ReadIFD(unsigned long long ifdOff, TiffGateIFD& info, unsigned long long& nextIFD) const {
 		unsigned char countBuf[2];
 		if (!ReadAt(ifdOff, countBuf, 2)) {
+			SetRejection(GateReject_IfdUnreadable, ifdOff);
 			return false;
 		}
 		unsigned long long n = Rd16(countBuf);
 		if (n == 0) {
+			SetRejection(GateReject_IfdEmpty, ifdOff);
 			return false;
 		}
 		// n is a uint16, so the entry block is at most 65535 * 12 bytes.
 		unsigned long long entriesSize = n * 12;
 		if (ifdOff + 2 > m_fileSize || entriesSize > m_fileSize - (ifdOff + 2)) {
+			SetRejection(GateReject_IfdUnreadable, ifdOff, n);
 			return false;
 		}
 		std::vector<unsigned char> entries((size_t)entriesSize);
 		if (!ReadAt(ifdOff + 2, &entries[0], entriesSize)) {
+			SetRejection(GateReject_IfdUnreadable, ifdOff, n);
 			return false;
 		}
 		for (unsigned long long k = 0; k < n; ++k) {
@@ -2314,11 +2456,13 @@ public:
 					// SubIFD offsets. No real camera file lists more
 					// than a handful; an absurd count is malformed.
 					if (count > 1024 || (type != 3 && type != 4)) {
+						SetRejection(GateReject_SubIfdBad, ifdOff, count);
 						return false;
 					}
 					for (unsigned long long j = 0; j < count; ++j) {
 						unsigned long long v = ReadElement(dataOff, type, j);
 						if (v == kInvalid) {
+							SetRejection(GateReject_SubIfdBad, ifdOff, count, j);
 							return false;
 						}
 						info.subIFDs.push_back(v);
@@ -2364,14 +2508,17 @@ public:
 	// both partner arrays in lockstep (R-05: no 512 cap, nothing stored).
 	bool CheckIFD(const TiffGateIFD& info) const {
 		if (info.width == 0 || info.height == 0 || info.width > 65535 || info.height > 65535) {
+			SetRejection(GateReject_CheckDimInvalid, info.offset, info.width, info.height);
 			return false;
 		}
 		// R-02: with these caps the product below cannot overflow 64 bit
 		// (65535^2 * 8 * 64 / 8 is far below 2^64).
 		if (info.samplesPresent && info.samples > 8) {
+			SetRejection(GateReject_CheckSamplesTooMany, info.offset, info.samples);
 			return false;
 		}
 		if (info.bitsPresent && info.bits > 64) {
+			SetRejection(GateReject_CheckBitsTooMany, info.offset, info.bits);
 			return false;
 		}
 		unsigned long long declaredPixels = info.width * info.height;
@@ -2388,12 +2535,14 @@ public:
 			// photometric and still fails, as does any file with bits
 			// missing.
 			if (!info.bitsPresent) {
+				SetRejection(GateReject_CheckBitsMissing, info.offset);
 				return false;
 			}
 			unsigned long long samples = info.samples;
 			if (!info.samplesPresent) {
 				if (!info.photometricPresent ||
 					(info.photometric != 0 && info.photometric != 1 && info.photometric != 32803)) {
+					SetRejection(GateReject_CheckSamplesMissing, info.offset, info.photometric);
 					return false;
 				}
 				samples = 1;
@@ -2417,6 +2566,7 @@ public:
 			// still apply.
 			unsigned long long declaredBytes = declaredPixels * samples * info.bits / 8;
 			if (!m_isKdc && !m_isSrf && declaredBytes > m_fileSize) {
+				SetRejection(GateReject_CheckDeclaredBytes, info.offset, declaredBytes, m_fileSize);
 				return false;
 			}
 			// F-H06: the pixels/8 floor applies even for .kdc. It is very
@@ -2426,6 +2576,7 @@ public:
 			// using the .kdc exemption to smuggle an absurdly small file
 			// past the gate.
 			if (m_fileSize < declaredPixels / 8) {
+				SetRejection(GateReject_CheckPixelsFloor, info.offset, declaredPixels, m_fileSize);
 				return false;
 			}
 		} else {
@@ -2437,6 +2588,7 @@ public:
 			// compression 7 loses no crash protection. Non-JPEG
 			// compressed data keeps the floor.
 			if (info.compression != 7 && m_fileSize < declaredPixels / 8) {
+				SetRejection(GateReject_CheckPixelsFloor, info.offset, declaredPixels, m_fileSize);
 				return false;
 			}
 			// JPEG-7 exemption: Hasselblad 3FR JPEG strips carry the nominal
@@ -2446,9 +2598,11 @@ public:
 			// absurdly small files.
 			if (info.compression != 7) {
 				if (!CheckArrayPair(info.stripOff, info.stripCnt)) {
+					SetRejection(GateReject_CheckStripPair, info.offset, info.stripOff.count, info.stripCnt.count);
 					return false;
 				}
 				if (!CheckArrayPair(info.tileOff, info.tileCnt)) {
+					SetRejection(GateReject_CheckTilePair, info.offset, info.tileOff.count, info.tileCnt.count);
 					return false;
 				}
 			}
@@ -2523,7 +2677,18 @@ public:
 	// A SubIFD's chain is never followed: dcraw's tag 330 handling
 	// parses each SubIFD once (parse_tiff_ifd) and never reads its
 	// next pointer.
-	bool CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out, std::vector<unsigned long long>& visited) const {
+	// Fix 2: a broken IFD is skipped, not fatal - except IFD0 itself
+	// and except the node cap. dcraw_mod's parse_tiff loops the chain
+	// and breaks on a bad IFD (dcraw_mod.cpp:6325-6327: "while
+	// ((doff = get4())) { ... if (parse_tiff_ifd (base)) break; }"),
+	// and its tag 330 handling parses each SubIFD once and breaks out
+	// of the SubIFD loop on failure while the outer IFD continues
+	// (dcraw_mod.cpp:5984-5987). So a bad chain IFD ends the chain and
+	// a bad SubIFD is skipped; only IFD0 (cur == ifdOff) still rejects
+	// the file, and the 4096-node cap still fails closed (Fix 8
+	// territory, explicitly not done): the cap is a separate result,
+	// never confused with an unreadable IFD.
+	TiffGateCollectResult CollectIFDTree(unsigned long long ifdOff, int depth, std::vector<TiffGateIFD>& out, std::vector<unsigned long long>& visited) const {
 		// F-01: walk the next-IFD chain as well as the SubIFD tree.
 		// dcraw_mod's parse_tiff loops on the next pointer, so a chain
 		// IFD that declares absurd dimensions would otherwise bypass
@@ -2538,18 +2703,27 @@ public:
 		while (cur != 0) {
 			for (size_t i = 0; i < visited.size(); ++i) {
 				if (visited[i] == cur) {
-					return true; // shared SubIFD / chain link already walked
+					return TiffGateCollect_Ok; // shared SubIFD / chain link already walked
 				}
 			}
 			if (out.size() >= 4096) {
-				return false;
+				SetRejection(GateReject_NodeCapExceeded, cur, (unsigned long long)out.size());
+				return TiffGateCollect_CapExceeded;
 			}
 			visited.push_back(cur);
 			TiffGateIFD info;
 			unsigned long long nextIFD = 0;
 			if (!ReadIFD(cur, info, nextIFD)) {
-				return false;
+				// ReadIFD already recorded the reason (which check,
+				// which offset). IFD0 itself is fatal; a later chain
+				// IFD just ends the chain, exactly like dcraw's break
+				// in parse_tiff (dcraw_mod.cpp:6325-6327).
+				if (cur == ifdOff) {
+					return TiffGateCollect_BadIfd;
+				}
+				break;
 			}
+			info.offset = cur;
 			out.push_back(info);
 			if (depth < 2) {
 				for (size_t i = 0; i < info.subIFDs.size(); ++i) {
@@ -2557,9 +2731,18 @@ public:
 					if (sub == 0) {
 						continue; // 0 means "no SubIFD" for this entry
 					}
-					if (!CollectIFDTree(sub, depth + 1, out, visited)) {
-						return false;
+					TiffGateCollectResult subResult = CollectIFDTree(sub, depth + 1, out, visited);
+					if (subResult == TiffGateCollect_CapExceeded) {
+						return TiffGateCollect_CapExceeded;
 					}
+					// BadIfd: skip that subtree and continue with the
+					// next SubIFD, like dcraw's tag 330 loop breaking
+					// out of the SubIFD loop while the outer IFD
+					// continues (dcraw_mod.cpp:5984-5987). The reason
+					// left behind by the failed subtree is stale and is
+					// never reported: it is only read when CheckIFDTree
+					// returns false, and every fatal failure site sets
+					// it first (see SetRejection).
 				}
 			}
 			// Only the top-level chain is followed (depth 0). A SubIFD's
@@ -2571,13 +2754,13 @@ public:
 			// veto the file. Following it exceeds what dcraw decodes.
 			cur = (depth == 0) ? nextIFD : 0;
 		}
-		return true;
+		return TiffGateCollect_Ok;
 	}
 
 	bool CheckIFDTree(unsigned long long ifdOff, int depth) const {
 		std::vector<TiffGateIFD> all;
 		std::vector<unsigned long long> visited;
-		if (!CollectIFDTree(ifdOff, depth, all, visited)) {
+		if (CollectIFDTree(ifdOff, depth, all, visited) != TiffGateCollect_Ok) {
 			return false;
 		}
 		const TiffGateIFD* largest = NULL;
@@ -2588,12 +2771,23 @@ public:
 			// be sane. A present-but-unreadable dimension reads as 0 and
 			// therefore fails here, as before.
 			if (info.widthPresent != info.heightPresent) {
+				SetRejection(GateReject_DimUnpaired, info.offset, info.width, info.height);
 				return false;
 			}
-			if (info.widthPresent && (info.width == 0 || info.width > 65535)) {
+			if (info.widthPresent && info.width == 0) {
+				SetRejection(GateReject_DimZero, info.offset, info.width, info.height);
 				return false;
 			}
-			if (info.heightPresent && (info.height == 0 || info.height > 65535)) {
+			if (info.widthPresent && info.width > 65535) {
+				SetRejection(GateReject_DimTooBig, info.offset, info.width, info.height);
+				return false;
+			}
+			if (info.heightPresent && info.height == 0) {
+				SetRejection(GateReject_DimZero, info.offset, info.width, info.height);
+				return false;
+			}
+			if (info.heightPresent && info.height > 65535) {
+				SetRejection(GateReject_DimTooBig, info.offset, info.width, info.height);
 				return false;
 			}
 			if (info.widthPresent) {
@@ -2613,21 +2807,42 @@ public:
 	}
 
 private:
+	// Records why the gate rejected the file. Const methods only: the
+	// reader is built per IsPlausibleRawFile call and never shared
+	// between threads, so mutable members are safe here.
+	void SetRejection(TiffGateRejectReason reason, unsigned long long ifdOff, unsigned long long aux1 = 0, unsigned long long aux2 = 0) const {
+		m_rejectReason = reason;
+		m_rejectIfdOff = ifdOff;
+		m_rejectAux1 = aux1;
+		m_rejectAux2 = aux2;
+	}
+
 	HANDLE m_hFile;
 	unsigned long long m_fileSize;
 	bool m_little;
 	bool m_isKdc;
 	bool m_isSrf;
+	mutable TiffGateRejectReason m_rejectReason;
+	mutable unsigned long long m_rejectIfdOff;
+	mutable unsigned long long m_rejectAux1;
+	mutable unsigned long long m_rejectAux2;
 };
 
 static bool IsPlausibleRawFile(LPCTSTR fileName) {
 	HANDLE hFile = ::CreateFile(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
+		// No handle, so no size/mtime for the dedup key: path-only.
+		FILETIME ftZero = { 0, 0 };
+		LogTiffGateRejectionOnce(fileName, 0, ftZero, GateReject_OpenFailed, 0, 0, 0);
 		return false;
 	}
+	// mtime for the log dedup key (path + size + mtime, like the memo).
+	FILETIME ftWrite = { 0, 0 };
+	::GetFileTime(hFile, NULL, NULL, &ftWrite);
 	LARGE_INTEGER liSize;
 	if (!::GetFileSizeEx(hFile, &liSize) || liSize.QuadPart <= 0) {
 		::CloseHandle(hFile);
+		LogTiffGateRejectionOnce(fileName, 0, ftWrite, GateReject_SizeInvalid, 0, 0, 0);
 		return false;
 	}
 	unsigned long long fileSize = (unsigned long long)liSize.QuadPart;
@@ -2635,6 +2850,7 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 	DWORD got = 0;
 	if (!::ReadFile(hFile, header, 8, &got, NULL) || got != 8) {
 		::CloseHandle(hFile);
+		LogTiffGateRejectionOnce(fileName, fileSize, ftWrite, GateReject_HeaderReadFailed, 0, 0, 0);
 		return false;
 	}
 
@@ -2662,6 +2878,7 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 			((unsigned long long)header[6] << 8) | header[7]);
 	if (ifdOff == 0) {
 		::CloseHandle(hFile);
+		LogTiffGateRejectionOnce(fileName, fileSize, ftWrite, GateReject_IfdOffsetZero, 0, 0, 0);
 		return false; // claims to be TIFF but has no IFD
 	}
 
@@ -2682,6 +2899,11 @@ static bool IsPlausibleRawFile(LPCTSTR fileName) {
 	TiffGateReader reader(hFile, fileSize, little, isKdc, isSrf);
 	bool ok = reader.CheckIFDTree(ifdOff, 0);
 	::CloseHandle(hFile);
+	// A non-TIFF pass-through returns true above and is never logged.
+	if (!ok) {
+		LogTiffGateRejectionOnce(fileName, fileSize, ftWrite, reader.GetRejectReason(),
+			reader.GetRejectIfdOff(), reader.GetRejectAux1(), reader.GetRejectAux2());
+	}
 	return ok;
 }
 
@@ -2690,6 +2912,12 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	bool bSizeLimitExceeded = false; // R-04/P2-5: set by RawReader, mapped to the request below
 	try {
 		if (!IsPlausibleRawFile(request->FileName)) {
+			// P0: a gate rejection is not a decode failure (no decoder
+			// ran), so it must not be memoized as a bad file - see the
+			// memo condition in Process(). This covers both gate entry
+			// points: the IF_CameraRAW switch case and the TIFF fallback
+			// in ProcessReadGDIPlusRequest, which both come through here.
+			request->GateRejected = true;
 			return;
 		}
 		// One-shot full-size reload (IDM_RELOAD_FULLSIZE): this request ignores
