@@ -248,6 +248,7 @@ void* JxlReader::ReadImage(int& width,
 	int& height,
 	int& nchannels,
 	bool& has_animation,
+	int frame_index, // M-D7: requested frame (0 restarts the animation decoder)
 	int& frame_count,
 	int& frame_time,
 	void*& exif_chunk,
@@ -262,6 +263,16 @@ void* JxlReader::ReadImage(int& width,
 	has_animation = false;
 	unsigned char* pPixelData = NULL;
 	exif_chunk = NULL;
+	// M-D7: frame 0 restarts the animation. The decoder and the compressed
+	// stream live in cache, so rewind and re-subscribe here; the following
+	// DecodeJpegXlOneShot() then returns frame 0 (total_frames is already
+	// known from F-16, so no recount happens).
+	if (frame_index == 0 && cache.decoder != NULL && cache.data != NULL) {
+		JxlDecoderRewind(cache.decoder);
+		JxlDecoderSubscribeEvents(cache.decoder, JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
+		JxlDecoderSetInput(cache.decoder, cache.data, cache.data_size);
+		JxlDecoderCloseInput(cache.decoder);
+	}
 
 
 	std::vector<uint8_t> pixels;

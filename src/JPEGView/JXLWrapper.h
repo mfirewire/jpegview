@@ -15,6 +15,7 @@ public:
 		int& height,  // height of the image loaded.
 		int& bpp,     // BYTES (not bits) PER PIXEL.
 		bool& has_animation,     // if the image is animated
+		int frame_index,  // M-D7: requested frame (0 restarts the animation decoder)
 		int& frame_count, // number of frames
 		int& frame_time, // frame duration in milliseconds
 		void*& exif, // Pointer to Exif data (must be freed by caller)

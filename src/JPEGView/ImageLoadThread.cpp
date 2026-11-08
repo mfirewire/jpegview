@@ -1348,7 +1348,7 @@ void CImageLoadThread::ProcessReadWEBPRequest(CRequest * request) {
 			int nFrameTimeMs = 0;
 			int nBPP;
 			void* pEXIFData;
-			uint8* pPixelData = (uint8*)m_webpReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
+			uint8* pPixelData = (uint8*)m_webpReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData && nBPP == 4) {
 				// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
 				// the loop entirely when no pixel is transparent (see
@@ -1433,7 +1433,7 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 			// that conversion; the only reason to take GDI+ would be ForceGDIPlus.
 			bool bUseGDIPlus = CSettingsProvider::This().ForceGDIPlus();
 			if (bUseCachedDecoder || !bUseGDIPlus || PngReader::MustUseLibpng(pBuffer, nFileSize))
-				pPixelData = (uint8*)m_pngReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
+				pPixelData = (uint8*)m_pngReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 #endif
 
 			if (pPixelData != NULL) {
@@ -1546,7 +1546,7 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 			// ReadImage (JXLWrapper.cpp:48-64); set the flag before the
 			// call so the catch below never frees a buffer the reader owns.
 			bJxlReaderOwnsBuffer = true;
-			uint8* pPixelData = (uint8*)m_jxlReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
+			uint8* pPixelData = (uint8*)m_jxlReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastJxlFileName = sFileName;

@@ -32,6 +32,8 @@ Bugs fixed:
 - Image rotation in memory now marks the image as destructively processed, so a following lossless JPEG transformation cannot silently discard the unsaved edit
 - Load failures caused by an unhandled exception are no longer memoized as permanently bad files; genuine decode failures are still remembered
 - JPEG decoding via GDI+ now keeps the EXIF block, the file hash, the preserved APP/COM segments and the real chroma subsampling, so lossless transform and crop MCU checks no longer assume 4:2:0 for 4:4:4/4:2:2 files
+- Animated WebP/APNG/JXL: the requested frame index is now passed to the decoder, so returning to a file or wrapping the animation restarts at frame 0 instead of showing the cached decoder's next frame under a frame-0 label
+- APNG: a corrupt frame now clears libpng's error-state decoder immediately instead of leaving it in the cache for the next read
 - JXL loading: the exception handler no longer leaks the file buffer or the EXIF chunk, and no longer risks freeing a buffer owned by the JXL reader cache (double-free)
 - SVG viewing: rapid paging through SVG files no longer crashes (access violation in libthorvg-1.dll); the whole ThorVG session is now serialised across load threads instead of only init/term
 - Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the missing-file state is shown instead (or the empty state when the folder really has no images) (F-H02)

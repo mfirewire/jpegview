@@ -13,6 +13,7 @@ void* WebpReaderWriter::ReadImage(int& width,
 	int& height,
 	int& nchannels,
 	bool& has_animation,
+	int frame_index, // M-D7: requested frame (0 restarts the animation decoder)
 	int& frame_count,
 	int& frame_time,
 	void*& exif_chunk,
@@ -141,8 +142,16 @@ void* WebpReaderWriter::ReadImage(int& width,
 	// Decode frame
 	int timestamp;
 	uint8_t* buf;
-	if (!WebPAnimDecoderHasMoreFrames(decoder))
+	// M-D7: a request for frame 0 (switching back to this file, or the
+	// animation wrapping around) must restart the decoder instead of
+	// continuing from the cached cursor. libwebp has no random-frame API,
+	// so Reset + GetNext is the only way to land on frame 0 again.
+	if (frame_index == 0) {
 		WebPAnimDecoderReset(decoder);
+		cache.prev_frame_timestamp = 0;
+	} else if (!WebPAnimDecoderHasMoreFrames(decoder)) {
+		WebPAnimDecoderReset(decoder);
+	}
 	if (!WebPAnimDecoderGetNext(decoder, &buf, &timestamp)) {
 		free(exif_chunk);
 		exif_chunk = NULL;

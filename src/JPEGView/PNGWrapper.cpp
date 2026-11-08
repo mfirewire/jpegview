@@ -105,6 +105,14 @@ bool PngReader::ReadFrameData()
 {
 	if (setjmp(png_jmpbuf(cache.png_ptr)))
 	{
+		// N-15: libpng longjmp'd out of a failed frame. Leaving the
+		// error-state png_ptr/info_ptr in the cache lets a later
+		// ReadNextFrame re-enter a corrupted decoder. Clear it here
+		// instead of relying on every caller to delete the cache.
+		// DeleteCacheInternal(false) keeps cache.buffer so a retry
+		// still has the compressed stream, and zeroes every pointer,
+		// so the caller's DeleteCache() cannot double-free them.
+		DeleteCacheInternal(false);
 		return false;
 	}
 #ifdef PNG_APNG_SUPPORTED
@@ -377,6 +385,7 @@ void* PngReader::ReadImage(int& width,
 	int& height,
 	int& nchannels,
 	bool& has_animation,
+	int frame_index, // M-D7: requested frame (0 restarts the animation decoder)
 	int& frame_count,
 	int& frame_time,
 	void*& exif_chunk,
@@ -402,7 +411,11 @@ void* PngReader::ReadImage(int& width,
 	}
 	buffer = cache.buffer;
 	sizebytes = cache.buffer_size;
-	if (!cache.png_ptr || cache.frame_index == 0) {
+	// M-D7: frame 0 must re-open the APNG from the beginning, even when the
+	// per-thread cache still holds the decoder from a previous visit to this
+	// file. The canvas blend/dispose state is sequential, so the whole read
+	// has to be restarted, not just the frame counter.
+	if (frame_index == 0 || !cache.png_ptr || cache.frame_index == 0) {
 		DeleteCacheInternal(false);
 		if (!buffer || !BeginReading(buffer, sizebytes, outOfMemory, isSizeLimitExceeded)) {
 			return NULL;
