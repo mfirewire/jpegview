@@ -11,16 +11,21 @@ public:
 	void SetCurrentFile(LPCTSTR fileName);
 	void SetCurrentDirectory(LPCTSTR directoryName);
 
-	// Kindly terminates the thread by setting the m_terminateEvent
-	void Terminate();
-	// First tries to terminate the thread by setting m_terminateEvent, when no reaction -> kills the thread
-	void Abort();
+	// Kindly terminates the thread by setting the m_terminateEvent.
+	// Returns true only when the worker is confirmed to have returned from
+	// ThreadFunc. When it returns false the worker is stuck in a blocking
+	// call (e.g. a dead network path) and still dereferences this object:
+	// the caller must NOT delete it, otherwise the critical section and
+	// both events are freed under the running thread (P0-4). The object is
+	// leaked instead, like the image load threads (R-21/F-M30).
+	bool Terminate();
 
 private:
 	CRITICAL_SECTION m_lock;
 	HANDLE m_terminateEvent; // Event to terminate the thread
 	HANDLE m_newDirectoryEvent; // New directory needs to be watched
 	HANDLE m_hThread; // watchdog thread
+	HANDLE m_threadFinishedEvent; // set by the worker as its last action; the only safe-delete criterion (P0-4)
 	HWND m_hTargetWindow;
 	bool m_bTerminate;
 

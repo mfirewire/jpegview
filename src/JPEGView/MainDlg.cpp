@@ -305,7 +305,19 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 }
 
 CMainDlg::~CMainDlg() {
-	delete m_pDirectoryWatcher;
+	// P0-4: a watcher thread stuck in a blocking file-system call cannot be
+	// stopped. It dereferences this object (the lock, both events and the
+	// strings), so freeing it would be a use-after-free - leak the whole
+	// object instead, the same rule the image load threads follow
+	// (R-21/F-M30). Terminate() is idempotent and succeeds here in the
+	// normal case, where the object is then deleted.
+	if (m_pDirectoryWatcher != NULL) {
+		if (m_pDirectoryWatcher->Terminate()) {
+			delete m_pDirectoryWatcher;
+		}
+		m_pDirectoryWatcher = NULL;
+	}
+
 	delete m_pFileList;
 	if (m_pJPEGProvider != NULL) delete m_pJPEGProvider;
 	delete m_pImageProcParams;
@@ -338,6 +350,15 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 	HelpersGUI::ScreenScaling = ::GetDeviceCaps(dc, LOGPIXELSX)/96.0f;
 
 	::SetClassLongPtr(m_hWnd, GCLP_HCURSOR, NULL);
+
+	// P0-3: construct the parameter DB singleton here, on the UI thread
+	// and before the first worker exists (the directory watcher below,
+	// the processing pool and the two image load threads further down).
+	// CParameterDB::This() is a lock-free lazy init and both load
+	// threads reach it through CJPEGImage::SetFileDependentProcessParams,
+	// so without this the first access could construct two instances,
+	// leak one and open ParamDB.db twice.
+	CParameterDB::This();
 
 	m_pDirectoryWatcher = new CDirectoryWatcher(m_hWnd);
 
@@ -1125,12 +1146,23 @@ LRESULT CMainDlg::OnGetDlgCode(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 }
 
 LRESULT CMainDlg::OnImageLoadCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& /*bHandled*/) {
+	// P0-2: the load threads post this after SetEvent, so a message can
+	// still be queued when CleanupAndTerminate has already deleted the
+	// provider (and the images it owns). Nothing is left to complete then.
+	if (m_pJPEGProvider == NULL) {
+		return 0;
+	}
 	// route to JPEG provider
 	m_pJPEGProvider->OnImageLoadCompleted((int)lParam);
 	return 0;
 }
 
 LRESULT CMainDlg::OnDisplayedFileChangedOnDisk(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+	// P0-2: same shutdown window as OnImageLoadCompleted; the provider owns
+	// m_pCurrentImage, so reloading is not possible once it is gone.
+	if (m_pJPEGProvider == NULL) {
+		return 0;
+	}
 	if (CSettingsProvider::This().ReloadWhenDisplayedImageChanged() && m_pCurrentImage != NULL && !m_pCurrentImage->IsClipboardImage() &&
 		m_pFileList != NULL && m_pFileList->CanOpenCurrentFileForReading()) {
 		ExecuteCommand(IDM_RELOAD);
@@ -3857,9 +3889,20 @@ void CMainDlg::AnimateTransition() {
 void CMainDlg::CleanupAndTerminate() {
 	StopMovieMode();
 	StopAnimation();
+	// P0-2/P0-4: stop the watcher first so it cannot queue new
+	// WM_DISPLAYED_FILE_CHANGED_ON_DISK / WM_ACTIVE_DIRECTORY_FILELIST_CHANGED
+	// messages while the provider is being torn down. The object itself is
+	// deleted in the destructor (or leaked there if the thread is stuck).
+	if (m_pDirectoryWatcher != NULL) {
+		m_pDirectoryWatcher->Terminate();
+	}
 	if (m_pOcrController) m_pOcrController->Shutdown();
 	delete m_pJPEGProvider; // delete this early to properly shut down the loading threads
 	m_pJPEGProvider = NULL;
+	// The provider owns every CJPEGImage; m_pCurrentImage is a borrowed
+	// pointer and now dangles. Clear it so a late message handler cannot
+	// dereference it (P0-2).
+	m_pCurrentImage = NULL;
 	EndDialog(0);
 }
 	

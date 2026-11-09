@@ -58,6 +58,10 @@ Bugs fixed:
 - RAW loading: an IFD that declares a width or height above 65535 is never skipped as a thumbnail, not even when it is JPEG-compressed; the hard dimension limit is always enforced, so a JPEG-compressed main-image IFD with an over-limit dimension cannot let the gate validate the thumbnail while the decoded image's dimensions go unchecked
 - Saving as EXR no longer brightens the image on reload: the writer stored 8-bit sRGB values directly as linear light, while the EXR reader applies gamma 2.2 on decode (mid-grey 128 reopened as ~186). The writer now linearises with the shared Helpers::LinearFromSRGB (gamma 2.2), the same conversion the HDR writer already applied, so save -> reload round-trips pixel-identically
 - Saving a JPEG whose EXIF APP1 is malformed (length 6-7, or "Exif" not followed by \0\0) no longer writes two APP1 Exif segments: the segment walker kept the malformed block as an ordinary segment while the EXIF branch also rewrote it, and a reader takes the first (stale) one, losing the orientation reset to 1. The walker's Exif check now matches FindEXIFBlock (length >= 6, first 4 bytes "Exif"), so the malformed block is excluded and rewritten exactly once
+- Shutdown: a message posted by a load thread after it signalled completion can no longer reach the window once the image provider has been deleted (the handler and the file-changed handler check for the shutdown state, and the borrowed current-image pointer is cleared)
+- The parameter DB is now created on the UI thread before any worker starts, so two load threads can no longer construct it twice, leak one instance or open ParamDB.db concurrently
+- Directory watcher: a worker that does not stop within its wait window is no longer followed by deleting the lock and events it still uses; the watcher object is leaked instead, like the image load threads
+- TGA viewing: the RLE pixel counter is size_t now, so an image above 2 GB cannot overflow a signed int and write before the buffer
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

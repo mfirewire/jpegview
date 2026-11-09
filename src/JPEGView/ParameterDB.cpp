@@ -360,6 +360,12 @@ bool CParameterDBEntry::HasZoomOffsetStored() const {
 
 CParameterDB* CParameterDB::sm_instance = NULL;
 
+// P0-3: lock-free lazy init. This is only safe because the first call is
+// made on the UI thread, before any worker exists: CMainDlg::OnInitDialog
+// constructs the singleton before it starts the directory watcher, the
+// processing pool and the two image load threads. Without that ordering two
+// load threads could both see NULL, construct two databases (one leaks) and
+// race on ParamDB.db. Do not call this from a worker during startup.
 CParameterDB& CParameterDB::This() {
 	if (sm_instance == NULL) {
 		sm_instance = new CParameterDB();

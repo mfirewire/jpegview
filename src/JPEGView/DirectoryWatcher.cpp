@@ -31,40 +31,58 @@ CDirectoryWatcher::CDirectoryWatcher(HWND hTargetWindow)
 	m_terminateEvent = ::CreateEvent(0, TRUE, FALSE, NULL);
 	m_newDirectoryEvent = ::CreateEvent(0, TRUE, FALSE, NULL);
 	m_bModificationTimeValid = FALSE;
+	m_bTerminate = false;
 	m_lastFileChangedTick = 0;
 
+	// P0-4: manual-reset event, set by the worker right before it leaves
+	// ThreadFunc. Waiting on the _beginthread handle cannot be used for
+	// this: _endthread() closes that handle inside the CRT, so a wait can
+	// report WAIT_FAILED for a worker that has in fact finished.
+	m_threadFinishedEvent = ::CreateEvent(0, TRUE, FALSE, NULL);
 	m_hThread = (HANDLE)_beginthread(ThreadFunc, 0, this);
+	if (m_hThread == (HANDLE)-1) {
+		// No worker was created: there is nothing to wait for.
+		m_hThread = NULL;
+		::SetEvent(m_threadFinishedEvent);
+	}
 }
 
 CDirectoryWatcher::~CDirectoryWatcher(void) {
-	Abort();
+	// P0-4: CMainDlg only deletes us after Terminate() returned true, so the
+	// worker is gone here. Call it again defensively (it is idempotent) and
+	// bail out rather than tearing down a lock a stuck worker still enters.
+	if (!Terminate()) {
+		return;
+	}
 	::DeleteCriticalSection(&m_lock);
 	::CloseHandle(m_terminateEvent);
 	::CloseHandle(m_newDirectoryEvent);
+	::CloseHandle(m_threadFinishedEvent);
 }
 
-void CDirectoryWatcher::Terminate() { 
+bool CDirectoryWatcher::Terminate() {
 	m_bTerminate = true;
-	if (m_hThread != NULL) {
-		::SetEvent(m_terminateEvent);
-		::WaitForSingleObject(m_hThread, 1000);
-		m_hThread = NULL;
+	if (m_hThread == NULL) {
+		return true;
 	}
-}
-
-void CDirectoryWatcher::Abort() {
-	try {
-		if (m_hThread != NULL) {
-			::SetEvent(m_terminateEvent);
-			if (WAIT_TIMEOUT == ::WaitForSingleObject(m_hThread, 100)) {
-				::TerminateThread(m_hThread, 1);
-				::WaitForSingleObject(m_hThread, 100);
-			}
-			m_hThread = NULL;
-		}
-	} catch (...) {
-		// do not crash
+	::SetEvent(m_terminateEvent);
+	// P0-4: the old code ignored the wait result and NULLed the handle. A
+	// worker blocked in CreateFile/GetFileTime on a dead network path then
+	// outlived the object while the destructor deleted m_lock and closed
+	// both events -> use-after-free. Wait for the worker's own "finished"
+	// event instead; on timeout leave m_hThread set and report failure, so a
+	// retry or a deliberate leak is possible. TerminateThread is not used as
+	// a fallback: it can leave m_lock permanently locked, which would
+	// corrupt every later wait.
+	if (::WaitForSingleObject(m_threadFinishedEvent, 1000) != WAIT_OBJECT_0) {
+		::OutputDebugString(_T("JPEGView: DirectoryWatcher: worker did not stop within 1 s, the watcher is leaked\n"));
+		return false;
 	}
+	// The worker has returned from ThreadFunc; its only remaining work is
+	// the CRT exit path, which does not touch this object. The _beginthread
+	// handle is owned (and closed) by _endthread, so it is only forgotten.
+	m_hThread = NULL;
+	return true;
 }
 
 void CDirectoryWatcher::SetCurrentFile(LPCTSTR fileName)
@@ -302,5 +320,9 @@ void CDirectoryWatcher::ThreadFunc(void* arg) {
 		}
 	} while (!bTerminate);
 
+	// P0-4: last access to this object. After this point only the CRT exit
+	// path runs, so a waiter may delete the watcher as soon as the event is
+	// signalled.
+	::SetEvent(thisPtr->m_threadFinishedEvent);
 	_endthread();
 }

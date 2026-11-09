@@ -291,10 +291,13 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 
 		// Create some variables to hold the rleID, current colors read, channels, & stride.
 		byte rleID = 0;
-		int colorsRead = 0;
+		// P0-5: size_t, not int. The buffer may be up to MAX_IMAGE_BYTES
+		// (4 GB - 1 on x64), so a signed 32-bit accumulator overflows past
+		// 2 GB and pImage[colorsRead + n] would write before the buffer.
+		size_t colorsRead = 0;
 		channels = bits / 8;
 		int x = 0;
-		int padding = (int)(targetStride - (size_t)targetChannels * width);
+		size_t padding = targetStride - (size_t)targetChannels * width; // P0-5: no int round-trip
 
 		uint8 colors[4];
 		byte* pColors = (byte*)colors;
