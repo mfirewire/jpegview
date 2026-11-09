@@ -39,6 +39,8 @@
 *.ini      text eol=crlf
 *.tpl      text eol=crlf
 *.txt      text eol=crlf
+*.km       text eol=crlf
+*.default  text eol=crlf
 *.md       text eol=crlf
 *.yml      text eol=crlf
 *.yaml     text eol=crlf

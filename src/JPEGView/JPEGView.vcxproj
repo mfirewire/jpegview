@@ -127,6 +127,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <LargeAddressAware>true</LargeAddressAware>
       <DelayLoadDLLs>WICLoader.dll;jxl.dll;jxl_threads.dll;heif.dll;avif.dll;lcms2.dll;libraw.dll;openjp2.dll;libthorvg-1.dll</DelayLoadDLLs>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
@@ -231,6 +232,7 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <LargeAddressAware>true</LargeAddressAware>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
       <DelayLoadDLLs>WICLoader.dll;jxl.dll;jxl_threads.dll;heif.dll;avif.dll;lcms2.dll;libraw.dll;openjp2.dll;libthorvg-1.dll</DelayLoadDLLs>
       <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>

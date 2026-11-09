@@ -82,6 +82,9 @@ Bugs fixed:
 - Button drawing no longer leaks one GDI bitmap per dimmed paint (the previous bitmap is selected back before the new one is destroyed)
 - Single instance: a running viewer with no image open (title exactly "JPEGView") is found again, so the second start forwards its file instead of opening another window
 - INI parsing: "nan"/"inf" in UnsharpMaskParameters, ColorCorrection and LandscapeModeParameters are rejected instead of reaching the image filters
+- CI: the EOL guard now fails on a project text file whose extension has no rule in .gitattributes (the old check could never fire because the catch-all makes such files report "unset"), and it knows .json/.svg/.bash/.km/.default
+- The shipped KeyMap.txt.default and symbols.km are now covered by the text policy (CRLF on disk, LF in the index), like the other delivered configuration files
+- README: the image size section describes the current default (no pixel cap, byte and dimension caps still apply) instead of the removed 256 MP default
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

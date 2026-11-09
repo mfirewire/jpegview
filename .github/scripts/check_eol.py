@@ -22,7 +22,8 @@ TEXT_EXT = (
     ".idl", ".def", ".ini", ".tpl", ".txt", ".md", ".yml", ".yaml",
     ".xml", ".props", ".targets", ".vcxproj", ".filters", ".sln",
     ".wxs", ".wxl", ".wixproj", ".html", ".py", ".ps1", ".sh",
-    ".bat", ".cmd", ".cmake", ".mak", ".patch",
+    ".bat", ".cmd", ".cmake", ".mak", ".patch", ".json", ".svg",
+    ".bash", ".km", ".default",
 )
 
 # Files whose bytes must never be re-encoded or EOL-converted (legacy
@@ -108,7 +109,12 @@ def main():
                 except UnicodeDecodeError:
                     errors.append("non-UTF-8 text outside whitelist: %s" % path)
         elif owned and known_ext and path not in WHITELIST:
-            errors.append("text file not covered by .gitattributes: %s" % path)
+            # P1-23: the catch-all "* -text" makes every uncovered file
+            # report "unset", never "unspecified", so the old test never
+            # fired. Any project text extension without an explicit rule
+            # must fail here: otherwise a new file is stored with CRLF in
+            # the index and no rule above ever checks it.
+            errors.append("text file not covered by .gitattributes: %s (text attribute is %s)" % (path, attr))
 
     print("checked %d tracked files, %d with the text attribute" % (len(files), text_count))
     if errors:
