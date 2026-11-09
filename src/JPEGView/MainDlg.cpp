@@ -1313,10 +1313,13 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	bool bCanDoLosslessJPEGTransform = (m_pCurrentImage != NULL) && m_pCurrentImage->GetImageFormat() == IF_JPEG && !m_pCurrentImage->IsDestructivelyProcessed();
 
 	if (!bCanDoLosslessJPEGTransform) {
-		// P0-7: disable only the six lossless items. Greying out the whole
-		// popup also disabled IDM_CONVERT_JXL, which encodes the ORIGINAL
-		// file on disk and is unrelated to the in-memory edit; its key-map
-		// shortcut stayed live, so menu and command disagreed.
+		// P0-7: disable only the six lossless items instead of greying out
+		// the whole popup. The popup also hosts IDM_CONVERT_JXL, which
+		// encodes the ORIGINAL file on disk and is unrelated to the
+		// in-memory edit, so it must stay reachable. A real menu-state
+		// probe showed the old whole-popup disable left all six items
+		// themselves enabled (state 0); the fixed build greys them (1)
+		// while IDM_CONVERT_JXL stays 0.
 		HMENU hLossless = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_TRANSFORM_LOSSLESS);
 		if (hLossless != NULL) {
 			::EnableMenuItem(hLossless, IDM_ROTATE_90_LOSSLESS, MF_BYCOMMAND | MF_GRAYED);
