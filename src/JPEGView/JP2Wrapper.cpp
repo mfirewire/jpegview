@@ -162,7 +162,7 @@ void* JP2Reader::ReadImage(int& width,
 	if (image->numcomps < 1 || image->numcomps > 4) {
 		goto cleanup;
 	}
-	// CMYK is rejected rather than shown with wrong colors. Palette images
+	// Palette images
 	// are NOT rejected here and NOT expanded here either: the wrapper calls
 	// opj_set_default_decoder_parameters() and never writes params.flags,
 	// so OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG (openjpeg.h, 0x0001 -
@@ -175,7 +175,9 @@ void* JP2Reader::ReadImage(int& width,
 	// palette, a palette image arrives here as a 1-component index and
 	// is rendered as grey by the isGray path below. Known limitation
 	// (R-21) until a palette sample is verified on a real machine.
-	if (image->color_space == OPJ_CLRSPC_CMYK) {
+	// CMYK is decoded below (four ink components). A CMYK flag with any
+	// other component count is malformed.
+	if (image->color_space == OPJ_CLRSPC_CMYK && image->numcomps != 4) {
 		goto cleanup;
 	}
 	for (OPJ_UINT32 c = 0; c < image->numcomps; c++) {
@@ -212,6 +214,10 @@ void* JP2Reader::ReadImage(int& width,
 		memset(pDst, 0, allocSize);
 		bool isYCbCr = (image->color_space == OPJ_CLRSPC_SYCC || image->color_space == OPJ_CLRSPC_EYCC);
 		bool isGray = (image->numcomps == 1 || image->numcomps == 2);
+		// CMYK JP2 (colr enumCS 12): the components are C,M,Y,K ink amounts
+		// (0 = no ink), so the naive ink formula applies directly. Unlike PSD,
+		// whose channel planes store the inverted value, these are not inverted.
+		bool isCMYK = (image->color_space == OPJ_CLRSPC_CMYK);
 		// S-6: find the alpha component (OpenJPEG marks it) so it can be
 		// composited over white instead of being dropped. The per-pixel
 		// buffer holds at most 8 components; a file declaring more used
@@ -256,6 +262,11 @@ void* JP2Reader::ReadImage(int& width,
 				if (isGray) {
 					// All three channels from the gray component.
 					r = g = b = v[0];
+				} else if (isCMYK) {
+					const int inkK = 255 - v[3];
+					r = (255 - v[0]) * inkK / 255; // R from C
+					g = (255 - v[1]) * inkK / 255; // G from M
+					b = (255 - v[2]) * inkK / 255; // B from Y
 				} else if (isYCbCr) {
 					// BT.601 YCbCr -> RGB (Cb/Cr centred on 128). EYCC uses
 					// the same coefficients here; that is an approximation,
@@ -276,7 +287,7 @@ void* JP2Reader::ReadImage(int& width,
 					b = v[2];
 				}
 				// S-6: composite over white, like the SVG and EXR decoders.
-				if (nAlphaComp >= 0) {
+				if (nAlphaComp >= 0 && !isCMYK) {
 					const int a = v[nAlphaComp];
 					if (a != 255) {
 						r = (r * a + 255 * (255 - a) + 127) / 255;
