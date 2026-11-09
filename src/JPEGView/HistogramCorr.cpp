@@ -265,7 +265,13 @@ uint8* CHistogramCorr::CalculateCorrectionLUT(const CHistogram & histogram, floa
 	// If the brightness decreased by the correction, undo this
 	float fMeanBlackPt = (fBlackPtB + fBlackPtG + fBlackPtR)/3;
 	float fMeanWhitePt = (fWhitePtB + fWhitePtG + fWhitePtR)/3; 
-	float fA = 1.0f/(fMeanWhitePt - fMeanBlackPt);
+	// P1-2: a degenerate histogram (mean white == mean black, e.g. a
+	// single-colour image) made fA infinite or NaN, and the NaN reached
+	// CalculateLUT as an undefined float-to-int cast. This denominator was
+	// the one the S-L4 guard did not cover. Fall back to an identity ramp;
+	// the colour-cast correction below still applies.
+	const float fRange = fMeanWhitePt - fMeanBlackPt;
+	float fA = (fRange > 0.001f) ? 1.0f/fRange : 1.0f;
 	float fB = -fMeanBlackPt*fA;
 	float fMidPt = (fMeanWhitePt + fMeanBlackPt)*0.5f;
 	float fCorr = cBrightnessCorr*(fMidPt*(1.0f - fA) - fB);

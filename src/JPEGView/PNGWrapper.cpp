@@ -431,6 +431,14 @@ void* PngReader::ReadImage(int& width,
 		delete[] (unsigned char*)pixels; // hidden first frame is skipped; release it before reading the next
 		pixels = ReadNextFrame(&exif, &exif_size);
 	}
+	if (pixels == NULL) {
+		// P1-22: ReadFrameData() longjmp'd and DeleteCacheInternal(false)
+		// already destroyed info_ptr, so `exif` (owned by info_ptr) dangles.
+		// The copy below must not read it. The remaining frame-index
+		// mismatch after such a reset is documented in the report.
+		exif = NULL;
+		exif_size = 0;
+	}
 	
 	width = cache.width;
 	height = cache.height;

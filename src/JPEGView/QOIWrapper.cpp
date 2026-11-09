@@ -112,15 +112,22 @@ void* QoiReaderWriter::Compress(const void* source,
 	desc.height = height;
 	desc.channels = nchannels;
 	desc.colorspace = QOI_SRGB;
-	int input_stride = width * nchannels;
-	int padded_stride = Helpers::DoPadding(input_stride, 4);
-	int size = input_stride * height;
-	unsigned char* pPixelData = new(std::nothrow) unsigned char[input_stride * height];
+	// P1-4: size_t, not int. width*height*3 can exceed INT_MAX for a
+	// large image (the loader allows a 4 GB - 1 buffer on x64), which
+	// wrapped `size` negative and made the copy loop read out of bounds.
+	const size_t input_stride = (size_t)width * nchannels;
+	const int padded_stride = Helpers::DoPadding((int)input_stride, 4);
+	size_t size = 0;
+	if (!IsImageBufferSizeOk(input_stride, (size_t)height, &size)
+		|| !IsImageBufferSizeOk((size_t)padded_stride, (size_t)height)) {
+		return NULL; // the source image cannot be that large; report failure
+	}
+	unsigned char* pPixelData = new(std::nothrow) unsigned char[size];
 	unsigned char* pSourcePixels = (unsigned char*)source;
 	if (pPixelData != NULL) {
 		// Copy from BGR to RGB
-		for (int i = 0; i < size; i += nchannels) {
-			int j = i / input_stride * padded_stride + i % input_stride;
+		for (size_t i = 0; i < size; i += nchannels) {
+			const size_t j = i / input_stride * padded_stride + i % input_stride;
 			pPixelData[i  ] = pSourcePixels[j+2];
 			pPixelData[i+1] = pSourcePixels[j+1];
 			pPixelData[i+2] = pSourcePixels[j  ];

@@ -1369,6 +1369,10 @@ void CImageLoadThread::ProcessReadWEBPRequest(CRequest * request) {
 	} catch (...) {
 		delete request->Image;
 		request->Image = NULL;
+		// P1-20: every other format path flags an unhandled exception, so
+		// this failure was reported as an ordinary decode error and the file
+		// was memoized as permanently bad (R-1 excludes exception failures).
+		request->ExceptionError = true;
 	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
@@ -1682,6 +1686,13 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 		} else {
 			ProcessReadHEIFRequest(request);
 		}
+	}
+	// P1-21: the AVIF decoder threw, but the HEIF fallback may still have
+	// read the file. The flag describes the failed attempt only; leaving it
+	// set produced Image != NULL with ExceptionError == true, so a good
+	// image was reported (and memoized) as a crashed load.
+	if (request->Image != NULL) {
+		request->ExceptionError = false;
 	}
 	if (!bUseCachedDecoder) {
 		::CloseHandle(hFile);
@@ -3585,6 +3596,9 @@ void CImageLoadThread::ProcessReadWICRequest(CRequest* request) {
 		}
 	} catch (...) {
 		// fatal error in WIC
+		// P1-20: mark it like every other format path; without the flag the
+		// failure was memoized as a permanently bad file.
+		request->ExceptionError = true;
 	}
 }
 

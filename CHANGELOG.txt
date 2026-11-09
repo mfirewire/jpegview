@@ -62,6 +62,12 @@ Bugs fixed:
 - The parameter DB is now created on the UI thread before any worker starts, so two load threads can no longer construct it twice, leak one instance or open ParamDB.db concurrently
 - Directory watcher: a worker that does not stop within its wait window is no longer followed by deleting the lock and events it still uses; the watcher object is leaked instead, like the image load threads
 - TGA viewing: the RLE pixel counter is size_t now, so an image above 2 GB cannot overflow a signed int and write before the buffer
+- Colour correction: a degenerate histogram (mean white equal to mean black) no longer divides by zero and feeds NaN into the LUT; the brightness ramp falls back to identity
+- JPEG chroma subsampling: an unknown value reported by the decoder is normalized to 4:4:4 instead of indexing the MCU tables out of bounds (affected PSD thumbnails, RAW previews and the lossless-transform eligibility check)
+- Saving QOI: the stride and buffer size are size_t now, so an image above 2 GB cannot overflow the copy loop and read out of bounds
+- WebP and WIC loading: an unhandled exception is now flagged like every other format, so the file is not memoized as permanently bad
+- AVIF loading: when the AVIF decoder throws but the HEIF fallback reads the file, the exception flag is cleared instead of reporting a good image as a crashed load
+- APNG viewing: when a frame fails, the EXIF pointer into the destroyed libpng info struct is no longer copied (use-after-free read)
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

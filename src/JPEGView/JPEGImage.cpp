@@ -202,6 +202,15 @@ CJPEGImage::~CJPEGImage(void) {
 	m_pRawMetadata = NULL;
 }
 
+void CJPEGImage::SetJPEGChromoSampling(TJSAMP eSampling) {
+	// P1-3: TJSAMP_UNKNOWN is -1 and would index tjMCUWidth/tjMCUHeight out
+	// of bounds in CanUseLosslessJPEGTransformations and
+	// TrimRectToMCUBlockSize. TurboJpeg::GetSubsampling already normalizes
+	// this to 444 (no subsampling); do the same for every setter caller
+	// (PSD thumbnails, RAW previews, dcraw_mod), not just the JPEG path.
+	m_eJPEGChromoSampling = (eSampling == TJSAMP_UNKNOWN) ? TJSAMP_444 : eSampling;
+}
+
 bool CJPEGImage::CanUseLosslessJPEGTransformations() {
 	return m_eImageFormat == IF_JPEG && (m_nOrigWidth % tjMCUWidth[m_eJPEGChromoSampling]) == 0 &&
 		(m_nOrigHeight % tjMCUHeight[m_eJPEGChromoSampling]) == 0;

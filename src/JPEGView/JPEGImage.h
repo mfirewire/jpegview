@@ -173,7 +173,9 @@ public:
 
 	// Gets or sets the JPEG chromo sampling. See turbojpeg.h for the TJSAMP enumeration.
 	TJSAMP GetJPEGChromoSampling() { return m_eJPEGChromoSampling; }
-	void SetJPEGChromoSampling(TJSAMP eSampling) { m_eJPEGChromoSampling = eSampling; }
+	// P1-3: implemented in the .cpp so TJSAMP_UNKNOWN can be normalized;
+	// the header only forward-declares the enum.
+	void SetJPEGChromoSampling(TJSAMP eSampling);
 
 	// Gets if lossless JPEG transformations can be applied to this image.
 	// Checks if this is a JPEG image and if the dimension of this image is dividable by the JPEG block size used.
