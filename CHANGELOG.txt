@@ -90,6 +90,14 @@ Bugs fixed:
 - Navigation panel animation: the device context was handed to ReleaseDC and then deleted a second time by the CDC destructor on the same handle
 - Shutdown: the second image-processing parameter set is freed instead of leaking once per session
 - Shutdown: the retained printer dialog and print parameters are freed by a new CPrintImage destructor
+- Help window: the info column colour was read from a shadowing file-scope constant, so the on/off entries never used the intended colour; a key that does not fit the text buffer is skipped instead of crashing the layout
+- Case-insensitive substring search: an allocation failure no longer passes NULL to _tcslwr
+- Parameter DB error dialog: a failed FormatMessage no longer appends a NULL string to the message
+- Window placement: a failing GetMonitorInfo no longer returns an uninitialised monitor rectangle
+- BMP loading: a height of INT_MIN is rejected instead of reaching abs()/negation (undefined behaviour)
+- CMYK ICC profile: a truncated module path is detected by the returned length instead of a stale last-error value
+- File type registration: an empty extension segment no longer registers an empty name or reads past the list buffer
+- CI: the WICLoader import-library cleanup step no longer fails when a file is already absent, and the WICLoader project uses the same /EHa exception model as the main project
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

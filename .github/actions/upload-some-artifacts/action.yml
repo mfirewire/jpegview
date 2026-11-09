@@ -28,9 +28,9 @@ runs:
       if: inputs.build-config == 'Release'
       run: |
         cd src/JPEGView/bin
-        rm */*/WICLoader.exp
-        rm */*/WICLoader.lib
-        rm */*/WICLoader.pdb
+        rm -f */*/WICLoader.exp
+        rm -f */*/WICLoader.lib
+        rm -f */*/WICLoader.pdb
     - name: Upload No-Install Outputs Only
       # if not master branch, only upload the extract-and-run artifact
       if: github.ref_name != inputs.branch-match

@@ -70,13 +70,15 @@ CJPEGImage* CReaderBMP::ReadBmpImage(LPCTSTR strFileName, bool& bOutOfMemory, bo
 		fclose(fptr);
 		return NULL;
 	}
-	/* Not too big files */
-	if (infoheader.width > MAX_IMAGE_DIMENSION || infoheader.width <= 0 || abs(infoheader.height) > MAX_IMAGE_DIMENSION) {
+	/* Not too big files. abs(INT_MIN) is undefined and stays negative, so the
+	   height is widened before it is negated. */
+	const __int64 nAbsHeight = (infoheader.height < 0) ? -(__int64)infoheader.height : (__int64)infoheader.height;
+	if (infoheader.width > MAX_IMAGE_DIMENSION || infoheader.width <= 0 || nAbsHeight > MAX_IMAGE_DIMENSION) {
 		fclose(fptr);
 		return NULL;
 	}
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
-	if ((double)infoheader.width * abs(infoheader.height) > (double)CSettingsProvider::This().MaxImagePixels()) {
+	if ((double)infoheader.width * (double)nAbsHeight > (double)CSettingsProvider::This().MaxImagePixels()) {
 		fclose(fptr);
 		bSizeLimitExceeded = true;
 		return NULL;

@@ -1155,8 +1155,8 @@ CString ReplacePathByShortForm(LPCTSTR sPath) {
 // strstr() ignoring case
 LPTSTR stristr(LPCTSTR szStringToBeSearched, LPCTSTR szSubstringToSearchFor) {
 	LPCTSTR pPos = NULL;
-	LPCTSTR szCopy1 = NULL;
-	LPCTSTR szCopy2 = NULL;
+	LPTSTR szCopy1 = NULL;
+	LPTSTR szCopy2 = NULL;
 	 
 	// verify parameters
 	if ( szStringToBeSearched == NULL || szSubstringToSearchFor == NULL ) {
@@ -1168,8 +1168,8 @@ LPTSTR stristr(LPCTSTR szStringToBeSearched, LPCTSTR szSubstringToSearchFor) {
 		return (LPTSTR)szStringToBeSearched;
 	}
 	 
-	szCopy1 = _tcslwr(_tcsdup(szStringToBeSearched));
-	szCopy2 = _tcslwr(_tcsdup(szSubstringToSearchFor));
+	szCopy1 = _tcsdup(szStringToBeSearched);
+	szCopy2 = _tcsdup(szSubstringToSearchFor);
 	 
 	if ( szCopy1 == NULL || szCopy2 == NULL ) {
 		// another option is to raise an exception here
@@ -1177,6 +1177,9 @@ LPTSTR stristr(LPCTSTR szStringToBeSearched, LPCTSTR szSubstringToSearchFor) {
 		free((void*)szCopy2);
 		return NULL;
 	}
+	// Lower-case only after the NULL check: _tcslwr dereferences the block.
+	_tcslwr(szCopy1);
+	_tcslwr(szCopy2);
 	 
 	pPos = _tcsstr(szCopy1, szCopy2);
 	 

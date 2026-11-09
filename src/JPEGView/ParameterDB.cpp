@@ -67,7 +67,9 @@ static void HandleErrorAndCloseHandle(EFileError eError, LPCTSTR sParamDBName, H
 			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR) &lpMsgBuf, 0, NULL);
 		sError += _T("\n");
 		sError += CNLS::GetString(_T("Reason:")); sError += _T(" ");
-		sError += lpMsgBuf;
+		if (lpMsgBuf != NULL) {
+			sError += lpMsgBuf;
+		}
 		LocalFree(lpMsgBuf);
 	}
 

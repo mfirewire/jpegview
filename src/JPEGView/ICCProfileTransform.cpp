@@ -52,7 +52,9 @@ void* ICCProfileTransform::GetCMYKProfile() {
 		try {
 			CHAR path[MAX_PATH + 16];
 		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
-		if (length > 0 && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+		// GetModuleFileNameA returns nSize and sets ERROR_INSUFFICIENT_BUFFER
+		// on truncation; testing the length directly avoids a stale last error.
+		if (length > 0 && length < MAX_PATH) {
 			PathRemoveFileSpecA(path);
 			lstrcatA(path, "\\cmyk.icm");
 			CMYKProfile = cmsOpenProfileFromFile(path, "r");

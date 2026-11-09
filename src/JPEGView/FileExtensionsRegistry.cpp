@@ -580,12 +580,17 @@ bool CFileExtensionsRegistrationWindows8::RegisterJPEGView() {
 	LPCTSTR fileEnding = buffer;
 	for (int i = 0; i <= length; i++) {
 		if (buffer[i] == _T(';') || buffer[i] == 0) {
+			if (*fileEnding == 0) {
+				break; // empty segment (e.g. a trailing ';'): nothing to register
+			}
 			fileEnding++; // strip the *
 			buffer[i] = 0;
 			if (!WriteStringValue(_T("Software\\JPEGView\\Capabilities\\FileAssociations"), fileEnding, _T("JPEGViewImageFile"))) {
 				return false;
 			}
-			fileEnding = &(buffer[i + 1]); 
+			if (i < length) {
+				fileEnding = &(buffer[i + 1]);
+			}
 		}
 	}
 	fileEndings.ReleaseBuffer();

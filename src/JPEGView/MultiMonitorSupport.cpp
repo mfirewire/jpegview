@@ -82,17 +82,21 @@ CRect CMultiMonitorSupport::GetMonitorRect(int nIndex) {
 
 CRect CMultiMonitorSupport::GetMonitorRect(HWND hWnd) {
 	HMONITOR hMonitor = ::MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY);
-	MONITORINFO monitorInfo;
+	MONITORINFO monitorInfo = { 0 };
 	monitorInfo.cbSize = sizeof(MONITORINFO);
-	::GetMonitorInfo(hMonitor, &monitorInfo);
+	if (!::GetMonitorInfo(hMonitor, &monitorInfo)) {
+		return CRect(0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN));
+	}
 	return CRect(monitorInfo.rcMonitor);
 }
 
 CRect CMultiMonitorSupport::GetWorkingRect(HWND hWnd) {
 	HMONITOR hMonitor = ::MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY);
-	MONITORINFO monitorInfo;
+	MONITORINFO monitorInfo = { 0 };
 	monitorInfo.cbSize = sizeof(MONITORINFO);
-	::GetMonitorInfo(hMonitor, &monitorInfo);
+	if (!::GetMonitorInfo(hMonitor, &monitorInfo)) {
+		return GetMonitorRect(hWnd);
+	}
 	return CRect(monitorInfo.rcWork);
 }
 
