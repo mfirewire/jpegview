@@ -97,7 +97,7 @@ Bugs fixed:
 - CMYK ICC profile: a truncated module path is detected by the returned length instead of a stale last-error value
 - File type registration: an empty extension segment no longer registers an empty name or reads past the list buffer
 - CI: the WICLoader import-library cleanup step no longer fails when a file is already absent, and the WICLoader project uses the same /EHa exception model as the main project
-- JPEG 2000: CMYK files (colr enumCS 12) are now decoded and converted with the naive ink formula instead of being rejected and shown as an empty state
+- JPEG 2000: CMYK files (colr enumCS 12) are now decoded and converted through the bundled cmyk.icm profile (naive ink formula only when the profile is unavailable) instead of being rejected and shown as an empty state
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

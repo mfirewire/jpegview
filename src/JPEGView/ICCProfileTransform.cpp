@@ -100,6 +100,10 @@ void* ICCProfileTransform::CreateTransform(const void* profile, unsigned int siz
 			inFormat = TYPE_YMCK_8;
 			outFormat = TYPE_BGR_8;
 			break;
+		case FORMAT_CMYK:
+			inFormat = TYPE_CMYK_8;
+			outFormat = TYPE_BGR_8;
+			break;
 		case FORMAT_AKYMC:
 			inFormat = TYPE_AKYMC_8;
 			outFormat = TYPE_BGRA_8;

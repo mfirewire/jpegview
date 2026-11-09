@@ -12,6 +12,9 @@ public:
 		FORMAT_LabA,
 		FORMAT_YMCK,
 		FORMAT_AKYMC,
+		// C,M,Y,K byte order (lcms TYPE_CMYK_8). FORMAT_YMCK is Y,M,C,K;
+		// JPEG 2000 stores the planes in C,M,Y,K.
+		FORMAT_CMYK,
 	};
 
 	// Create a transform from given ICC Profile to standard sRGB color space.

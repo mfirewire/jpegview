@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "JP2Wrapper.h"
+#include "ICCProfileTransform.h"
 // OpenJPEG 2.5, vendored under libopenjpeg/ (official Windows binaries,
 // v2.5.4): include/openjpeg-2.5/openjpeg.h, openjp2.lib in lib (Win32) /
 // lib64 (x64), openjp2.dll delay-loaded via the vcxproj DelayLoadDLLs entry,
@@ -218,6 +219,21 @@ void* JP2Reader::ReadImage(int& width,
 		// (0 = no ink), so the naive ink formula applies directly. Unlike PSD,
 		// whose channel planes store the inverted value, these are not inverted.
 		bool isCMYK = (image->color_space == OPJ_CLRSPC_CMYK);
+		// Prefer the bundled cmyk.icm for the ink->RGB mapping (the same
+		// accuracy as the PSD path). The naive formula below is only the
+		// fallback when the profile, the transform or the buffer is missing.
+		void* cmykTransform = NULL;
+		unsigned char* pCmyk = NULL;
+		if (isCMYK) {
+			cmykTransform = ICCProfileTransform::CreateTransform(NULL, 0, ICCProfileTransform::FORMAT_CMYK);
+			if (cmykTransform != NULL) {
+				pCmyk = new(std::nothrow) unsigned char[(size_t)width * (size_t)height * 4];
+				if (pCmyk == NULL) {
+					ICCProfileTransform::DeleteTransform(cmykTransform);
+					cmykTransform = NULL;
+				}
+			}
+		}
 		// S-6: find the alpha component (OpenJPEG marks it) so it can be
 		// composited over white instead of being dropped. The per-pixel
 		// buffer holds at most 8 components; a file declaring more used
@@ -256,6 +272,12 @@ void* JP2Reader::ReadImage(int& width,
 					if (col >= (int)comp->w) col = (int)comp->w - 1;
 					if (row >= (int)comp->h) row = (int)comp->h - 1;
 					v[c] = JP2SampleTo8(comp->data[(size_t)row * comp->w + (size_t)col], comp->prec, comp->sgnd);
+				}
+				if (pCmyk != NULL) {
+					// ICC route: interleave C,M,Y,K and let the transform write BGR.
+					unsigned char* d = pCmyk + ((size_t)y * (size_t)width + (size_t)x) * 4;
+					d[0] = v[0]; d[1] = v[1]; d[2] = v[2]; d[3] = v[3];
+					continue;
 				}
 				size_t dstIdx = (size_t)y * padded_stride + (size_t)x * 3;
 				int r, g, b;
@@ -299,6 +321,24 @@ void* JP2Reader::ReadImage(int& width,
 				pDst[dstIdx + 1] = (unsigned char)g;
 				pDst[dstIdx + 2] = (unsigned char)r;
 			}
+		}
+		if (pCmyk != NULL) {
+			if (!ICCProfileTransform::DoTransform(cmykTransform, pCmyk, pPixelData,
+				(unsigned int)width, (unsigned int)height, (unsigned int)((size_t)width * 4))) {
+				// Transform failed: convert the interleaved planes directly.
+				for (int y = 0; y < height; y++) {
+					const unsigned char* s = pCmyk + (size_t)y * (size_t)width * 4;
+					unsigned char* d = (unsigned char*)pPixelData + (size_t)y * padded_stride;
+					for (int x = 0; x < width; x++, s += 4, d += 3) {
+						const int inkK = 255 - s[3];
+						d[0] = (unsigned char)((255 - s[2]) * inkK / 255);
+						d[1] = (unsigned char)((255 - s[1]) * inkK / 255);
+						d[2] = (unsigned char)((255 - s[0]) * inkK / 255);
+					}
+				}
+			}
+			delete[] pCmyk;
+			ICCProfileTransform::DeleteTransform(cmykTransform);
 		}
 	}
 
