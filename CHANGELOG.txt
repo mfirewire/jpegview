@@ -85,7 +85,6 @@ Bugs fixed:
 - CI: the EOL guard now fails on a project text file whose extension has no rule in .gitattributes (the old check could never fire because the catch-all makes such files report "unset"), and it knows .json/.svg/.bash/.km/.default
 - The shipped KeyMap.txt.default and symbols.km are now covered by the text policy (CRLF on disk, LF in the index), like the other delivered configuration files
 - README: the image size section describes the current default (no pixel cap, byte and dimension caps still apply) instead of the removed 256 MP default
-- PSD CMYK images no longer render black: the channel plane was inverted before it was handed to lcms, which reads 255 as full ink, so a white area (no ink) became full coverage; PSD already stores ink amounts, so neither the ICC path nor the no-profile path inverts the plane any more
 - Zoom navigator, EXIF panel and help window: a window DC obtained with GetDC was wrapped in a managing CDC whose destructor calls DeleteDC, so every repaint leaked one device context (the navigator leaked one per mouse move)
 - Navigation panel animation: the device context was handed to ReleaseDC and then deleted a second time by the CDC destructor on the same handle
 - Shutdown: the second image-processing parameter set is freed instead of leaking once per session
