@@ -450,20 +450,15 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 		if (nColorMode == MODE_CMYK) {
 			if (transform != NULL) {
-				uint32* pImage32 = (uint32*)pPixelData;
-
-				// S-L5: the nChannels == 5 cases below are dead branches,
-				// annotated rather than deleted. CMYK starts with up to 5
-				// channels, but the ICC block above forces nChannels = 4
-				// for CMYK (alpha is disabled there), so a 5-channel CMYK
-				// image never reaches this loop. The branches are kept so
-				// a future alpha-capable CMYK path can revive the layout
-				// deliberately instead of rediscovering it.
-				for (size_t i = 0; i < (size_t)nWidth * nHeight; i++) {
-					if (nChannels == 5)
-						pImage32 = (uint32*)((uint8*)pImage32 + 1);
-					*pImage32++ = ~(*pImage32);
-				}
+				// PSD stores ink amounts (0 = no ink) and lcms' TYPE_YMCK_8
+				// uses the same convention, so the plane must not be inverted
+				// here. The old "~" pass turned white (0,0,0,0) into full ink,
+				// so every CMYK PSD came out black - white included. (The JPEG
+				// CMYK path still needs its 255-v flip: libjpeg returns the
+				// Adobe-inverted values, PSD does not.)
+				// S-L5: the nChannels == 5 branch is dead - the ICC block above
+				// forces nChannels = 4 for CMYK - and is kept for a future
+				// alpha-capable CMYK path.
 
 				if (nChannels == 5) {
 					void* tempBuffer = new(std::nothrow) char[allocSize];
@@ -478,14 +473,11 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				}
 				nChannels -= 1;
 			} else if (nChannels == 4) {
-				// F-M23: no ICC transform available. Convert the inverted YMCK
-				// plane with the same naive ink formula as the JPEG CMYK fallback
-				// (ConvertYmckInkToRgbNaive in ImageLoadThread.cpp), instead of
-				// treating the K channel as alpha over a black background.
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (size_t i = 0; i < (size_t)nWidth * nHeight; i++) {
-					*pImage32++ = ~(*pImage32);
-				}
+				// F-M23: no ICC transform available (cmyk.icm is missing). Convert
+				// the ink plane with the same naive formula as the JPEG CMYK
+				// fallback (ConvertYmckInkToRgbNaive in ImageLoadThread.cpp)
+				// instead of treating K as alpha over black. The plane is not
+				// inverted first: p[] already holds ink amounts.
 				const size_t outStride = (size_t)Helpers::DoPadding((int)nWidth * 3, 4);
 				size_t outBytes = 0;
 				unsigned char* pRgb = NULL;
@@ -496,13 +488,11 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					for (size_t y = 0; y < (size_t)nHeight; y++) {
 						unsigned char* q = pRgb + y * outStride;
 						for (size_t x = 0; x < (size_t)nWidth; x++, p += 4) {
-							// F-M23 polarity: the loop above already inverted the plane, so p[] holds
-							// the lcms-style inverted CMYK (C'M'Y'K'). The naive ink formula therefore
-							// multiplies by K' directly; inverting again made white come out black.
-							const unsigned int lightK = p[3];
-							q[x*3+0] = (unsigned char)((unsigned int)p[0] * lightK / 255);
-							q[x*3+1] = (unsigned char)((unsigned int)p[1] * lightK / 255);
-							q[x*3+2] = (unsigned char)((unsigned int)p[2] * lightK / 255);
+							// No ink must stay white: subtract every channel from 255.
+							const unsigned int lightK = 255 - p[3];
+							q[x*3+0] = (unsigned char)((255 - p[0]) * lightK / 255);
+							q[x*3+1] = (unsigned char)((255 - p[1]) * lightK / 255);
+							q[x*3+2] = (unsigned char)((255 - p[2]) * lightK / 255);
 						}
 					}
 					delete[] (char*)pPixelData;
