@@ -310,6 +310,7 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 	m_pIFD1 = NULL;
 	m_pLastIFD1 = NULL;
 	m_bHasJPEGCompressedThumbnail = false;
+	m_bHasUncompressedThumbnail = false;
 	m_nJPEGThumbStreamLen = 0;
 	m_pLatitude = NULL;
 	m_pLongitude = NULL;
@@ -509,6 +510,9 @@ CEXIFReader::CEXIFReader(void* pApp1Block, EImageFormat eImageFormat)
 			}
 		} else {
 			// uncompressed
+			// P1-11: remember it, so SaveImage can drop it instead of leaving
+			// the pre-edit picture in the file.
+			m_bHasUncompressedThumbnail = true;
 			uint8* pTagThumbWidth = FindTag(m_pIFD1, pLastIFD1, 0x0001, bLittleEndian);
 			uint8* pTagThumbHeight = FindTag(m_pIFD1, pLastIFD1, 0x0101, bLittleEndian);
 			if (pTagThumbWidth != NULL && pTagThumbHeight != NULL) {

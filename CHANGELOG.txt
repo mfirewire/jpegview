@@ -68,6 +68,15 @@ Bugs fixed:
 - WebP and WIC loading: an unhandled exception is now flagged like every other format, so the file is not memoized as permanently bad
 - AVIF loading: when the AVIF decoder throws but the HEIF fallback reads the file, the exception flag is cleared instead of reporting a good image as a crashed load
 - APNG viewing: when a frame fails, the EXIF pointer into the destroyed libpng info struct is no longer copied (use-after-free read)
+- File type registration: the DACL rebuild compared the wrong expression and dropped every existing ACE, so registering a type replaced the key's permissions with a single allow entry
+- File list: CreateFile failures were tested against NULL instead of INVALID_HANDLE_VALUE, so an unreadable or missing file was reported as readable
+- Slide show lists: the encoding probe buffer is NUL-terminated before strstr/strchr, and a UTF-8 XML list without a '<' in the probe no longer computes a position from a NULL pointer
+- Slide show lists: ANSI lines now use the converted wide-character length, so multi-byte file names no longer drag uninitialised characters behind them
+- File type registration dialog: the 49-character JPEG row is no longer truncated and up to 16 extensions per row are registered
+- Clipboard: DIBs compressed with BI_RLE8/4, BI_JPEG/BI_PNG or BI_ALPHABITFIELDS are rejected before GDI+ parses them, since no pixel extent can be validated for those layouts
+- EXIF: a strip-based (uncompressed) thumbnail is dropped when saving instead of keeping the pre-edit picture in the file
+- Batch rename/copy: forward-slash absolute paths are recognised as paths, and a rollback removes the whole directory chain the run created (deepest first) instead of only the innermost one
+- Lossless crop: the command itself now rejects non-JPEG and destructively edited images, not only the menu entry
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

@@ -178,6 +178,12 @@ static bool ValidateClipboardDIB(const BITMAPINFO* pbmInfo, SIZE_T nMemSize, int
 	if (hdr.biCompression == BI_BITFIELDS && hdr.biSize == sizeof(BITMAPINFOHEADER)) {
 		nColors = 3;   // three colour masks stored after a plain v1 header
 	}
+	// P1-10: only the uncompressed layouts are validated below. BI_RLE8/4,
+	// BI_JPEG/BI_PNG and BI_ALPHABITFIELDS would be handed to GDI+ with no
+	// pixel-extent check at all, so reject everything else up front.
+	if (hdr.biCompression != BI_RGB && hdr.biCompression != BI_BITFIELDS) {
+		return false;
+	}
 	const SIZE_T nHeaderBytes = (SIZE_T)hdr.biSize + (SIZE_T)nColors * sizeof(RGBQUAD);
 	if (nHeaderBytes >= nMemSize) {
 		return false;

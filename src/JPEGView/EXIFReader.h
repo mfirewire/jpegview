@@ -89,6 +89,8 @@ public:
 	bool ImageOrientationPresent() { return m_nImageOrientation > 0; }
 	// Thumbnail image information
 	bool HasJPEGCompressedThumbnail() { return m_bHasJPEGCompressedThumbnail; }
+	// P1-11: an IFD1 thumbnail stored as strips (not JPEG-compressed).
+	bool HasUncompressedThumbnail() { return m_bHasUncompressedThumbnail; }
 	int GetJPEGThumbStreamLen() { return m_nJPEGThumbStreamLen; }
 	int GetThumbnailWidth() { return m_nThumbWidth; }
 	int GetThumbnailHeight() { return m_nThumbHeight; }
@@ -131,6 +133,7 @@ private:
 	int m_nISOSpeed;
 	int m_nImageOrientation;
 	bool m_bHasJPEGCompressedThumbnail;
+	bool m_bHasUncompressedThumbnail;
 	int m_nThumbWidth;
 	int m_nThumbHeight;
 	int m_nJPEGThumbStreamLen;

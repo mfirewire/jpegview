@@ -596,6 +596,13 @@ void CCropCtl::CropLossless() {
 	if (pCurrentImage == NULL) {
 		return;
 	}
+	// P1-16: the crop menu removes this command for non-JPEG or edited
+	// images, but it is also reachable without the menu. The transform runs
+	// on the file on disk with unrotated coordinates, so after an in-memory
+	// rotation it would crop the wrong area and discard the edit.
+	if (pCurrentImage->GetImageFormat() != IF_JPEG || pCurrentImage->IsDestructivelyProcessed()) {
+		return;
+	}
 	CRect cropRect = GetImageCropRect(true);
 	if (cropRect.IsRectEmpty()) {
 		return;

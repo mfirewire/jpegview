@@ -80,15 +80,19 @@ LRESULT CFileExtensionsDlg::OnOK(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*
 
 	int numItems = m_lvFileExtensions.GetItemCount();
 	for (int i = 0; i < numItems; i++) {
-		TCHAR buff[48];
-		m_lvFileExtensions.GetItemText(i, 0, (LPTSTR)&buff, 48);
+		// P1-9: the JPEG row alone is 49 characters (".jpg" through
+		// ".mpo"), so a 48-character buffer truncated it and the four-slot
+		// array silently registered only the first four extensions.
+		TCHAR buff[256];
+		m_lvFileExtensions.GetItemText(i, 0, (LPTSTR)&buff, 256);
+		buff[255] = 0;
 		
-		TCHAR* extensions[4];
+		TCHAR* extensions[16];
 		TCHAR* pStart = (TCHAR*)buff;
 		extensions[0] = pStart;
 		int nNumExtensions = 1;
 		int index = 0;
-		while (buff[index] != 0 && nNumExtensions < 4) {
+		while (buff[index] != 0 && nNumExtensions < 16) {
 			if (buff[index] == _T(';')) {
 				buff[index] = 0;
 				pStart = &(buff[index + 1]);

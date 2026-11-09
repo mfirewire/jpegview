@@ -437,7 +437,10 @@ static RegResult ResetPermissionsForRegistryKey(LPCTSTR subKeyRelativeToHKCU)
 					if (::GetAce(pACL, i, (LPVOID*)&pace))
 					{
 						// Build the new ACL but exclude the access denied ACEs
-						if (!pace->Header.AceType == ACCESS_DENIED_ACE_TYPE) {
+						// P1-5: '!AceType == X' parses as '(!AceType) == X', i.e.
+						// '0 == 4', which is always false - every ACE was dropped, so
+						// the rebuilt DACL kept only the allow ACE added above.
+						if (pace->Header.AceType != ACCESS_DENIED_ACE_TYPE) {
 							::AddAce(pDacl, ACL_REVISION, MAXDWORD, pace, ((PACE_HEADER)pace)->AceSize);
 						}
 					}

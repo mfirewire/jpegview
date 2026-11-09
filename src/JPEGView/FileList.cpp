@@ -635,7 +635,8 @@ void CFileList::ModificationTimeChanged() {
 	if (m_iter != m_fileList.end()) {
 		LPCTSTR sName = m_iter->GetName();
 		HANDLE hFile = ::CreateFile(sName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-		if (hFile != NULL) {
+		// P1-6: CreateFile returns INVALID_HANDLE_VALUE (-1), never NULL.
+		if (hFile != INVALID_HANDLE_VALUE) {
 			FILETIME lastModTime;
 			if (::GetFileTime(hFile, NULL, NULL, &lastModTime)) {
 				m_iter->SetModificationDate(lastModTime);
@@ -1022,7 +1023,8 @@ bool CFileList::CanOpenCurrentFileForReading() const
 	LPCTSTR sCurrentFile = Current();
 	if (sCurrentFile != NULL && sCurrentFile[0] != 0) {
 		HANDLE hFile = ::CreateFile(Current(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-		if (hFile != NULL) {
+		// P1-6: INVALID_HANDLE_VALUE, not NULL (see ModificationTimeChanged).
+		if (hFile != INVALID_HANDLE_VALUE) {
 			::CloseHandle(hFile);
 			return true;
 		}
@@ -1391,11 +1393,14 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 	}
 	// Try to detect if this is a UTF16 Unicode text file or a ANSI or UTF-8 coded file
 	const int NUMPROBE = 64;
-	uint8 buff[NUMPROBE];
+	// P1-7: one extra byte and a forced terminator. A 64-byte read left the
+	// buffer without a NUL, and both strstr() below could read past it.
+	uint8 buff[NUMPROBE + 1] = { 0 };
 	bool bUnicode;
 	bool bUTF8Marker = false;
 	int nSeekPos = 0;
 	int nRealProbe = (int)fread(buff, 1, NUMPROBE, fptr);
+	buff[(nRealProbe > 0) ? nRealProbe : 0] = 0; // P1-7: strstr/strchr below need a terminator
 	if (nRealProbe < 16) {
 		// file is too short for a good guess
 		bUnicode = false;
@@ -1428,7 +1433,9 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 		if ((fptr = _tfopen(sSlideShowFile,_T("r, ccs=UTF-8"))) == NULL) {
 			return false;
 		}
-		nSeekPos = bIsUTF8EncodedXML ? max(0, (int)(strchr((char*)buff, '<') - (char*)buff)) : 3;
+		// P1-7: strchr may return NULL; the pointer subtraction was UB then.
+		const char* pXMLStart = strchr((char*)buff, '<');
+		nSeekPos = (bIsUTF8EncodedXML && pXMLStart != NULL) ? max(0, (int)(pXMLStart - (char*)buff)) : 3;
 		bUnicode = true;
 	}
 
@@ -1456,7 +1463,7 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 				}
 				pRunning++; nNumChars++; nTotalChars++;
 			}
-			bValid = nNumChars < 512 && !bIsNull;
+			bValid = nNumChars < LINE_BUFF_SIZE && !bIsNull;
 			if (bValid) {
 				memcpy(lineBuff, wideFileBuff, (pRunning - wideFileBuff)*sizeof(TCHAR));
 			}
@@ -1473,8 +1480,14 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 			}
 			bValid = nNumChars < LINE_BUFF_SIZE && !bIsNull;
 			if (bValid) {
-				size_t nDummy;
-				mbstowcs_s(&nDummy, lineBuff, LINE_BUFF_SIZE, fileBuff, pRunning - fileBuff);
+				// P1-8: mbstowcs_s counts wide characters, but the byte length
+				// was passed as both the limit and (implicitly) the produced
+				// length. For multi-byte ANSI text the tail of lineBuff stayed
+				// uninitialised and pEnd below scanned that garbage up to the
+				// forced newline. Use the converted length.
+				size_t nConverted = 0;
+				mbstowcs_s(&nConverted, lineBuff, LINE_BUFF_SIZE, fileBuff, (size_t)(pRunning - fileBuff));
+				nNumChars = (nConverted < (size_t)LINE_BUFF_SIZE) ? (int)nConverted : LINE_BUFF_SIZE - 1;
 			}
 			fileBuff = pRunning+1;
 			nTotalChars++;

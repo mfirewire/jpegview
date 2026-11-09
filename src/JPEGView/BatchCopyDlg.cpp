@@ -32,6 +32,11 @@ static void FileTimeToLocalSystemTime(const FILETIME & fileTime, SYSTEMTIME & sy
 
 // Creates an absolute path from a relative path, relative to given directory
 static CString MakeAbsolutePath(LPCTSTR strFileName, LPCTSTR strDirectory) {
+	// P1-12: '/' is a valid Windows separator, but the checks below only
+	// look for '\', so "D:/Photos/x.jpg" was treated as a relative name.
+	CString sNormalized(strFileName);
+	sNormalized.Replace(_T('/'), _T('\\'));
+	strFileName = sNormalized;
 	// Check if path already absolute
 	if (_tcsstr(strFileName, _T(":\\")) != NULL || _tcsstr(strFileName, _T("\\\\")) == strFileName) {
 		return CString(strFileName);
@@ -290,11 +295,22 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 				if (sSlash != NULL) {
 					CString strNewPath(op.sTo, (int)(sSlash - (LPCTSTR)op.sTo));
 					if (::GetFileAttributes(strNewPath) == INVALID_FILE_ATTRIBUTES) {
+						// P1-13: remember the outermost missing ancestor, not only the
+						// immediate parent. SHCreateDirectoryEx creates the whole chain,
+						// and the rollback has to remove all of it.
+						CString strTopmost = strNewPath;
+						for (;;) {
+							int nSlashPos = strTopmost.ReverseFind(_T('\\'));
+							if (nSlashPos <= 0) break;
+							CString strParent = strTopmost.Left(nSlashPos);
+							if (::GetFileAttributes(strParent) != INVALID_FILE_ATTRIBUTES) break;
+							strTopmost = strParent;
+						}
 						int nErrorCode = ::SHCreateDirectoryEx(NULL, strNewPath, NULL);
 						bSuccess = (nErrorCode == ERROR_SUCCESS);
 						if (bSuccess) {
 							nDirsCreated++;
-							op.sCreatedDir = strNewPath;
+							op.sCreatedDir = strTopmost;
 						} else {
 							lastError = nErrorCode;
 						}
@@ -347,7 +363,25 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 				::MoveFileEx(done[i].sTo, done[i].sFrom, 0);
 			}
 			if (!done[i].sCreatedDir.IsEmpty()) {
-				::RemoveDirectory(done[i].sCreatedDir);
+				// P1-13: remove the chain this run created, deepest first, and
+				// stop at the outermost directory. Failures (a directory that is
+				// not empty again) are logged instead of being ignored silently.
+				int nSlash = done[i].sTo.ReverseFind(_T('\\'));
+				CString strDir = (nSlash > 0) ? done[i].sTo.Left(nSlash) : CString();
+				while (!strDir.IsEmpty()) {
+					// Never walk above the chain recorded at creation time.
+					if (strDir.GetLength() < done[i].sCreatedDir.GetLength()) break;
+					if (!::RemoveDirectory(strDir)) {
+						CString sLog;
+						sLog.Format(_T("JPEGView: batch rollback: could not remove \"%s\" (error %u)\n"),
+							(LPCTSTR)strDir, (unsigned int)::GetLastError());
+						::OutputDebugString(sLog);
+					}
+					if (strDir.CompareNoCase(done[i].sCreatedDir) == 0) break;
+					nSlash = strDir.ReverseFind(_T('\\'));
+					if (nSlash <= 0) break;
+					strDir = strDir.Left(nSlash);
+				}
 			}
 		}
 		m_fileList.Reload();
@@ -446,6 +480,8 @@ CString CBatchCopyDlg::GetPatternText() {
 
 bool CBatchCopyDlg::IsCopyNeeded(LPCTSTR strName, LPCTSTR strDirectory) {
 	CString strNewName(strName);
+	// P1-12: normalize before deciding rename vs copy; see MakeAbsolutePath.
+	strNewName.Replace(_T('/'), _T('\\'));
 	strNewName.Replace(_T("%pictures%"), m_strMyPictures);
 	if (_tcschr(strNewName, _T('\\')) == NULL) {
 		// no path given, file is in same directory thus rename

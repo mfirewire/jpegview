@@ -567,6 +567,11 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 			if (!bThumbRebuilt) {
 				exifReader.DeleteThumbnail();
 			}
+		} else if (exifReader.HasUncompressedThumbnail()) {
+			// P1-11: a strip-based thumbnail cannot be rebuilt here, but it
+			// must not survive either - Explorer would keep showing the old
+			// picture. DeleteThumbnail() unlinks IFD1, which drops it.
+			exifReader.DeleteThumbnail();
 		}
 
 		int nJFIFLength = GetJFIFBlockLength(pTargetStream);
