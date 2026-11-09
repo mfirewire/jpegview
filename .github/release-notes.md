@@ -1,4 +1,4 @@
-# JPEGView v1.3.46-20261109.1
+# JPEGView v1.3.46-20261109
 
 基于 `fix/review-1300182-aa26097`（**不合 master**，先发 release），是 `v1.3.46-20261108.1` 之后的稳定版，自 `19897de` 起共 21 笔提交。版本号沿用 1.3.46，About 页显示 `1.3.46-20261109.1`。
 
@@ -12,8 +12,8 @@
 
 | 构建 | 说明 |
 | --- | --- |
-| **JPEGView-x64-v1.3.46-20261109.1.zip** | x64 Release：`JPEGView.exe`、依赖 DLL、Config 文件 |
-| **JPEGView-win32-v1.3.46-20261109.1.zip** | Win32 Release，内容同上 |
+| **JPEGView-x64-v1.3.46-20261109.zip** | x64 Release：`JPEGView.exe`、依赖 DLL、Config 文件 |
+| **JPEGView-win32-v1.3.46-20261109.zip** | Win32 Release，内容同上 |
 
 解压即用，无需安装。
 
