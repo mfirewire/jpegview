@@ -496,10 +496,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					for (size_t y = 0; y < (size_t)nHeight; y++) {
 						unsigned char* q = pRgb + y * outStride;
 						for (size_t x = 0; x < (size_t)nWidth; x++, p += 4) {
-							const unsigned int inkK = 255 - p[3];
-							q[x*3+0] = (unsigned char)((255 - p[0]) * inkK / 255); // B from Y
-							q[x*3+1] = (unsigned char)((255 - p[1]) * inkK / 255); // G from M
-							q[x*3+2] = (unsigned char)((255 - p[2]) * inkK / 255); // R from C
+							// F-M23 polarity: the loop above already inverted the plane, so p[] holds
+							// the lcms-style inverted CMYK (C'M'Y'K'). The naive ink formula therefore
+							// multiplies by K' directly; inverting again made white come out black.
+							const unsigned int lightK = p[3];
+							q[x*3+0] = (unsigned char)((unsigned int)p[0] * lightK / 255);
+							q[x*3+1] = (unsigned char)((unsigned int)p[1] * lightK / 255);
+							q[x*3+2] = (unsigned char)((unsigned int)p[2] * lightK / 255);
 						}
 					}
 					delete[] (char*)pPixelData;
