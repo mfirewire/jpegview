@@ -477,7 +477,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, nWidth, nHeight, nRowSize);
 				}
 				nChannels -= 1;
-			} else {
+			} else if (nChannels == 4) {
 				// F-M23: no ICC transform available. Convert the inverted YMCK
 				// plane with the same naive ink formula as the JPEG CMYK fallback
 				// (ConvertYmckInkToRgbNaive in ImageLoadThread.cpp), instead of
@@ -510,6 +510,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				} else {
 					backgroundColor = 0; // keep the old fallback on allocation failure
 				}
+			} else {
+				// P0-1 guard: a malformed CMYK PSD can carry 1 or 3 channels
+				// (the header only caps the count at 56 and ThrowIf(!nChannels)
+				// rejects zero). There is no 4-byte YMCK plane to invert, so
+				// keep the historical K-as-alpha fallback instead of reading
+				// past the buffer allocated for nChannels bytes per pixel.
+				backgroundColor = 0;
 			}
 		} else {
 			ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, nWidth, nHeight, nRowSize);

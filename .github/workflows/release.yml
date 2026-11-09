@@ -161,6 +161,27 @@ jobs:
     - name: Package x64
       shell: pwsh
       run: Compress-Archive -Path release-artifacts/x64/* -DestinationPath release-artifacts/JPEGView-x64-${{ github.ref_name }}.zip
+    # The body is written by hand before tagging (see .github/release-notes.md).
+    # stamp-version puts github.ref_name into the exe and the zip names, but
+    # body_path is static: without this check the previous version's notes
+    # would be published with the new tag and the wrong download file names.
+    - name: Validate release notes match the tag
+      shell: pwsh
+      env:
+        TAG_NAME: ${{ github.ref_name }}
+      run: |
+        $notes = Get-Content .github/release-notes.md -Raw
+        $first = ($notes -split "`n")[0]
+        if (-not $first.Contains($env:TAG_NAME)) {
+          throw "release-notes.md headline does not name tag $($env:TAG_NAME): $first"
+        }
+        foreach ($arch in @('win32','x64')) {
+          $asset = "JPEGView-$arch-$($env:TAG_NAME).zip"
+          if (-not $notes.Contains($asset)) {
+            throw "release-notes.md download table is missing $asset"
+          }
+        }
+        Write-Host "release notes validated for $($env:TAG_NAME)"
     - name: Create Release and upload assets
       uses: softprops/action-gh-release@v3
       with:

@@ -144,6 +144,12 @@ bool ICCProfileTransform::DoTransform(void* transform, const void* inputBuffer, 
 	// now pass it explicitly; 0 keeps the historical tight/4-aligned value.
 	const size_t lineOut = (size_t)width * bppOut;
 	size_t bytesPerLineOut = (strideOut != 0) ? (size_t)strideOut : ((lineOut + 3) & ~(size_t)3);
+	// P1-1: an explicitly supplied output stride must hold one whole output
+	// row. A smaller value makes cmsDoTransformLineStride write consecutive
+	// rows over each other; the plane-size checks below cannot detect that,
+	// because the total byte count can still be large enough.
+	if (bytesPerLineOut < lineOut)
+		return false;
 	if (stride == 0)
 		stride = (unsigned int)((size_t)width * bppIn);
 	// F-M24: lcms2 takes 32-bit plane sizes. Do the arithmetic in 64 bits

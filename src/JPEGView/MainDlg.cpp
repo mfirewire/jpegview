@@ -1312,7 +1312,22 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 
 	bool bCanDoLosslessJPEGTransform = (m_pCurrentImage != NULL) && m_pCurrentImage->GetImageFormat() == IF_JPEG && !m_pCurrentImage->IsDestructivelyProcessed();
 
-	if (!bCanDoLosslessJPEGTransform) ::EnableMenuItem(hMenuTrackPopup, SUBMENU_POS_TRANSFORM_LOSSLESS, MF_BYPOSITION | MF_GRAYED);
+	if (!bCanDoLosslessJPEGTransform) {
+		// P0-7: disable only the six lossless items. Greying out the whole
+		// popup also disabled IDM_CONVERT_JXL, which encodes the ORIGINAL
+		// file on disk and is unrelated to the in-memory edit; its key-map
+		// shortcut stayed live, so menu and command disagreed.
+		HMENU hLossless = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_TRANSFORM_LOSSLESS);
+		if (hLossless != NULL) {
+			::EnableMenuItem(hLossless, IDM_ROTATE_90_LOSSLESS, MF_BYCOMMAND | MF_GRAYED);
+			::EnableMenuItem(hLossless, IDM_ROTATE_270_LOSSLESS, MF_BYCOMMAND | MF_GRAYED);
+			::EnableMenuItem(hLossless, IDM_ROTATE_180_LOSSLESS, MF_BYCOMMAND | MF_GRAYED);
+			::EnableMenuItem(hLossless, IDM_MIRROR_H_LOSSLESS, MF_BYCOMMAND | MF_GRAYED);
+			::EnableMenuItem(hLossless, IDM_MIRROR_V_LOSSLESS, MF_BYCOMMAND | MF_GRAYED);
+		} else {
+			::EnableMenuItem(hMenuTrackPopup, SUBMENU_POS_TRANSFORM_LOSSLESS, MF_BYPOSITION | MF_GRAYED);
+		}
+	}
 
 	if (m_pCurrentImage == NULL) {
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE, MF_BYCOMMAND | MF_GRAYED);

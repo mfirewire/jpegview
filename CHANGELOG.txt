@@ -37,6 +37,10 @@ Bugs fixed:
 - ICC colour transforms now accept an explicit output row stride and reject plane sizes that would overflow the 32-bit lcms2 API (defensive; decode paths are already bounded by the image byte cap)
 - PSD CMYK files without a usable ICC profile are now converted with the same naive CMYK-to-RGB formula as JPEG, instead of blending the K channel as alpha over black
 - Histogram LUT calculation guards the midpoint denominators against zero on extremely tinted images
+- PSD CMYK files with a malformed channel count no longer enter the 4-byte YMCK conversion and read past the allocated buffer
+- Lossless JPEG transform menu: only the six lossless items are greyed out now, so Convert to JXL stays available after an in-memory rotation
+- ICC colour transforms reject an explicitly supplied output row stride that is smaller than one output row, instead of overlapping rows
+- Release workflow validates that the release notes headline and both download asset names match the tag before publishing
 - JXL loading: the exception handler no longer leaks the file buffer or the EXIF chunk, and no longer risks freeing a buffer owned by the JXL reader cache (double-free)
 - SVG viewing: rapid paging through SVG files no longer crashes (access violation in libthorvg-1.dll); the whole ThorVG session is now serialised across load threads instead of only init/term
 - Finding a file that left the folder list (e.g. deleted externally) no longer silently shows the first image; the missing-file state is shown instead (or the empty state when the folder really has no images) (F-H02)

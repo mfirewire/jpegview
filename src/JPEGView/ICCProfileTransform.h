@@ -29,7 +29,7 @@ public:
 		unsigned int width, // width of image in pixels
 		unsigned int height, // height of image in pixels
 		unsigned int stride=0, // number of bytes per row of pixels in the input, only needed if not equal to width * 4
-		unsigned int strideOut=0 // S-L2: bytes per output row. 0 derives it from the transform's output format (the historical behaviour); callers with padded output rows must pass it explicitly
+		unsigned int strideOut=0 // S-L2: bytes per output row. 0 derives it from the transform's output format (the historical behaviour); a non-zero value must be >= width * output bytes-per-pixel or DoTransform returns false
 	);
 
 	// Free memory associated with the given transform
