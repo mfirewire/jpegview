@@ -18,6 +18,9 @@ public:
 		m_pPrintParameters = NULL;
 	}
 
+	// Frees the retained printer dialog and print parameters.
+	~CPrintImage();
+
 	// Shows the print dialog and prints the specified image if the user confirms to print.
 	// Returns if the image was successfully printed.
 	bool Print(HWND hWnd, CJPEGImage * pImage, const CImageProcessingParams& procParams,

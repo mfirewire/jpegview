@@ -321,6 +321,7 @@ CMainDlg::~CMainDlg() {
 	delete m_pFileList;
 	if (m_pJPEGProvider != NULL) delete m_pJPEGProvider;
 	delete m_pImageProcParams;
+	delete m_pImageProcParams2;
 	delete m_pImageProcParamsKept;
 	delete m_pZoomNavigatorCtl;
 	delete m_pCropCtl;

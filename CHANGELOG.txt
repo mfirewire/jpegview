@@ -86,6 +86,10 @@ Bugs fixed:
 - The shipped KeyMap.txt.default and symbols.km are now covered by the text policy (CRLF on disk, LF in the index), like the other delivered configuration files
 - README: the image size section describes the current default (no pixel cap, byte and dimension caps still apply) instead of the removed 256 MP default
 - PSD CMYK without an ICC profile: the naive ink conversion inverted the YMCK plane twice, so every such image rendered black (pure white included); the formula now uses the inverted plane directly
+- Zoom navigator, EXIF panel and help window: a window DC obtained with GetDC was wrapped in a managing CDC whose destructor calls DeleteDC, so every repaint leaked one device context (the navigator leaked one per mouse move)
+- Navigation panel animation: the device context was handed to ReleaseDC and then deleted a second time by the CDC destructor on the same handle
+- Shutdown: the second image-processing parameter set is freed instead of leaking once per session
+- Shutdown: the retained printer dialog and print parameters are freed by a new CPrintImage destructor
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

@@ -12,6 +12,11 @@ static double Mm10ToInch(double value) {
 	return value * 0.01 / 2.54;
 }
 
+CPrintImage::~CPrintImage() {
+	delete m_pPrinterSelectionDlg;
+	delete m_pPrintParameters;
+}
+
 void CPrintImage::ClearOffsets() {
 	if (m_pPrintParameters != NULL) {
 		m_pPrintParameters->OffsetX = m_pPrintParameters->OffsetY = 0;

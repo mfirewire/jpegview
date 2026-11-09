@@ -236,7 +236,7 @@ void CNavigationPanelCtl::DoNavPanelAnimation() {
 
 	if (bDoAnimation) {
 		CRect rectNavPanel = PanelRect();
-		CDC screenDC = m_pMainDlg->GetDC();
+		CClientDC screenDC(m_pMainDlg->GetHWND());
 		void* pDIBData = pCurrentImage->DIBPixelsLastProcessed(false);
 		if (pDIBData != NULL) {
 			if (m_pMemDCAnimation == NULL) {
@@ -262,10 +262,9 @@ void CNavigationPanelCtl::DoNavPanelAnimation() {
 								  *m_pNavPanel, CPoint(-rectNavPanel.left, -rectNavPanel.top), m_fCurrentBlendingFactorNavPanel);
 			screenDC.BitBlt(rectNavPanel.left, rectNavPanel.top, rectNavPanel.Width(), rectNavPanel.Height(), *m_pMemDCAnimation, 0, 0, SRCCOPY);
 		}
-		// GetDC above paired with ReleaseDC here, outside the pDIBData check so
-		// every path releases. Without it every animation frame leaked a device
-		// context until GDI ran out of handles.
-		m_pMainDlg->ReleaseDC(screenDC);
+		// CClientDC releases the DC in its destructor, so every path is covered.
+		// The explicit ReleaseDC that used to sit here ran first, and the CDC
+		// destructor then called DeleteDC on the same, already released handle.
 	}
 	if (bTerminate) {
 		EndNavPanelAnimation();
