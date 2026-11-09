@@ -629,6 +629,9 @@
     <ClInclude Include="PSDWrapper.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
+    <ClInclude Include="YmckDecode.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="RAWWrapper.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>

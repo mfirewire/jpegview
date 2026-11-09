@@ -66,7 +66,7 @@ void BlendOver(unsigned char** rows_dst, unsigned char** rows_src, unsigned int 
 				if (dp[3] != 0)
 				{
 					u = sp[3] * 255;
-					v = (255 - sp[3]) * dp[3];
+					v = (255 - sp[3]) * dp[3]; // ymck-ok: alpha composite, not a colour plane
 					al = u + v;
 					dp[0] = (sp[0] * u + dp[0] * v) / al;
 					dp[1] = (sp[1] * u + dp[1] * v) / al;

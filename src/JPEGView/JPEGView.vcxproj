@@ -456,6 +456,7 @@
     <ClInclude Include="ProcessingThreadPool.h" />
     <ClInclude Include="ProcessParams.h" />
     <ClInclude Include="PSDWrapper.h" />
+    <ClInclude Include="YmckDecode.h" />
     <ClInclude Include="QOIWrapper.h" />
     <ClInclude Include="PPMWrapper.h" />
     <ClInclude Include="HDRWrapper.h" />

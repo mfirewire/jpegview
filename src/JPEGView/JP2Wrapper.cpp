@@ -2,6 +2,7 @@
 
 #include "JP2Wrapper.h"
 #include "ICCProfileTransform.h"
+#include "YmckDecode.h"
 // OpenJPEG 2.5, vendored under libopenjpeg/ (official Windows binaries,
 // v2.5.4): include/openjpeg-2.5/openjpeg.h, openjp2.lib in lib (Win32) /
 // lib64 (x64), openjp2.dll delay-loaded via the vcxproj DelayLoadDLLs entry,
@@ -285,10 +286,10 @@ void* JP2Reader::ReadImage(int& width,
 					// All three channels from the gray component.
 					r = g = b = v[0];
 				} else if (isCMYK) {
-					const int inkK = 255 - v[3];
-					r = (255 - v[0]) * inkK / 255; // R from C
-					g = (255 - v[1]) * inkK / 255; // G from M
-					b = (255 - v[2]) * inkK / 255; // B from Y
+					const YmckDecode::Rgb rgb = YmckDecode::InkToRgb(v[0], v[1], v[2], v[3]);
+					r = rgb.r; // R from C
+					g = rgb.g; // G from M
+					b = rgb.b; // B from Y
 				} else if (isYCbCr) {
 					// BT.601 YCbCr -> RGB (Cb/Cr centred on 128). EYCC uses
 					// the same coefficients here; that is an approximation,
@@ -330,10 +331,10 @@ void* JP2Reader::ReadImage(int& width,
 					const unsigned char* s = pCmyk + (size_t)y * (size_t)width * 4;
 					unsigned char* d = (unsigned char*)pPixelData + (size_t)y * padded_stride;
 					for (int x = 0; x < width; x++, s += 4, d += 3) {
-						const int inkK = 255 - s[3];
-						d[0] = (unsigned char)((255 - s[2]) * inkK / 255);
-						d[1] = (unsigned char)((255 - s[1]) * inkK / 255);
-						d[2] = (unsigned char)((255 - s[0]) * inkK / 255);
+						const YmckDecode::Rgb rgb = YmckDecode::InkToRgb(s[0], s[1], s[2], s[3]);
+						d[0] = rgb.b;
+						d[1] = rgb.g;
+						d[2] = rgb.r;
 					}
 				}
 			}

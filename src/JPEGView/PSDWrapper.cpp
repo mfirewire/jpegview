@@ -49,6 +49,7 @@
 #include "TJPEGWrapper.h"
 #include "ICCProfileTransform.h"
 #include "SettingsProvider.h"
+#include "YmckDecode.h"
 
 
 #define PSD_HEADER_SIZE 26
@@ -449,21 +450,23 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		COLORREF backgroundColor = CSettingsProvider::This().ColorTransparency();
 
 		if (nColorMode == MODE_CMYK) {
-			if (transform != NULL) {
-				uint32* pImage32 = (uint32*)pPixelData;
+			// Plane polarity lives in YmckDecode.h: PSD stores 255 = no ink and
+			// lcms' TYPE_YMCK_8 wants ink amounts, so the plane is inverted
+			// exactly once, here, and both paths below work in ink space.
+			// Never invert a second time (that is ec8032f) and never drop this
+			// call (that is 9746da5); .github/scripts/check_ymck_polarity.py
+			// enforces both.
+			if (nChannels >= 4)
+				YmckDecode::InvertPlaneInPlace(pPixelData, (size_t)nWidth * nHeight, nChannels == 5 ? 5 : 4);
 
+			if (transform != NULL) {
 				// S-L5: the nChannels == 5 cases below are dead branches,
 				// annotated rather than deleted. CMYK starts with up to 5
 				// channels, but the ICC block above forces nChannels = 4
 				// for CMYK (alpha is disabled there), so a 5-channel CMYK
-				// image never reaches this loop. The branches are kept so
+				// image never reaches the branch below. They are kept so
 				// a future alpha-capable CMYK path can revive the layout
 				// deliberately instead of rediscovering it.
-				for (size_t i = 0; i < (size_t)nWidth * nHeight; i++) {
-					if (nChannels == 5)
-						pImage32 = (uint32*)((uint8*)pImage32 + 1);
-					*pImage32++ = ~(*pImage32);
-				}
 
 				if (nChannels == 5) {
 					void* tempBuffer = new(std::nothrow) char[allocSize];
@@ -478,14 +481,10 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				}
 				nChannels -= 1;
 			} else if (nChannels == 4) {
-				// F-M23: no ICC transform available. Convert the inverted YMCK
-				// plane with the same naive ink formula as the JPEG CMYK fallback
+				// F-M23: no ICC transform available. Convert the YMCK plane with
+				// the same naive ink formula as the JPEG CMYK fallback
 				// (ConvertYmckInkToRgbNaive in ImageLoadThread.cpp), instead of
 				// treating the K channel as alpha over a black background.
-				uint32* pImage32 = (uint32*)pPixelData;
-				for (size_t i = 0; i < (size_t)nWidth * nHeight; i++) {
-					*pImage32++ = ~(*pImage32);
-				}
 				const size_t outStride = (size_t)Helpers::DoPadding((int)nWidth * 3, 4);
 				size_t outBytes = 0;
 				unsigned char* pRgb = NULL;
@@ -496,10 +495,10 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					for (size_t y = 0; y < (size_t)nHeight; y++) {
 						unsigned char* q = pRgb + y * outStride;
 						for (size_t x = 0; x < (size_t)nWidth; x++, p += 4) {
-							const unsigned int inkK = 255 - p[3];
-							q[x*3+0] = (unsigned char)((255 - p[0]) * inkK / 255); // B from Y
-							q[x*3+1] = (unsigned char)((255 - p[1]) * inkK / 255); // G from M
-							q[x*3+2] = (unsigned char)((255 - p[2]) * inkK / 255); // R from C
+							const YmckDecode::Rgb rgb = YmckDecode::YmckToRgb(p[0], p[1], p[2], p[3]);
+							q[x*3+0] = rgb.b; // B from Y
+							q[x*3+1] = rgb.g; // G from M
+							q[x*3+2] = rgb.r; // R from C
 						}
 					}
 					delete[] (char*)pPixelData;

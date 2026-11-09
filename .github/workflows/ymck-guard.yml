@@ -1,0 +1,53 @@
+name: YMCK polarity guard
+
+# Three consecutive CMYK "fixes" (F-M23, ec8032f, 9746da5) each re-derived the
+# plane polarity from the previous patch instead of from a fact, and the last
+# one turned every real Photoshop file black. The polarity cannot be settled by
+# reading the code, so it is pinned in src/JPEGView/YmckDecode.h and guarded
+# from two directions:
+#
+#   * endpoint assertions - they encode what the picture must look like
+#     (no ink = white), not what the code happens to compute;
+#   * a static gate - the inversion may only happen in that one header.
+#
+# Runs on Linux so it proves the assertions need no Windows toolchain.
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    name: Endpoint assertions and polarity gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Static polarity gate
+        run: python3 .github/scripts/check_ymck_polarity.py
+
+      - name: Endpoint assertions
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/ymck_decode_test.cpp -o /tmp/ymck_test
+          /tmp/ymck_test
+
+      # A guard that cannot fail is decoration. Build the same test with the
+      # polarity flipped; the compile itself must stop inside YmckDecode.h.
+      - name: Prove the assertions can fail
+        run: |
+          set +e
+          g++ -std=c++17 -DYMCK_PLANE_IS_INVERTED=0 -I src/JPEGView tests/ymck_decode_test.cpp -o /tmp/ymck_mutant 2>/tmp/mutant.log
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error::flipping the plane polarity still compiles - the endpoint assertions guard nothing"
+            exit 1
+          fi
+          grep -q "static assertion failed: A1" /tmp/mutant.log || {
+            echo "::error::the mutant was rejected, but not by assertion A1 - check the test harness"
+            sed -n '1,20p' /tmp/mutant.log
+            exit 1
+          }
+          echo "mutant rejected by A1 as expected"

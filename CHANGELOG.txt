@@ -100,6 +100,7 @@ Bugs fixed:
 - JPEG 2000: CMYK files (colr enumCS 12) are now decoded and converted through the bundled cmyk.icm profile (naive ink formula only when the profile is unavailable) instead of being rejected and shown as an empty state
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
+- CMYK plane polarity now lives in one header (YmckDecode.h) with endpoint assertions and a CI gate, so the PSD/JP2/JPEG ink conversion cannot be inverted or inverted twice again; tests/ymck_decode_test.cpp runs on any platform, and JPEGVIEW_DISABLE_CMYK_ICC=1 makes the no-profile fallback reachable for testing
 
 [1.3.46-20261107] 2026-11-07
 New features:
@@ -207,9 +208,9 @@ Localization updates:
 - New language: "tr" Turkish, thanks Kaya Zeren
 - New language: "bg" Bulgarian, thanks Ivan Georgiev
 - New translation: "sr" Serbian, thanks Ljuba Cirovic
-- New translation: "hu" Hungarian, thanks József Ujvári
+- New translation: "hu" Hungarian, thanks Jï¿½zsef Ujvï¿½ri
 - New translation: "fi" Finnish, thanks Kari Eveli
-- New translation: "sk" Slovak, thanks Marián Hikaník
+- New translation: "sk" Slovak, thanks Mariï¿½n Hikanï¿½k
 - New translation: "ta" Tamil, thanks Nirmal G.
 - Updated Japanese translation, thanks maboroshin (GH https://github.com/maboroshin)
 - Updated Korean translation, thanks VenusGirl (GH https://github.com/VenusGirl)
@@ -736,7 +737,7 @@ Bugs fixed:
 - Lossless rotate and crop now works in folders containing Unicode characters in the path.
   Note that the file title must not contain Unicode characters due to the fact that jpegtrans.exe does not support this.
 New features:
-- Portuguese (Portugal) translation, thanks to Sérgio Marques
+- Portuguese (Portugal) translation, thanks to Sï¿½rgio Marques
 - Support for viewing embedded JPEG images in camera RAW files using code from the dcraw project (v8.86).
 - Support for loading images using Windows Image Codecs (WIC). By default WIC is used to load JPEG XR files (also called
   High definition photo). When using Windows Vista or Windows 7, the Windows Camera Codec pack can be installed to get
@@ -829,7 +830,7 @@ New features:
 Bugs fixed:
 - Fixed crash on startup when ShowFullScreen=true in INI file
 New features:
-- Swedish translation (thanks to Åke)
+- Swedish translation (thanks to ï¿½ke)
 
 [1.0.22] 2011-01-14
 Bugs fixed:

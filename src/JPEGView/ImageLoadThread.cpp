@@ -15,6 +15,7 @@
 #include "TJPEGWrapper.h"
 #include "libjpeg-turbo\include\turbojpeg.h"
 #include "ICCProfileTransform.h"
+#include "YmckDecode.h"
 #include "PNGWrapper.h"
 #ifndef WINXP
 #include "JXLWrapper.h"
@@ -960,10 +961,10 @@ static void* ConvertCmykToRgb(void* pCmyk, int nWidth, int nHeight, void* pJPEGS
 	const size_t nPixels = (size_t)nWidth * (size_t)nHeight;
 	for (size_t i = 0; i < nPixels; i++, p += 4) {
 		const unsigned char c = p[0];
-		p[0] = (unsigned char)(255 - p[2]); // Y -> C slot
-		p[2] = (unsigned char)(255 - c);    // C -> Y slot
-		p[1] = (unsigned char)(255 - p[1]); // M
-		p[3] = (unsigned char)(255 - p[3]); // K
+		p[0] = YmckDecode::ToInk(p[2]); // Y -> C slot
+		p[2] = YmckDecode::ToInk(c);    // C -> Y slot
+		p[1] = YmckDecode::ToInk(p[1]); // M
+		p[3] = YmckDecode::ToInk(p[3]); // K
 	}
 
 	unsigned int nProfileSize = 0;
@@ -1019,10 +1020,12 @@ static void* ConvertYmckInkToRgbNaive(void* pYmck, int nWidth, int nHeight) {
 	for (int y = 0; y < nHeight; y++) {
 		unsigned char* row = q;
 		for (int x = 0; x < nWidth; x++, p += 4) {
-			const unsigned int inkK = 255 - p[3];
-			row[0] = (unsigned char)((255 - p[0]) * inkK / 255); // B from Y
-			row[1] = (unsigned char)((255 - p[1]) * inkK / 255); // G from M
-			row[2] = (unsigned char)((255 - p[2]) * inkK / 255); // R from C
+			// Same formula as the PSD fallback: one shared implementation in
+			// YmckDecode.h so the two CMYK paths cannot drift apart.
+			const YmckDecode::Rgb rgb = YmckDecode::YmckToRgb(p[0], p[1], p[2], p[3]);
+			row[0] = rgb.b; // B from Y
+			row[1] = rgb.g; // G from M
+			row[2] = rgb.r; // R from C
 			row += 3;
 		}
 		q += outStride;
