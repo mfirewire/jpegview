@@ -77,6 +77,11 @@ Bugs fixed:
 - EXIF: a strip-based (uncompressed) thumbnail is dropped when saving instead of keeping the pre-edit picture in the file
 - Batch rename/copy: forward-slash absolute paths are recognised as paths, and a rollback removes the whole directory chain the run created (deepest first) instead of only the innermost one
 - Lossless crop: the command itself now rejects non-JPEG and destructively edited images, not only the menu entry
+- No black bar when a user command reloads everything: the ClearAllRequests wait is now inside the "waiting for image" guard, so its paint no longer fills the client area
+- The window position is saved when the viewer is closed with ESC or the Exit command, not only via the title-bar close button
+- Button drawing no longer leaks one GDI bitmap per dimmed paint (the previous bitmap is selected back before the new one is destroyed)
+- Single instance: a running viewer with no image open (title exactly "JPEGView") is found again, so the second start forwards its file instead of opening another window
+- INI parsing: "nan"/"inf" in UnsharpMaskParameters, ColorCorrection and LandscapeModeParameters are rejected instead of reaching the image filters
 Engineering:
 - CI: actions/upload-artifact upgraded from v4 to v7 (Node 20 deprecation warning); Debug|Win32 build now verified with a /SAFESEH check
 

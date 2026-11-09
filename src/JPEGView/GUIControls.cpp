@@ -444,7 +444,10 @@ void CButtonCtrl::PreDraw(CDC & dc, CRect position) {
 		memDCblack.CreateCompatibleDC(dc);
 		CBitmap bitmapBlack;
 		bitmapBlack.CreateCompatibleBitmap(dc, position.Width(), position.Height());
-		memDCblack.SelectBitmap(bitmapBlack);
+		// P1-17: deselect before bitmapBlack is destroyed. A bitmap that is
+		// still selected into the DC is not freed, so every dimmed button
+		// paint leaked one GDI object.
+		HBITMAP hOldBitmap = memDCblack.SelectBitmap(bitmapBlack);
 		memDCblack.FillRect(CRect(0, 0, position.Width(), position.Height()), (HBRUSH)::GetStockObject(BLACK_BRUSH));
 	
 		BLENDFUNCTION blendFunc;
@@ -453,6 +456,7 @@ void CButtonCtrl::PreDraw(CDC & dc, CRect position) {
 		blendFunc.SourceConstantAlpha = (unsigned char)(m_dimmingFactor*255 + 0.5f);
 		blendFunc.AlphaFormat = 0;
 		dc.AlphaBlend(position.left, position.top, position.Width(), position.Height(), memDCblack, 0, 0, position.Width(), position.Height(), blendFunc);
+		memDCblack.SelectBitmap(hOldBitmap);
 	}
 }
 

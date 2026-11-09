@@ -2689,8 +2689,14 @@ void CMainDlg::ExecuteUserCommand(CUserCommand* pUserCommand) {
 				m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
 				// P2-1: NULL before ClearAllRequests (see OpenFile): the wait
 				// inside pumps WM_PAINT, which must not see a dangling image.
-				m_pCurrentImage = NULL;
-				m_pJPEGProvider->ClearAllRequests(true);
+				// P1-14: and OnPaint has to know that the NULL means "waiting",
+				// otherwise it fills the client area and the same black bar
+				// flashes here (F0 only covers GotoImage and OpenFile).
+				{
+					CWaitingForImageGuard waitingGuard(m_bWaitingForImage);
+					m_pCurrentImage = NULL;
+					m_pJPEGProvider->ClearAllRequests(true);
+				}
 				bReloadCurrent = true;
 			} else {
 				if (pUserCommand->NeedsReloadFileList()) {
@@ -3887,6 +3893,10 @@ void CMainDlg::AnimateTransition() {
 }
 
 void CMainDlg::CleanupAndTerminate() {
+	// P1-15: OnClose records the window rect, but ESC (OnCancel) and the
+	// Exit command reach this function without a WM_CLOSE, so the sticky
+	// window position was never saved on those paths.
+	GetWindowRect(m_windowRectOnClose);
 	StopMovieMode();
 	StopAnimation();
 	// P0-2/P0-4: stop the watcher first so it cannot queue new

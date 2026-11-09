@@ -322,7 +322,9 @@ CSettingsProvider::CSettingsProvider(void) {
 
 	CString sUnsharpMaskParams = GetString(_T("UnsharpMaskParameters"), _T(""));
 	float fRadius, fAmount, fThreshold;
-	if (_stscanf(sUnsharpMaskParams, _T(" %f %f %f "), &fRadius, &fAmount, &fThreshold) == 3) {
+	// P1-32: %f accepts "nan"/"inf", and those values poison the filter.
+	if (_stscanf(sUnsharpMaskParams, _T(" %f %f %f "), &fRadius, &fAmount, &fThreshold) == 3
+		&& _finite(fRadius) && _finite(fAmount) && _finite(fThreshold)) {
 		m_unsharpMaskParms.Radius = fRadius;
 		m_unsharpMaskParms.Amount = fAmount;
 		m_unsharpMaskParms.Threshold = fThreshold;
@@ -407,10 +409,19 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_sLDCInclude.Replace(_T("%mypictures%"), sMyPicturesFolder);
 
 	CString sColorCorrections = GetString(_T("ColorCorrection"), _T(""));
+	bool bValidColorCorrections = false;
 	if (sColorCorrections.GetLength() > 0 &&
 		_stscanf(sColorCorrections, _T("R: %f G: %f B: %f C: %f M: %f Y: %f"), 
 		&m_fColorCorrections[0], &m_fColorCorrections[1], &m_fColorCorrections[2],
 		&m_fColorCorrections[3], &m_fColorCorrections[4], &m_fColorCorrections[5]) == 6) {
+		// P1-32: %f accepts "nan"/"inf"; the min/max clamp below does not
+		// reliably normalise NaN, so require finite values.
+		bValidColorCorrections = true;
+		for (int i = 0; i < 6; i++) {
+			if (!_finite(m_fColorCorrections[i])) bValidColorCorrections = false;
+		}
+	}
+	if (bValidColorCorrections) {
 		for (int i = 0; i < 6; i++) {
 			m_fColorCorrections[i] = min(1.0f, max(0.0f, m_fColorCorrections[i]));
 		}
@@ -468,6 +479,11 @@ CImageProcessingParams CSettingsProvider::LandscapeModeParams(const CImageProces
 	for (int i = 0; i < cnParams; i++) fParams[i] = cfUndefined;
 	_stscanf(m_sLandscapeModeParams, _T("%f %f %f %f %f %f %f %f %f %f %f %f"), &fParams[0], &fParams[1], &fParams[2], 
 		&fParams[3], &fParams[4], &fParams[5], &fParams[6], &fParams[7], &fParams[8], &fParams[9], &fParams[10], &fParams[11]);
+	// P1-32: "nan"/"inf" are parsed by %f and would otherwise replace the
+	// template value; treat them like an omitted parameter.
+	for (int i = 0; i < cnParams; i++) {
+		if (!_finite(fParams[i])) fParams[i] = cfUndefined;
+	}
 	return CImageProcessingParams(
 		(fParams[0] == cfUndefined) ? templParams.Contrast : fParams[0],
 		(fParams[1] == cfUndefined) ? templParams.Gamma : fParams[1],

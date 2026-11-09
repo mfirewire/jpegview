@@ -19,10 +19,14 @@ static HWND _HWNDOtherInstance = NULL;
 
 static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
 	const int BUF_LEN = 255;
-	TCHAR buff[BUF_LEN + 1];
-	buff[BUF_LEN] = 0;
-	::GetWindowText(hwnd, (LPTSTR)&buff, BUF_LEN);
-	if (_tcsstr(buff, _T(" - JPEGView")) != NULL) {
+	// P1-31: zero-initialised - GetWindowText leaves the buffer untouched
+	// when it fails. With no image open the title is exactly "JPEGView"
+	// (no " - JPEGView"), so the old substring test missed the running
+	// instance and the new process opened its own window instead of
+	// forwarding the file to it.
+	TCHAR buff[BUF_LEN + 1] = { 0 };
+	::GetWindowText(hwnd, buff, BUF_LEN);
+	if (_tcsstr(buff, _T(" - JPEGView")) != NULL || _tcsicmp(buff, _T(JPEGVIEW_TITLE)) == 0) {
 		_HWNDOtherInstance = hwnd;
 		return FALSE;
 	}
