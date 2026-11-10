@@ -67,6 +67,7 @@ void* PPMReader::ReadImage(int& width,
 	// the header is malformed; then stb_image fails on it as before.
 	int nHdrWidth = 0;
 	int nHdrHeight = 0;
+	int nHdrMaxVal = 0;
 	bool bHdrOk = false;
 	{
 		size_t pos = 0;
@@ -112,6 +113,7 @@ void* PPMReader::ReadImage(int& width,
 		if (bParseOk) {
 			nHdrWidth = nValues[0];
 			nHdrHeight = nValues[1];
+			nHdrMaxVal = nValues[2];
 			bHdrOk = true;
 		}
 		if (bParseOk && nValues[2] > 255 && nValues[2] <= 65535 && nValues[0] > 0 && nValues[1] > 0) {
@@ -173,6 +175,18 @@ void* PPMReader::ReadImage(int& width,
 	if (nChannels != 1 && nChannels != 3) {
 		stbi_image_free(pDecoded);
 		return NULL;
+	}
+	// PNM defines white as maxval, not as 255. stb ignores the field and hands
+	// the raw samples back, so a legal maxval=15 PGM used to display as a
+	// near-black image (sample 15 out of 255) instead of pure white. Scale the
+	// 8-bit case here; 16-bit samples (maxval > 255) still go through stb's
+	// >>8 path unchanged, which is only exact for maxval == 65535.
+	if (nHdrMaxVal > 0 && nHdrMaxVal < 255) {
+		const size_t nSamples = (size_t)width * (size_t)height * (size_t)nChannels;
+		for (size_t i = 0; i < nSamples; i++) {
+			pDecoded[i] = (unsigned char)(((unsigned)pDecoded[i] * 255u + (unsigned)nHdrMaxVal / 2u) /
+				(unsigned)nHdrMaxVal);
+		}
 	}
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
 	// No abs(): stbi_load success implies width/height > 0; unqualified

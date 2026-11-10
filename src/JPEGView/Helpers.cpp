@@ -413,25 +413,39 @@ void* FindJPEGMarker(void* pJPEGStream, int nStreamLength, unsigned char nMarker
 }
 
 void* FindEXIFBlock(void* pJPEGStream, int nStreamLength) {
-	uint8* pEXIFBlock = (uint8*)Helpers::FindJPEGMarker(pJPEGStream, nStreamLength, 0xE1);
-	if (pEXIFBlock == NULL) {
-		return NULL;
+	uint8* pStream = (uint8*)pJPEGStream;
+	if (pStream == NULL || nStreamLength < 4 || pStream[0] != 0xFF || pStream[1] != 0xD8) {
+		return NULL; // not a JPEG
 	}
-	// The marker starts at FF E1; bytes 2..3 hold the segment length, which counts
-	// itself, and the "Exif" identifier follows at +4. A truncated file that ends
-	// right after the length field used to reach past the buffer here.
-	int nOffset = (int)(pEXIFBlock - (uint8*)pJPEGStream);
-	if (nOffset + 4 > nStreamLength) {
-		return NULL;
+	// Walk every header segment instead of stopping at the first APP1.
+	// A JPEG may legitimately carry an XMP APP1 before the Exif APP1 (exiftool
+	// -o, some phones and editors write them in that order). The old rule -
+	// "first 0xE1 or nothing" - returned NULL there, so the file lost its
+	// orientation, camera data and timestamp while every other viewer showed
+	// it correctly.
+	int nIndex = 2;
+	while (nIndex + 3 < nStreamLength) {
+		if (pStream[nIndex] != 0xFF) {
+			break; // entropy-coded data: no more header segments
+		}
+		while (nIndex < nStreamLength && pStream[nIndex] == 0xFF) nIndex++;
+		if (nIndex + 2 >= nStreamLength) break;
+		const unsigned char nSegmentMarker = pStream[nIndex];
+		if (nSegmentMarker == 0x00) break;                    // FF 00 is byte stuffing
+		if (nSegmentMarker == 0xDA || nSegmentMarker == 0xD9) break; // SOS / EOI
+		const int nBlockLength = pStream[nIndex + 1] * 256 + pStream[nIndex + 2];
+		if (nBlockLength < 2 || nIndex + 1 + nBlockLength > nStreamLength) {
+			break; // malformed: a length below 2 would not advance the index
+		}
+		// The segment starts at the 0xFF that precedes the marker byte, and the
+		// caller expects exactly that pointer (length at +2, "Exif" at +4).
+		if (nSegmentMarker == 0xE1 && nIndex >= 1 && nIndex + 7 <= nStreamLength &&
+			memcmp(pStream + nIndex + 3, "Exif", 4) == 0) {
+			return pStream + (nIndex - 1);
+		}
+		nIndex += 1 + nBlockLength;
 	}
-	int nBlockLength = pEXIFBlock[2] * 256 + pEXIFBlock[3];
-	if (nBlockLength < 6 || nOffset + 2 + nBlockLength > nStreamLength) {
-		return NULL;
-	}
-	if (strncmp((const char*)(pEXIFBlock + 4), "Exif", 4) != 0) {
-		return NULL;
-	}
-	return pEXIFBlock;
+	return NULL;
 }
 
 // F-H10: the largest preserved-segments blob we keep. 16 MB matches the

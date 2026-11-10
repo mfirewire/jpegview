@@ -295,7 +295,11 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 		// (4 GB - 1 on x64), so a signed 32-bit accumulator overflows past
 		// 2 GB and pImage[colorsRead + n] would write before the buffer.
 		size_t colorsRead = 0;
-		channels = bits / 8;
+		// Bytes actually stored per pixel. 15bpp is a two-byte 5-5-5 word, so
+		// bits/8 (== 1) made every RLE packet consume one byte too few and the
+		// stream drifted from the second pixel on: the image decoded to noise
+		// instead of the solid colour the file holds.
+		channels = (bits + 7) / 8;
 		int x = 0;
 		size_t padding = targetStride - (size_t)targetChannels * width; // P0-5: no int round-trip
 

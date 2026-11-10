@@ -9,6 +9,9 @@ New features:
 - JPEG saving: ICC profile, XMP metadata, Photoshop/IPTC data, JFIF density and COM comment segments from the original file are now preserved on save, in their original order (previously only the EXIF segment was copied)
 - HDR (.hdr) viewing: the GAMMA header is now honoured when converting to 8-bit, so files written for gamma 0.454545 are no longer displayed far too bright; files without a GAMMA header (or GAMMA=1.0) render byte-identically to before
 Bugs fixed:
+- PNM viewing: a portable anymap with a maxval below 255 (4-bit/6-bit samples, common from older and scientific tools) is scaled to full range instead of being displayed at maxval/255 of its brightness - a legal maxval=15 PGM used to render almost black instead of white
+- TGA viewing: a 15-bit RLE file consumed one byte per pixel instead of two, so every pixel after the first was read from the wrong offset and the image decoded to noise; 15bpp now uses two bytes like the uncompressed path
+- JPEG viewing: an Exif APP1 that is not the first APP1 (XMP written in front of it, as exiftool -o and some phones do) is found again, so orientation, camera data and timestamps are no longer dropped for those files
 - JP2 viewing: a file whose reference grid has x1 <= x0 (or y1 <= y0) is rejected before the dimension subtraction can wrap
 - HDR viewing: negative or NaN samples no longer reach an undefined float-to-int cast (they clamp to 0, like the EXR decoder)
 - JPEG saving: when the EXIF thumbnail cannot be rebuilt, the old thumbnail is dropped instead of staying in the file and showing the previous picture
