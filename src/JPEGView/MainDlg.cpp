@@ -2447,11 +2447,19 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	// 打开新文件时清掉上一张图的识别结果。拖放、打开对话框、第二实例传文件
 	// 都走这里；翻页走 GotoImage，在那里另行清理。
 	ResetOcrResult();
+	// Windows accepts both separators, and a path handed over by a shell, a
+	// script or a shortcut often uses '/'. The file-list split, the extension
+	// check and several string comparisons assume '\\', so a forward-slash path
+	// used to open nothing at all (the window came up empty). Normalise once,
+	// here, where every entry point - dialog, drag&drop, second instance and
+	// command line - ends up.
+	CString sNormalizedFile(sFileName);
+	sNormalizedFile.Replace(_T('/'), _T('\\'));
 	// recreate file list based on image opened
 	Helpers::ESorting eOldSorting = m_pFileList->GetSorting();
 	bool oOldAscending = m_pFileList->IsSortedAscending();
 	delete m_pFileList;
-	m_sStartupFile = sFileName;
+	m_sStartupFile = sNormalizedFile;
 	m_pFileList = new CFileList(m_sStartupFile, *m_pDirectoryWatcher, eOldSorting, oOldAscending, CSettingsProvider::This().WrapAroundFolder());
 	// free current image and all read ahead images
 	InitParametersForNewImage();
