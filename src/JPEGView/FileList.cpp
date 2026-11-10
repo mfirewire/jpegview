@@ -386,8 +386,14 @@ CFileList::CFileList(const CString & sInitialFile, CDirectoryWatcher & directory
 	m_sInitialFile = sInitialFile;
 	m_nLevel = nLevel;
 	m_next = m_prev = NULL;
-	int nPos = sInitialFile.ReverseFind(_T('\\'));
-	m_sDirectory = (nPos > 0) ? sInitialFile.Left(nPos) : _T(""); // the backslash is stripped away!
+	// Windows accepts both separators, and a path handed over by a shell or a
+	// script often uses '/'. Splitting on '\\' alone left m_sDirectory empty,
+	// the folder was never enumerated, and paging silently did nothing even
+	// though the image itself opened fine.
+	CString sPathForSplit(sInitialFile);
+	sPathForSplit.Replace(_T('/'), _T('\\'));
+	int nPos = sPathForSplit.ReverseFind(_T('\\'));
+	m_sDirectory = (nPos > 0) ? sPathForSplit.Left(nPos) : _T(""); // the backslash is stripped away!
 	nPos = sInitialFile.ReverseFind(_T('.'));
 	DWORD dwInitialFileAttributes = ::GetFileAttributes(sInitialFile);
 	// Check for INVALID_FILE_ATTRIBUTES first: its 0xFFFFFFFF value has every

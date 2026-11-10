@@ -80,6 +80,17 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 
 	// Search if we have the requested image already present or in progress
 	CImageRequest* pRequest = FindRequest(strFileName, nFrameIndex);
+	// A finished request without an image is a failed load (file locked by
+	// another process, transient I/O error, decoder rejection). Leaving it in
+	// the list made every later attempt - reload, next/previous, reopening the
+	// folder - hit the same dead entry and fail again without ever touching the
+	// file, so a one-off failure became permanent for the whole session.
+	// Drop it and start over; the RAW/TIFF bad-file memo still prevents a
+	// retry storm for files that are genuinely unreadable.
+	if (pRequest != NULL && pRequest->Ready && pRequest->Image == NULL) {
+		DeleteElement(pRequest);
+		pRequest = NULL;
+	}
 	bool bDirectionChanged = eDirection != m_eOldDirection || eDirection == TOGGLE;
 	bool bRemoveAlsoActiveRequests = bDirectionChanged; // if direction changed, all read-ahead requests are wrongly guessed
 	bool bWasOutOfMemory = false;
