@@ -336,12 +336,7 @@ CMainDlg::~CMainDlg() {
 
 void CMainDlg::SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 
 	int nTransitionTime, bool bAutoExit, int nDisplayMonitor) { 
-	// The command line often carries forward slashes. The startup path does not
-	// go through OpenFile - it is stored here and the file list is built from it
-	// in OnCreate - so normalise at this, the earliest point, as well.
-	CString sNormalizedStartup(sStartupFile);
-	sNormalizedStartup.Replace(_T('/'), _T('\\'));
-	m_sStartupFile = sNormalizedStartup; m_nAutoStartSlideShow = nAutostartSlideShow; m_eForcedSorting = eSorting;
+	m_sStartupFile = sStartupFile; m_nAutoStartSlideShow = nAutostartSlideShow; m_eForcedSorting = eSorting;
 	m_bAutoExit = bAutoExit;
 	if ((int)eEffect >= 0) m_eTransitionEffect = eEffect;
 	if (nTransitionTime > 0) m_nTransitionTime = nTransitionTime;
