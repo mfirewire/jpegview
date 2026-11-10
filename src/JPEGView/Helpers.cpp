@@ -439,7 +439,8 @@ void* FindEXIFBlock(void* pJPEGStream, int nStreamLength) {
 		}
 		// The segment starts at the 0xFF that precedes the marker byte, and the
 		// caller expects exactly that pointer (length at +2, "Exif" at +4).
-		if (nSegmentMarker == 0xE1 && nIndex >= 1 && nIndex + 7 <= nStreamLength &&
+		if (nSegmentMarker == 0xE1 && nBlockLength >= 6 && nIndex >= 1 &&
+			nIndex + 7 <= nStreamLength &&
 			memcmp(pStream + nIndex + 3, "Exif", 4) == 0) {
 			return pStream + (nIndex - 1);
 		}
