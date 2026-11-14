@@ -51,3 +51,27 @@ jobs:
             exit 1
           }
           echo "mutant rejected by A1 as expected"
+
+  cmyk-pixel-test:
+    name: CMYK end-to-end pixel test (B-CMYK1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Install OpenJPEG and Pillow
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenjp2-7-dev libopenjp2-tools
+          python3 -m pip install --break-system-packages Pillow
+
+      - name: CMYK pixel test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/cmyk_pixel_test.cpp \
+              -o /tmp/cmyk_pixel_test $(pkg-config --cflags --libs libopenjp2)
+          /tmp/cmyk_pixel_test
+
+      - name: CMYK reference check
+        run: python3 tests/cmyk_reference_check.py
