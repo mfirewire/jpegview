@@ -50,6 +50,12 @@ private:
 		WebPAnimDecoder* decoder;
 		WebPData data;
 		int prev_frame_timestamp;
+		// R-A4: index of the frame the next WebPAnimDecoderGetNext call
+		// will return (0 after a reset, or when the last frame was
+		// returned and the decoder is exhausted). Lets ReadImage tell a
+		// sequential request from a step back / forward jump, which must
+		// reset and step forward to the target instead.
+		int next_frame_index;
 		int width;
 		int height;
 		void* transform;

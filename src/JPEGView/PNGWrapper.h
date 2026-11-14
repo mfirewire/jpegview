@@ -67,6 +67,12 @@ private:
 		unsigned int height;
 		unsigned int channels;
 		unsigned int frame_index;
+		// R-A4: logical index of the next frame ReadOneLogicalFrame will
+		// return (0 after BeginReading). Lets ReadImage tell a sequential
+		// request from a step back / forward jump, which must restart
+		// and step forward to the target instead of returning the
+		// decoder's next frame under the requested label.
+		unsigned int next_frame_index;
 		png_uint_32 frame_count;
 		void* buffer;
 		size_t buffer_size;
@@ -82,6 +88,11 @@ private:
 	bool BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, bool& isSizeLimitExceeded);
 	bool ReadFrameData();
 	void* ReadNextFrame(void** exif_chunk, unsigned int* exif_size);
+	// R-A4: one logical animation frame from the decoder (a single
+	// ReadNextFrame, plus a second one when the first frame is hidden,
+	// so the hidden default image is skipped). Advances
+	// cache.next_frame_index on success.
+	void* ReadOneLogicalFrame(void** exif_chunk, png_uint_32* exif_size);
 	void DeleteCacheInternal(bool free_buffer);
 	// libpng's read callback must be a plain function pointer, so it cannot be
 	// a capturing lambda over this reader's cache. The reader instance is passed

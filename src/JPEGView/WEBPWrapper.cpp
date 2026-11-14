@@ -146,11 +146,28 @@ void* WebpReaderWriter::ReadImage(int& width,
 	// animation wrapping around) must restart the decoder instead of
 	// continuing from the cached cursor. libwebp has no random-frame API,
 	// so Reset + GetNext is the only way to land on frame 0 again.
-	if (frame_index == 0) {
+	// R-A4: the same restart is needed for any request that is not the
+	// decoder's next frame (a step back, a forward jump, or a fresh
+	// decoder): GetNext only advances one frame, so the target has to be
+	// reached by resetting and stepping forward to it. next_frame_index
+	// tracks the frame the next GetNext call will return.
+	if (frame_index == 0 || frame_index != cache.next_frame_index) {
 		WebPAnimDecoderReset(decoder);
 		cache.prev_frame_timestamp = 0;
-	} else if (!WebPAnimDecoderHasMoreFrames(decoder)) {
-		WebPAnimDecoderReset(decoder);
+		cache.next_frame_index = 0;
+		// Step forward to the requested frame, discarding the earlier
+		// ones; the composited canvas is cumulative, so every frame up
+		// to the target must be decoded. The skipped frames' timestamps
+		// keep prev_frame_timestamp current, so the frame_time below is
+		// the target frame's own duration.
+		for (int i = 0; i < frame_index; i++) {
+			if (!WebPAnimDecoderGetNext(decoder, &buf, &timestamp)) {
+				free(exif_chunk);
+				exif_chunk = NULL;
+				return NULL;
+			}
+			cache.prev_frame_timestamp = max(timestamp, 0);
+		}
 	}
 	if (!WebPAnimDecoderGetNext(decoder, &buf, &timestamp)) {
 		free(exif_chunk);
@@ -167,6 +184,11 @@ void* WebpReaderWriter::ReadImage(int& width,
 		cache.prev_frame_timestamp = 0;
 	frame_time = timestamp - cache.prev_frame_timestamp;
 	cache.prev_frame_timestamp = timestamp;
+	// R-A4: the next GetNext call returns the following frame, unless this
+	// was the last one - then the decoder is exhausted and the next request
+	// resets it first (frame 0 branch above, or the seek branch), so 0 is
+	// the safe value here as well.
+	cache.next_frame_index = WebPAnimDecoderHasMoreFrames(decoder) ? frame_index + 1 : 0;
 
 	// width * height * nchannels was int arithmetic; WebP caps at 16383x16383 so
 	// it cannot actually wrap today, but the decoder is the same shape as the rest

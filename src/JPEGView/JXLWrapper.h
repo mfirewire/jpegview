@@ -62,6 +62,12 @@ private:
 		size_t data_size;
 		int prev_frame_timestamp;
 		int total_frames; // F-16: frames counted on the first decode of this file (0 = not counted yet); JXL stores no frame count.
+		// R-A4: index of the last frame DecodeJpegXlOneShot returned (-1 =
+		// none yet, or unknown after a failed decode). Lets ReadImage tell
+		// a sequential request from a step back / forward jump, which must
+		// rewind and step forward to the target instead of returning the
+		// decoder's next frame under the requested label.
+		int frame_index;
 		int width;
 		int height;
 		void* transform;

@@ -192,6 +192,32 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 	return pixels;
 }
 
+// R-A4: one logical animation frame from the decoder: a single
+// ReadNextFrame, plus a second one when the first frame is hidden (the
+// hidden default image is skipped, as ReadImage used to do inline).
+// Advances cache.next_frame_index on success, so ReadImage can tell a
+// sequential request from a seek. The hidden frame is the first raw
+// frame of the stream, so it is skipped only by the first logical frame
+// of a cycle (next_frame_index == 0): testing
+// cache.frame_index < cache.first instead misfires once the raw counter
+// wraps mid-stream (frame_index is 0 again after the second-to-last
+// frame when the first frame is hidden), which the seek loop in ReadImage
+// would hit when stepping to the last frame.
+void* PngReader::ReadOneLogicalFrame(void** exif_chunk, png_uint_32* exif_size)
+{
+	bool read_two = cache.first != 0 && cache.next_frame_index == 0;
+	void* pixels = ReadNextFrame(exif_chunk, exif_size);
+	if (pixels != NULL && read_two) {
+		delete[] (unsigned char*)pixels; // hidden first frame is skipped; release it before reading the next
+		pixels = ReadNextFrame(exif_chunk, exif_size);
+	}
+	if (pixels != NULL) {
+		cache.next_frame_index++;
+		cache.next_frame_index %= cache.frame_count;
+	}
+	return pixels;
+}
+
 bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, bool& isSizeLimitExceeded)
 {
 	unsigned int    width, height, channels, rowbytes, j;
@@ -344,6 +370,7 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 			cache.x0 = x0;
 			cache.y0 = y0;
 			cache.frame_count = frames;
+			cache.next_frame_index = 0; // R-A4: decoder is at logical frame 0
 			if (frames > 0) {
 #ifdef PNG_iCCP_SUPPORTED
 				// libpng has already inflated the iCCP chunk by the time we get
@@ -415,22 +442,37 @@ void* PngReader::ReadImage(int& width,
 	// per-thread cache still holds the decoder from a previous visit to this
 	// file. The canvas blend/dispose state is sequential, so the whole read
 	// has to be restarted, not just the frame counter.
-	if (frame_index == 0 || !cache.png_ptr || cache.frame_index == 0) {
+	// R-A4: the same restart is needed whenever the requested frame is not
+	// the decoder's next frame (a step back, a forward jump, or a fresh
+	// decoder): ReadOneLogicalFrame only advances one logical frame per
+	// call, so anything else must be re-read from the start.
+	// next_frame_index tracks the decoder's logical position; it is reset
+	// by BeginReading and advanced by ReadOneLogicalFrame.
+	if (frame_index == 0 || !cache.png_ptr || cache.frame_index == 0
+		|| frame_index != (int)cache.next_frame_index) {
 		DeleteCacheInternal(false);
 		if (!buffer || !BeginReading(buffer, sizebytes, outOfMemory, isSizeLimitExceeded)) {
 			return NULL;
 		}
 
 	}
+	// R-A4: after a restart the decoder is at logical frame 0; step
+	// forward to the requested frame, discarding the intermediate
+	// canvases (the blend/dispose state is cumulative, so every frame up
+	// to the target must be composited). Without a restart this loop runs
+	// zero times: the restart condition above already ensured the decoder
+	// is positioned at the requested frame.
+	for (int i = (int)cache.next_frame_index; i < frame_index; i++) {
+		void* skipped = ReadOneLogicalFrame(NULL, NULL);
+		if (skipped == NULL) {
+			return NULL;
+		}
+		delete[] (unsigned char*)skipped;
+	}
 
 	void* exif = NULL;
 	unsigned int exif_size = 0;
-	bool read_two = cache.frame_index < cache.first;
-	void* pixels = ReadNextFrame(&exif, &exif_size);
-	if (pixels && read_two) {
-		delete[] (unsigned char*)pixels; // hidden first frame is skipped; release it before reading the next
-		pixels = ReadNextFrame(&exif, &exif_size);
-	}
+	void* pixels = ReadOneLogicalFrame(&exif, &exif_size);
 	if (pixels == NULL) {
 		// P1-22: ReadFrameData() longjmp'd and DeleteCacheInternal(false)
 		// already destroyed info_ptr, so `exif` (owned by info_ptr) dangles.

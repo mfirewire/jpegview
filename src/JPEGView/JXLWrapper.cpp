@@ -267,20 +267,43 @@ void* JxlReader::ReadImage(int& width,
 	// stream live in cache, so rewind and re-subscribe here; the following
 	// DecodeJpegXlOneShot() then returns frame 0 (total_frames is already
 	// known from F-16, so no recount happens).
-	if (frame_index == 0 && cache.decoder != NULL && cache.data != NULL) {
-		JxlDecoderRewind(cache.decoder);
-		JxlDecoderSubscribeEvents(cache.decoder, JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
-		JxlDecoderSetInput(cache.decoder, cache.data, cache.data_size);
-		JxlDecoderCloseInput(cache.decoder);
+	// R-A4: DecodeJpegXlOneShot only advances one frame per call, so a
+	// request that is not the immediate successor of the last returned
+	// frame (a step back, a forward jump, or a fresh decoder) must rewind
+	// and step forward to the target instead. cache.frame_index tracks
+	// the last returned frame (-1 = none yet, or unknown after a failed
+	// decode, in which case the rewind below re-syncs the decoder before
+	// any frame is read).
+	bool bSequential = (cache.decoder != NULL && cache.frame_index >= 0
+		&& cache.frame_index == frame_index - 1);
+	int nSteps = 1;
+	if (!bSequential) {
+		if (cache.decoder != NULL && cache.data != NULL) {
+			JxlDecoderRewind(cache.decoder);
+			JxlDecoderSubscribeEvents(cache.decoder, JXL_DEC_FRAME | JXL_DEC_FULL_IMAGE);
+			JxlDecoderSetInput(cache.decoder, cache.data, cache.data_size);
+			JxlDecoderCloseInput(cache.decoder);
+		}
+		cache.frame_index = -1;
+		nSteps = frame_index + 1;
 	}
-
 
 	std::vector<uint8_t> pixels;
 	std::vector<uint8_t> icc_profile;
-	if (!DecodeJpegXlOneShot((const uint8_t*)buffer, sizebytes, &pixels, width, height,
-		has_animation, frame_count, frame_time, &icc_profile, outOfMemory, isSizeLimitExceeded)) {
-		return NULL;
+	// Decode the requested frame: one call for the sequential fast path,
+	// frame_index + 1 calls after a (re)wind (the first returns frame 0).
+	// The intermediate results overwrite the same vectors; only the last
+	// call's pixels, frame time and frame count are kept. A failed call
+	// leaves the decoder mid-stream, so -1 forces the next request to
+	// rewind before decoding again.
+	for (int i = 0; i < nSteps; i++) {
+		if (!DecodeJpegXlOneShot((const uint8_t*)buffer, sizebytes, &pixels, width, height,
+			has_animation, frame_count, frame_time, &icc_profile, outOfMemory, isSizeLimitExceeded)) {
+			cache.frame_index = -1;
+			return NULL;
+		}
 	}
+	cache.frame_index = frame_index;
 	size_t size = (size_t)width * height * nchannels;
 	pPixelData = new(std::nothrow) unsigned char[size];
 	if (pPixelData == NULL) {
