@@ -7,6 +7,9 @@ Bugs fixed:
 - Lossless JPEG transformations: EXIF auto-rotation no longer marks the image as destructively processed, so the lossless menu stays available for rotated phone photos; a real in-memory rotation still blocks it
 - Lossless JPEG transformations: the EXIF orientation tag is now composed with the transform (rotation/flip), so the reloaded file shows the transformed image instead of applying the old orientation a second time (mirroring an orientation-6 photo used to flip it twice)
 
+Investigated (no change):
+- E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
+
 [1.3.46-20261110] 2026-11-10
 New features:
 - Saving: the compression ratio of lossy JP2 files is configurable with the JP2LossyRate INI key (1..100, default 10, the historical 10:1); lossless JP2 ignores it

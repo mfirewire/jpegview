@@ -3022,6 +3022,14 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 		// are intentionally reset for this view, because the full-size reload
 		// shows the RAW original as-is (see CMainDlg::ReloadImageFullSize).
 		int fullsize = request->ForceFullSizeRAW ? 3 : CSettingsProvider::This().DisplayFullSizeRAW();
+		// E6 (investigated, no change): the fallbacks below are not redundant
+		// retries of one full decode. dcraw_mod never fully decodes
+		// (dcraw_main hardcodes write_fun = write_thumb and only extracts the
+		// embedded preview), so one access performs at most one full decode
+		// (LibRaw). Default mode 2 tries the LibRaw thumbnail, then the dcraw
+		// thumbnail, then the LibRaw full image (mode 3 is full size,
+		// thumbnail, dcraw, in that order); each attempt rescues files the
+		// others cannot, so no fallback was cut.
 
 #ifndef WINXP
 		// Try with libraw
