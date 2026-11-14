@@ -710,11 +710,11 @@ CPoint CJPEGImage::ConvertOffset(CSize fullTargetSize, CSize clippingSize, CPoin
 	return CSize(nStartX, nStartY);
 }
 
-bool CJPEGImage::VerifyRotation(const CRotationParams& rotationParams) {
+bool CJPEGImage::VerifyRotation(const CRotationParams& rotationParams, bool bMarkDestructive) {
 	// First integer rotation (fast)
 	int nDiff = ((rotationParams.Rotation - m_rotationParams.Rotation) + 360) % 360;
 	if (nDiff != 0) {
-		if (!Rotate(nDiff)) return false;
+		if (!Rotate(nDiff, bMarkDestructive)) return false;
 	}
 	if (fabs(rotationParams.FreeRotation - m_rotationParams.FreeRotation) >= 0.009)
 	{
@@ -724,7 +724,29 @@ bool CJPEGImage::VerifyRotation(const CRotationParams& rotationParams) {
 	return true;
 }
 
-bool CJPEGImage::Rotate(int nRotation) {
+bool CJPEGImage::VerifyRotationAfterLoad(const CRotationParams& rotationParams) {
+	// R-A1: the rotation requested at load time mixes two things that
+	// must be told apart. The EXIF auto-rotation is part of decoding the
+	// file, not an edit: the orientation tag stays in the file, and the
+	// lossless transform composes it, so the reloaded file still shows
+	// the transformed image. Applying it must therefore not set the
+	// destructively-processed flag - with 7a1d18b's unconditional marking
+	// in Rotate() every orientation-6 phone photo lost the lossless menu
+	// at load, with no edit made. The remainder - the live user rotation
+	// (m_nUserRotation, kept across images when keeping parameters) and
+	// any rotation restored from the parameter DB - is a real unsaved
+	// edit, so it keeps the normal marking (F-M27): a lossless transform
+	// of the file would discard it. A free rotation can only come from
+	// the remainder (the EXIF step requests none), so
+	// RotateOriginalPixels() still marks it.
+	int nEXIFRotation = GetRotationFromEXIF(0);
+	if (nEXIFRotation != 0) {
+		if (!VerifyRotation(CRotationParams(nEXIFRotation), false)) return false;
+	}
+	return VerifyRotation(rotationParams, true);
+}
+
+bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
 	double dStartTickCount = Helpers::GetExactTickCount();
 
 	// Rotation can only be done in 32 bpp
@@ -751,7 +773,15 @@ bool CJPEGImage::Rotate(int nRotation) {
 	// MarkAsDestructivelyProcessed(): that helper also clears FreeRotation
 	// and Flags, which VerifyRotation() reads right after Rotate() and
 	// would otherwise apply the free rotation a second time.
-	m_bIsDestructivelyProcessed = true;
+	// R-A1: bMarkDestructive is false only for the EXIF auto-rotation
+	// applied by VerifyRotationAfterLoad() at load time. That rotation is
+	// not an edit: the file itself carries the orientation tag, and the
+	// lossless transform now composes it (JPEGLosslessTransform), so
+	// marking it destructive would grey out the lossless menu for every
+	// orientation-6 phone photo with no edit made.
+	if (bMarkDestructive) {
+		m_bIsDestructivelyProcessed = true;
+	}
 
 	m_dLastOpTickCount = Helpers::GetExactTickCount() - dStartTickCount;
 	return true;

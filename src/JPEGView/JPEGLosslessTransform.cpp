@@ -2,6 +2,7 @@
 #include "JPEGLosslessTransform.h"
 #include "Helpers.h"
 #include "SaveImage.h"
+#include "EXIFReader.h"
 #include "libjpeg-turbo\include\turbojpeg.h"
 #include "MaxImageDef.h" // A4: MAX_JPEG_FILE_SIZE
 
@@ -9,6 +10,7 @@ CJPEGLosslessTransform::EResult _DoTransformation(LPCTSTR sInputFile, LPCTSTR sO
 unsigned char* _ReadFile(LPCTSTR sFileName, unsigned int & nLengthBytes);
 bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int nLengthBytes);
 int _TransformationEnumToOpCode(CJPEGLosslessTransform::ETransformation transformation);
+void _UpdateEXIFOrientation(unsigned char* pJPEG, size_t nJPEGSize, int nTransformOp);
 
 // Performs a lossless JPEG transformation, transforming the input file and writing the result to the output file.
 // Input and output file can be identical, then the input file is overwritten by the resulting output file.
@@ -47,6 +49,11 @@ static CJPEGLosslessTransform::EResult _DoTransformation(LPCTSTR sInputFile, LPC
 		unsigned char* pOutputJPEGBytes = NULL;
 		size_t nNumBytesOutput = 0;
 		if (0 == tj3Transform(hTransform, pInputJPEGBytes, nNumBytesInput, 1, &pOutputJPEGBytes, &nNumBytesOutput, &transform) && pOutputJPEGBytes != NULL) {
+			// R-A1: keep the EXIF orientation in step with the transformed
+			// pixels (see _UpdateEXIFOrientation below); without it the
+			// next load applies the old orientation on top of the
+			// transformed pixels.
+			_UpdateEXIFOrientation(pOutputJPEGBytes, nNumBytesOutput, transform.op);
 			if (!_WriteFile(sOutputFile, pOutputJPEGBytes, nNumBytesOutput)) {
 				eResult = CJPEGLosslessTransform::WriteFileFailed;
 			}
@@ -147,6 +154,71 @@ static bool _WriteFile(LPCTSTR sFileName, unsigned char* pBuffer, unsigned int n
 	}
 
 	return true;
+}
+
+// R-A1: EXIF orientation after a lossless transform. tj3Transform copies
+// the EXIF APP1 verbatim (TJPARAM_SAVEMARKERS defaults to 2, "copy all
+// extra markers"; TJXOPT_COPYNONE is not set), so the Orientation tag
+// still describes the pre-transform stored pixels. If the tag is left
+// stale, the next load applies the old orientation on top of the
+// transformed pixels - a mirror on an orientation-6 phone photo comes
+// back flipped twice. The tag must therefore become O' with
+// O'(T(S)) == T(O(S)) (conjugation T . O . T^-1), where S are the stored
+// pixels, O the old orientation and T the transform. The table below was
+// derived by brute force over small pixel grids: rotations commute with
+// pure-rotation orientations (1/3/6/8 are unchanged by ROT90/180/270),
+// flips swap 6 <-> 8, and rotations swap 2 <-> 4 and 5 <-> 7. A crop
+// (TJXOP_NONE) does not rotate or flip anything, so the tag is unchanged.
+// The write is in place (2 bytes, same length), reusing CEXIFReader just
+// like the save path (SaveImage.cpp). No EXIF block, no orientation tag,
+// or an out-of-range value: leave the bytes untouched - there is nothing
+// to compose, and failing the transform over metadata would be worse.
+// Known limitation, shared with jpegtran: the embedded EXIF thumbnail
+// pixels are not transformed, so a viewer showing the raw thumbnail
+// still sees the pre-transform picture; the main image is correct.
+static const int kComposedOrientation[9][5] = {
+	//              ROT90 ROT180 ROT270 HFLIP VFLIP
+	/* O=1 */ { 1, 1, 1, 1, 1 },
+	/* O=2 */ { 4, 2, 4, 2, 2 },
+	/* O=3 */ { 3, 3, 3, 3, 3 },
+	/* O=4 */ { 2, 4, 2, 4, 4 },
+	/* O=5 */ { 7, 5, 7, 7, 7 },
+	/* O=6 */ { 6, 6, 6, 8, 8 },
+	/* O=7 */ { 5, 7, 5, 5, 5 },
+	/* O=8 */ { 8, 8, 8, 6, 6 },
+};
+
+static void _UpdateEXIFOrientation(unsigned char* pJPEG, size_t nJPEGSize, int nTransformOp) {
+	if (pJPEG == NULL || nJPEGSize < 4 || nJPEGSize > INT_MAX) {
+		return;
+	}
+	// A crop does not rotate or flip the pixels, so the orientation tag
+	// still describes them.
+	if (nTransformOp == TJXOP_NONE) {
+		return;
+	}
+	int nColumn = -1;
+	switch (nTransformOp) {
+		case TJXOP_ROT90: nColumn = 0; break;
+		case TJXOP_ROT180: nColumn = 1; break;
+		case TJXOP_ROT270: nColumn = 2; break;
+		case TJXOP_HFLIP: nColumn = 3; break;
+		case TJXOP_VFLIP: nColumn = 4; break;
+		default: return; // TJXOP_TRANSPOSE/TRANSVERSE are never requested
+	}
+	void* pEXIFBlock = Helpers::FindEXIFBlock(pJPEG, (int)nJPEGSize);
+	if (pEXIFBlock == NULL) {
+		return; // no EXIF block: nothing to update
+	}
+	CEXIFReader exifReader((unsigned char*)pEXIFBlock, IF_JPEG);
+	int nOldOrientation = exifReader.GetImageOrientation();
+	if (nOldOrientation < 1 || nOldOrientation > 8) {
+		return; // no (valid) orientation tag: nothing to compose
+	}
+	int nNewOrientation = kComposedOrientation[nOldOrientation][nColumn];
+	if (nNewOrientation != nOldOrientation) {
+		exifReader.WriteImageOrientation(nNewOrientation);
+	}
 }
 
 static int _TransformationEnumToOpCode(CJPEGLosslessTransform::ETransformation transformation) {

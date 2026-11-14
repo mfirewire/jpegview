@@ -119,7 +119,11 @@ public:
 
 	// Rotate the image clockwise by 90, 180 or 270 degrees. All other angles are invalid.
 	// Applies to original pixels!
-	bool Rotate(int nRotation);
+	// bMarkDestructive: set the destructively-processed flag (a lossless
+	// transformation of the file on disk would discard this rotation).
+	// False only for the EXIF auto-rotation applied at load time, see
+	// VerifyRotationAfterLoad().
+	bool Rotate(int nRotation, bool bMarkDestructive);
 
 	// Rotate original pixels by given angle (in radians). The original pixels are replaced by this operation.
 	// If autocrop is enabled, the maximum rectangular area is cropped, else black borders are added to the image.
@@ -188,7 +192,17 @@ public:
 	void SetDIBInvalid() { m_ClippingSize = CSize(0, 0); }
 
 	// Verify that the image is currently rotated by the specified parameters and rotate the original pixels of the image if not.
-	bool VerifyRotation(const CRotationParams& rotationParams);
+	// bMarkDestructive: see Rotate(); true everywhere except the EXIF
+	// auto-rotation applied by VerifyRotationAfterLoad().
+	bool VerifyRotation(const CRotationParams& rotationParams, bool bMarkDestructive);
+
+	// Rotation applied when an image is loaded: the EXIF auto-rotation
+	// first (without marking the image destructively processed - the file
+	// itself carries the orientation, so this is not a user edit), then
+	// the remaining requested rotation (live user rotation, rotation
+	// restored from the parameter DB, free rotation) with the normal
+	// marking. See JPEGImage.cpp.
+	bool VerifyRotationAfterLoad(const CRotationParams& rotationParams);
 
 	// Returns if this image has been cropped or not
 	bool IsCropped() { return m_bCropped; }

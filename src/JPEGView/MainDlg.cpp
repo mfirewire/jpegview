@@ -531,7 +531,7 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 		dc.FillRect(&m_clientRect, backBrush);
 	} else {
 		// do this as very first - may changes size of image
-		m_pCurrentImage->VerifyRotation(CRotationParams(m_pCurrentImage->GetRotationParams(), m_nRotation));
+		m_pCurrentImage->VerifyRotation(CRotationParams(m_pCurrentImage->GetRotationParams(), m_nRotation), true);
 
 		// Find out zoom multiplier if not yet known
 		if (m_dZoomMult < 0.0) {
@@ -660,7 +660,7 @@ void CMainDlg::PaintToDC(CDC& dc) {
 		dc.FillRect(&m_clientRect, backBrush);
 	} else {
 		// do this as very first - may changes size of image
-		pCurrentImage->VerifyRotation(CRotationParams(pCurrentImage->GetRotationParams(), GetRotation()));
+		pCurrentImage->VerifyRotation(CRotationParams(pCurrentImage->GetRotationParams(), GetRotation()), true);
 
 		// find out the new virtual image size and the size of the bitmap to request
 		double dZoom = m_dZoom;
@@ -1787,7 +1787,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 				// counters and the window must not move either. The old order bumped
 				// them before the call, and VerifyRotation then retried the same
 				// failing rotation on every paint.
-				if (!m_pCurrentImage->Rotate(nRotationDelta)) {
+				if (!m_pCurrentImage->Rotate(nRotationDelta, true)) {
 					ShowEditFailedMessage();
 					break;
 				}

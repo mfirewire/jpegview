@@ -3614,7 +3614,11 @@ CImageLoadThread::EAfterLoadResult CImageLoadThread::ProcessImageAfterLoad(CRequ
 	request->Image->SetFileDependentProcessParams(request->FileName, &(request->ProcessParams));
 
 	// First do rotation, this maybe modifies the width and height
-	if (!request->Image->VerifyRotation(CRotationParams(request->ProcessParams.RotationParams, request->ProcessParams.RotationParams.Rotation + request->ProcessParams.UserRotation))) {
+	// R-A1: VerifyRotationAfterLoad applies the EXIF auto-rotation
+	// without marking the image destructively processed, so the lossless
+	// menu stays available for EXIF-rotated photos; any user rotation
+	// is still marked (F-M27).
+	if (!request->Image->VerifyRotationAfterLoad(CRotationParams(request->ProcessParams.RotationParams, request->ProcessParams.RotationParams.Rotation + request->ProcessParams.UserRotation))) {
 		return AfterLoad_Error;
 	}
 
