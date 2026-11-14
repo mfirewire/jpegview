@@ -30,7 +30,8 @@ When a value's meaning cannot be derived from the code, do not document it -
 4. **A switch that makes the fallback reachable.** A branch that never executes
    cannot be tested - F-M23 "fixed" one and verified nothing.
    `JPEGVIEW_DISABLE_CMYK_ICC=1` forces `CreateTransform()` to fail for CMYK so
-   the no-profile paths really run.
+   the no-profile paths really run. The switch only exists in debug builds
+   (`#ifndef NDEBUG`); a Release build ignores the variable.
 
 ## Running it
 

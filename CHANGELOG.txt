@@ -10,6 +10,10 @@ Bugs fixed:
 Investigated (no change):
 - E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
 
+Hardening:
+- The JPEGVIEW_DISABLE_CMYK_ICC=1 test hook is now compiled out of Release builds (#ifndef NDEBUG), so it cannot silently disable CMYK colour management in a shipped build; it still works in debug builds
+- Installer: .jpx and .jpf are now registered as JPEGView file types (SupportedTypes and SystemFileAssociations), matching the 47 endings the application itself already browses
+
 [1.3.46-20261110] 2026-11-10
 New features:
 - Saving: the compression ratio of lossy JP2 files is configurable with the JP2LossyRate INI key (1..100, default 10, the historical 10:1); lossless JP2 ignores it

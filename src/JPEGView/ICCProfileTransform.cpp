@@ -111,18 +111,21 @@ void* ICCProfileTransform::CreateTransform(const void* profile, unsigned int siz
 		default:
 			return NULL;
 	}
-	// Test hook: JPEGVIEW_DISABLE_CMYK_ICC=1 makes every CMYK transform fail on
-	// purpose, so the no-ICC fallback paths (PSDWrapper F-M23, ImageLoadThread
-	// step 3) can actually be executed. Without it those branches are
-	// unreachable in a shipped build - cmyk.icm always ships and real PSDs
-	// carry an embedded profile - which is how F-M23 ended up "fixing" a
-	// branch that never ran. Read before any profile is opened, so nothing
-	// leaks on the early return.
+	// Test hook (debug builds only): JPEGVIEW_DISABLE_CMYK_ICC=1 makes every
+	// CMYK transform fail on purpose, so the no-ICC fallback paths (PSDWrapper
+	// F-M23, ImageLoadThread step 3) can actually be executed. Without it those
+	// branches are unreachable in a shipped build - cmyk.icm always ships and
+	// real PSDs carry an embedded profile - which is how F-M23 ended up "fixing"
+	// a branch that never ran. Read before any profile is opened, so nothing
+	// leaks on the early return. The hook is compiled out of Release builds,
+	// so it cannot silently disable colour management in a shipped build.
+#ifndef NDEBUG
 	if (T_COLORSPACE(inFormat) == PT_CMYK) {
 		char value[8] = { 0 };
 		if (GetEnvironmentVariableA("JPEGVIEW_DISABLE_CMYK_ICC", value, sizeof value) > 0 && value[0] != '0')
 			return NULL;
 	}
+#endif
 
 	cmsHPROFILE hEmbeddedProfile = NULL;
 	if (profile != NULL && size > 0 && CSettingsProvider::This().UseEmbeddedColorProfiles()) {
