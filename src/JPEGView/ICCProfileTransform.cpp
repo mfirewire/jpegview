@@ -171,6 +171,16 @@ bool ICCProfileTransform::DoTransform(void* transform, const void* inputBuffer, 
 		return false;
 	if (stride == 0)
 		stride = (unsigned int)((size_t)width * bppIn);
+	// R-A5: the input stride must hold one whole input row, mirroring
+	// the P1-1 output-stride check above. A smaller value makes
+	// cmsDoTransformLineStride read consecutive rows over each other,
+	// and the plane-size checks below cannot detect that: the last row
+	// starts at stride*(height-1) and reads width*bppIn bytes, past a
+	// buffer sized stride*height. A 0 stride was already replaced by
+	// the tight width*bppIn value above, so this only rejects an
+	// explicitly supplied stride that is too small.
+	if ((size_t)stride < (size_t)width * bppIn)
+		return false;
 	// F-M24: lcms2 takes 32-bit plane sizes. Do the arithmetic in 64 bits
 	// and refuse anything that would wrap or exceed the image byte cap -
 	// a wrapped plane size could make cmsDoTransform write past the buffer.

@@ -54,6 +54,7 @@ Bugs fixed:
 - PSD CMYK files with a malformed channel count no longer enter the 4-byte YMCK conversion and read past the allocated buffer
 - Lossless JPEG transform menu: only the six lossless items are greyed out now, so Convert to JXL stays available after an in-memory rotation
 - ICC colour transforms reject an explicitly supplied output row stride that is smaller than one output row, instead of overlapping rows
+- ICC colour transforms reject an explicitly supplied input row stride that is smaller than one input row, instead of reading rows over each other past the end of the buffer
 - Release workflow validates that the release notes headline and both download asset names match the tag before publishing
 - JXL loading: the exception handler no longer leaks the file buffer or the EXIF chunk, and no longer risks freeing a buffer owned by the JXL reader cache (double-free)
 - SVG viewing: rapid paging through SVG files no longer crashes (access violation in libthorvg-1.dll); the whole ThorVG session is now serialised across load threads instead of only init/term
