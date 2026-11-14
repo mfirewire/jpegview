@@ -3050,6 +3050,13 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 	} catch (...) {
 		delete request->Image;
 		request->Image = NULL;
+		// P1-20: every other format path flags an unhandled exception, so
+		// this failure was reported as an ordinary decode error and the file
+		// was memoized as permanently bad (R-1 excludes exception failures).
+		// RAW was the one remaining gap (WebP and WIC were fixed in the
+		// same batch); without the flag an exception here locked the file
+		// out as a permanently bad file for the rest of the session.
+		request->ExceptionError = true;
 	}
 	if (bOutOfMemory) {
 		request->OutOfMemory = true;
