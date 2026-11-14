@@ -16,11 +16,20 @@ Rules (project sources: src/JPEGView/*.cpp, *.h - vendored trees are skipped)
      Everywhere else use YmckDecode::ToInk(). A line that is genuinely doing
      alpha compositing opts out with a `ymck-ok:` comment.
   2. A whole-plane inversion may appear only as exactly one call to
-     YmckDecode::InvertPlaneInPlace() in PSDWrapper.cpp: zero means the
-     9746da5 regression is back, two means a double inversion (ec8032f).
-  3. Both naive CMYK converters must route through YmckDecode::YmckToRgb()
-     so the Y/M/C/K permutation cannot be re-inlined incorrectly.
-  4. No raw `~` complement on a pixel buffer outside the header.
+     YmckDecode::InvertPlaneInPlace() in PSDWrapper.cpp, with the pixel
+     count and stride arguments checked too: zero means the 9746da5
+     regression is back, two means a double inversion (ec8032f), and a
+     wrong count or stride inverts the wrong region.
+  3. All three naive CMYK converters must route through a single YmckDecode
+     function so the component permutation cannot be re-inlined incorrectly:
+     YmckToRgb(p[0], p[1], p[2], p[3]) for the YMCK plane order (PSD,
+     ImageLoadThread) and InkToRgb(v[0], v[1], v[2], v[3]) for JP2's
+     C/M/Y/K component order.
+  4. No raw `~` complement on a pixel buffer outside the header. This
+     catches `~(*p)`, `~*p` and `~word`. Known-safe idioms are excluded:
+     `& ~FLAG` flag clearing, `~x & 1` parity, `~c + 2` PackBits run length,
+     and dcraw_mod.cpp (vendored); a `~Name(` form is excluded so
+     destructor definitions are not flagged.
 
 Exit code 0 = clean, 1 = at least one violation.
 """
@@ -42,10 +51,72 @@ SOURCE_EXT = (".c", ".cc", ".cpp", ".h", ".hh", ".hpp", ".inl")
 INVERT_LITERAL = re.compile(r"255\s*-\s*[A-Za-z_][A-Za-z0-9_]*\s*\[")
 
 # Raw complement of a pixel word: `~(*pImage32)`, `= ~word`.
+# Raw complement of a pixel word: `~(*pImage32)` and `~*p`. The bare-`~word`
+# form is a separate pattern below because it needs context exclusions;
+# a single regex for it flags 21 legitimate uses (flag clearing, parity,
+# PackBits run length, dcraw internals, `~` in a format string).
 RAW_COMPLEMENT = re.compile(r"~\s*\(?\s*\*")
+
+# Bare `~word`: `~` followed by an identifier. Two regex guards keep it from
+# flagging destructors: `(?![A-Za-z0-9_])` forces the identifier to be maximal
+# (without it the pattern backtracks to a one-letter prefix and `~CClass()`
+# matches), and `(?!\s*\()` excludes a following `(` (destructor `~CClass()`
+# and a complement of a function call `~func()` look the same; the former is
+# far more common here, so `~func()` is a known blind spot). `~(size_t)3` and
+# `~(nBlockWidth - 1)` are not caught: `~` is followed by `(`, not by an
+# identifier, so bitmask alignment stays clean.
+RAW_COMPLEMENT_WORD = re.compile(r"~\s*[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_])(?!\s*\()")
+
+
+def strip_strings(text):
+    """Blank the contents of double-quoted strings and char literals, so a
+    `~` inside a format string (e.g. "%s~jv%lu") is not mistaken for a
+    complement. Only the delimiters are kept, so line structure is intact."""
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c in ("\"", "'"):
+            quote = c
+            out.append(quote)
+            i += 1
+            while i < n and text[i] != quote:
+                if text[i] == "\\" and i + 1 < n:
+                    i += 2
+                else:
+                    i += 1
+            if i < n:
+                out.append(quote)
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _is_pixel_complement(line, m):
+    """True if a `~word` match is a complement on a value, not a known-safe idiom."""
+    before = line[:m.start()].rstrip()
+    if before.endswith("&") or before.endswith("&="):
+        return False  # flag/mask clearing: `& ~FLAG`, `&= ~FLAG`
+    after = line[m.end():]
+    rest = after.lstrip()
+    if rest[:1] in ("&", "|", "+", "-"):
+        return False  # parity/bitmask/arithmetic: `~x & 1`, `~c + 2` (PackBits run length)
+    return True
 
 YMCK_TO_RGB_CALL = "YmckDecode::YmckToRgb(p[0],p[1],p[2],p[3])"
 INVERT_CALL = "YmckDecode::InvertPlaneInPlace("
+# Compacted form of the single InvertPlaneInPlace call: buffer, pixel
+# count, stride (4 or 5 bytes per pixel). The count check alone cannot
+# tell a wrong count or stride from the right one.
+INVERT_CALL_ARGS = "InvertPlaneInPlace(pPixelData,(size_t)nWidth*nHeight,nChannels==5?5:4)"
+JP2 = OWN_SRC / "JP2Wrapper.cpp"
+INK_TO_RGB_CALL = "InkToRgb("
+# Canonical InkToRgb call: same base variable indexed [0],[1],[2],[3] in
+# order, so a permuted call (e.g. v[2],v[1],v[0],v[3]) does not match.
+INK_TO_RGB_CANONICAL = re.compile(r"InkToRgb\(([A-Za-z_][A-Za-z0-9_]*)\[0\],\1\[1\],\1\[2\],\1\[3\]\)")
 OPTOUT = "ymck-ok:"
 
 
@@ -143,6 +214,15 @@ def main():
                     f"{path.relative_to(ROOT)}:{lineno}: raw '~' complement on a pixel "
                     f"buffer -> YmckDecode::InvertPlaneInPlace(). Line: {code.strip()}"
                 )
+            if path.name != "dcraw_mod.cpp":
+                code_nostr = strip_strings(code)
+                for m in RAW_COMPLEMENT_WORD.finditer(code_nostr):
+                    if _is_pixel_complement(code_nostr, m):
+                        problems.append(
+                            f"{path.relative_to(ROOT)}:{lineno}: raw '~' complement on a pixel "
+                            f"buffer -> YmckDecode::InvertPlaneInPlace(). Line: {code.strip()}"
+                        )
+                        break
 
     if not PSD.exists():
         problems.append("src/JPEGView/PSDWrapper.cpp not found")
@@ -161,6 +241,13 @@ def main():
                 "YmckDecode::YmckToRgb(p[0], p[1], p[2], p[3]) so the Y/M/C/K order is "
                 "not re-inlined"
             )
+        if INVERT_CALL_ARGS not in psd:
+            problems.append(
+                "src/JPEGView/PSDWrapper.cpp: the single InvertPlaneInPlace call "
+                "must pass the pixel count and stride "
+                "(pPixelData, (size_t)nWidth*nHeight, nChannels==5?5:4); a wrong "
+                "count or stride inverts the wrong region"
+            )
 
     if not JPEG.exists():
         problems.append("src/JPEGView/ImageLoadThread.cpp not found")
@@ -171,6 +258,21 @@ def main():
                 "src/JPEGView/ImageLoadThread.cpp: ConvertYmckInkToRgbNaive must call "
                 "YmckDecode::YmckToRgb(p[0], p[1], p[2], p[3]) - one formula for every "
                 "CMYK decoder"
+            )
+
+    if not JP2.exists():
+        problems.append("src/JPEGView/JP2Wrapper.cpp not found")
+    else:
+        jp2 = compact(strip_comments(read(JP2)))
+        ink_calls = jp2.count(INK_TO_RGB_CALL)
+        canonical = INK_TO_RGB_CANONICAL.findall(jp2)
+        if len(canonical) < 2 or ink_calls != len(canonical):
+            problems.append(
+                "src/JPEGView/JP2Wrapper.cpp: the naive CMYK converter must call "
+                "YmckDecode::InkToRgb(v[0], v[1], v[2], v[3]) in component order "
+                f"(found {len(canonical)} canonical call(s) out of {ink_calls} "
+                "InkToRgb call(s)); a permuted or re-inlined conversion bypasses "
+                "the polarity contract"
             )
 
     if problems:
