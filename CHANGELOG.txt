@@ -22,6 +22,7 @@ Documentation:
 - Release notes: Shift+Delete permanently deletes the current file from disk (with a confirmation prompt), it does not use the Recycle Bin; and the colour-management exceptions are now stated (the WIC fallback gets none, CMYK JPEGs always convert with the embedded profile or cmyk.icm)
 - INI: the UseEmbeddedColorProfiles comment no longer claims a PNG gAMA/sRGB chunk is always applied by libpng; it follows the switch (off means the chunk is ignored and the raw values are shown)
 - README: OCR now notes to pause the animation first (Esc stops it) so the text is taken from a stable frame
+- Minimum supported OS is now Windows 10: the System Requirements (README), the runtime note (COMPILING.txt) and the supported-OS list (readme.html) no longer list Windows 7/8/Vista/XP; the OCR note already said Windows 10 and later, so it is unchanged. Declaration only - no build setting was changed (the project already targets the Windows 10.0 SDK) and whether the binary actually starts on Windows 7 was not re-tested
 
 [1.3.46-20261110] 2026-11-10
 New features:

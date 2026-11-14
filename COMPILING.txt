@@ -16,8 +16,8 @@ To compile the MSI installer, you need:
 
 
 Please note:
-- Windows XP SP2 or later is needed to run the 32-bit version (When built from VS2017).
-- 64-bit Windows 7 or later is needed to run the 64-bit version.
+- Windows 10 or later is needed to run the 32-bit version.
+- 64-bit Windows 10 or later is needed to run the 64-bit version.
 
 
 NOTE: VS2019 is the current active JPEGView development environment.
