@@ -178,14 +178,19 @@ void* PPMReader::ReadImage(int& width,
 	}
 	// PNM defines white as maxval, not as 255. stb ignores the field and hands
 	// the raw samples back, so a legal maxval=15 PGM used to display as a
-	// near-black image (sample 15 out of 255) instead of pure white. Scale the
-	// 8-bit case here; 16-bit samples (maxval > 255) still go through stb's
-	// >>8 path unchanged, which is only exact for maxval == 65535.
-	if (nHdrMaxVal > 0 && nHdrMaxVal < 255) {
+	// near-black image (sample 15 out of 255) instead of pure white. Scale here:
+	// the 8-bit case maps [0, maxval] to [0, 255]; the 16-bit case goes through
+	// stb's >>8 path, so its decoded range is [0, maxval>>8] and it is scaled
+	// by 255/(maxval>>8) instead. The scale is the identity for maxval == 255
+	// and maxval == 65535, and it maps both endpoints exactly (0 -> 0 and
+	// maxval -> 255); interior 16-bit values stay approximate because stb
+	// already dropped the low byte (e.g. maxval=4095, sample 2048 decodes to
+	// 8 and scales to 136 instead of 128).
+	if (nHdrMaxVal > 0 && nHdrMaxVal <= 65535 && nHdrMaxVal != 255 && nHdrMaxVal != 65535) {
+		const unsigned nDivisor = (nHdrMaxVal < 255) ? (unsigned)nHdrMaxVal : ((unsigned)nHdrMaxVal >> 8);
 		const size_t nSamples = (size_t)width * (size_t)height * (size_t)nChannels;
 		for (size_t i = 0; i < nSamples; i++) {
-			pDecoded[i] = (unsigned char)(((unsigned)pDecoded[i] * 255u + (unsigned)nHdrMaxVal / 2u) /
-				(unsigned)nHdrMaxVal);
+			pDecoded[i] = (unsigned char)(((unsigned)pDecoded[i] * 255u + nDivisor / 2u) / nDivisor);
 		}
 	}
 	// R-04/P2-5: exceeding the pixel cap is a size-limit rejection, not out-of-memory.
