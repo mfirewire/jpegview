@@ -2974,6 +2974,14 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 	}
 }
 
+// NOTE (M-U6, intentional, do not "fix"): a reload with keepParameters=false
+// discards the current image's unsaved processing parameters. Without
+// KEEP_PARAMETERS, GotoImage() calls InitParametersForNewImage(), which resets
+// rotation, zoom/pan and the image processing parameters to their defaults
+// (unless "keep parameters between images" is enabled, which is off by
+// default). All menu/key callers pass false on purpose; the only
+// keepParameters=true caller is the free-rotation panel, whose rotation
+// cannot be restored after a reload (see RotationPanelCtl.cpp).
 void CMainDlg::ReloadImage(bool keepParameters, bool updateWindow) {
 	int flags = keepParameters ? KEEP_PARAMETERS : 0;
 	GotoImage(CMainDlg::POS_Current, updateWindow ? flags : flags | NO_UPDATE_WINDOW);

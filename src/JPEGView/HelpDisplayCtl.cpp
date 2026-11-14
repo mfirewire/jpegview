@@ -82,6 +82,7 @@ void CHelpDisplayCtl::GenerateHelpDisplay() {
 	m_pHelpDisplay->AddLine(_KeyDesc(IDM_PREV), CNLS::GetString(_T("Goto previous image")));
 	m_pHelpDisplay->AddLine(_KeyDesc(IDM_NEXT), CNLS::GetString(_T("Goto next image")));
 	m_pHelpDisplay->AddLine(_KeyDesc(IDM_FIRST, IDM_LAST), CNLS::GetString(_T("Goto first/last image of current folder (using sort order as defined)")));
+	m_pHelpDisplay->AddLine(_KeyDesc(IDM_RELOAD), CNLS::GetString(_T("Reload image (discards unsaved image processing parameters)")));
 	TCHAR buff[16]; _stprintf_s(buff, 16, _T("%.2f"), m_pImageProcParams->Gamma);
 	m_pHelpDisplay->AddLineInfo(_KeyDesc(IDM_GAMMA_INC, IDM_GAMMA_DEC), buff, CNLS::GetString(_T("Increase/decrease brightness")));
 	TCHAR buff1[16]; _stprintf_s(buff1, 16, _T("%.2f"), m_pImageProcParams->Contrast);

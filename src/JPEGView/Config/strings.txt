@@ -271,6 +271,7 @@ Reading the JPEG file from disk failed
 Reason:	
 Registering or unregistering file extensions in this registry area requires administrator privileges and cannot be done in JPEGView.	
 Registration applies to the current user only.	
+Reload image (discards unsaved image processing parameters)	
 Remove from	
 Rename	
 Rename/copy images to:	
