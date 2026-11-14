@@ -193,8 +193,15 @@ static bool ValidateClipboardDIB(const BITMAPINFO* pbmInfo, SIZE_T nMemSize, int
 		if (nStride > nMemSize) {
 			return false;
 		}
-		const SIZE_T nPixels = nStride * (SIZE_T)nAbsHeight;
-		if (nPixels > nMemSize - nHeaderBytes) {
+		// R-A3: compute the pixel byte count in 64 bits. With a 32-bit
+		// SIZE_T (Win32) nStride * nAbsHeight wraps: 32768x32768x32bpp
+		// has stride 131072, so the product is exactly 2^32 and wraps to
+		// 0, passing the extent check and letting GDI+ read pixels past
+		// the end of the block. The true product is at most
+		// 262140 * 65535 (< 2^35), so unsigned __int64 is exact here on
+		// both Win32 and x64.
+		const unsigned __int64 nPixels = (unsigned __int64)nStride * (unsigned __int64)nAbsHeight;
+		if (nPixels > (unsigned __int64)(nMemSize - nHeaderBytes)) {
 			return false;
 		}
 	}
