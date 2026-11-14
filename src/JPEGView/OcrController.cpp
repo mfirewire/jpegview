@@ -35,7 +35,7 @@ void COcrController::Reset() {
     m_result = {};
     m_selected.clear();
     m_active = m_selecting = m_hovering = false;
-    m_dragAnchor = m_dragEnd = -1;
+    m_dragAnchor = m_dragEnd = m_dragLastHit = -1;
 }
 
 void COcrController::Shutdown() {
@@ -129,7 +129,7 @@ void COcrController::Toggle(CMainDlg& main) {
         });
         m_result = {};
         m_selected.clear();
-        m_dragAnchor = m_dragEnd = -1;
+        m_dragAnchor = m_dragEnd = m_dragLastHit = -1;
     } catch (const std::exception&) {
         // Undo the publish. A job that is out but has no worker behind it would
         // never be marked done and never posts WM_OCR_COMPLETED, and the busy gate
@@ -178,13 +178,13 @@ bool COcrController::MouseDown(CMainDlg& main, CPoint point) {
         // Background click drops the selection but still leaves the event to
         // panning, which is what it did before multi-select existed.
         m_selected.assign(m_result.words.size(), false);
-        m_dragAnchor = m_dragEnd = -1;
+        m_dragAnchor = m_dragEnd = m_dragLastHit = -1;
         main.Invalidate(FALSE);
         return false;
     }
     // The word is not toggled yet: a click (press and release without moving)
     // toggles it in MouseUp, a drag replaces the selection with the swept range.
-    m_dragAnchor = m_dragEnd = hit;
+    m_dragAnchor = m_dragEnd = m_dragLastHit = hit;
     m_dragStart = point;
     m_dragMoved = false;
     m_selecting = true;
@@ -204,6 +204,7 @@ bool COcrController::MouseMove(CMainDlg& main, CPoint point) {
         if (!m_dragMoved && (dx > 4 || dx < -4 || dy > 4 || dy < -4)) {
             m_dragMoved = true;
         }
+        m_dragLastHit = hit;
         if (hit >= 0 && m_dragEnd != hit) { m_dragEnd = hit; main.Invalidate(FALSE); }
         ::SetCursor(::LoadCursor(nullptr, IDC_IBEAM));
         return true; // swallow while a selection is being dragged
@@ -220,7 +221,8 @@ bool COcrController::MouseUp(CMainDlg& main) {
     m_selecting = false;
     const int anchor = m_dragAnchor, end = m_dragEnd;
     const bool dragMoved = m_dragMoved;
-    m_dragAnchor = m_dragEnd = -1;
+    const int lastHit = m_dragLastHit;
+    m_dragAnchor = m_dragEnd = m_dragLastHit = -1;
     m_dragMoved = false;
     if (!wasSelecting || anchor < 0) return false;
 
@@ -238,6 +240,16 @@ bool COcrController::MouseUp(CMainDlg& main) {
         if (first > last) std::swap(first, last);
         for (int i = first; i <= last && size_t(i) < m_selected.size(); ++i) {
             m_selected[size_t(i)] = true;
+        }
+    } else if (lastHit == anchor) {
+        // Dragged out and back to the same word (or dragged within it): the
+        // swept range is just that word. This is the R-11 case: without
+        // m_dragLastHit it fell through to "keep the selection" below,
+        // because m_dragEnd never moves past the anchor while the pointer
+        // is over empty space.
+        std::fill(m_selected.begin(), m_selected.end(), false);
+        if (size_t(anchor) < m_selected.size()) {
+            m_selected[size_t(anchor)] = true;
         }
     }
     // else: dragged off the words and released over empty space, keep the

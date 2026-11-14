@@ -45,6 +45,14 @@ private:
     // 拖动则用一段连续范围整体替换。复制时按索引顺序拼接，天然是原文顺序。
     std::vector<bool> m_selected;
     int m_dragAnchor = -1, m_dragEnd = -1;
+    // Word index under the pointer at the latest MouseMove while a selection
+    // is being dragged, or -1 when it is over empty space. MouseUp needs it
+    // to tell "dragged out and back to the same word" (select that word)
+    // from "dragged off and released over empty space" (keep the selection):
+    // both leave m_dragEnd equal to the anchor, because MouseMove only
+    // updates m_dragEnd on a word hit. A bare "ever left the words" flag
+    // cannot tell them apart, so the release position is recorded instead.
+    int m_dragLastHit = -1;
     // Screen point of the press and whether the pointer moved far enough to turn
     // the gesture from a click into a drag. Without the threshold a shaky click
     // that grazes a neighbour word replaced the whole multi-selection, and a
