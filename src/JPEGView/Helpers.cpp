@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "Helpers.h"
+#include "FindEXIFBlock.h"
 #include "immintrin.h"
 #include "NLS.h"
 #include "MultiMonitorSupport.h"
@@ -408,43 +409,6 @@ void* FindJPEGMarker(void* pJPEGStream, int nStreamLength, unsigned char nMarker
 	}
 	if (nMarker == 0 || (pStream[nIndex] == nMarker && pStream[nIndex - 1] == 0xFF)) {
 		return &(pStream[nIndex - 1]); // place on marker start
-	}
-	return NULL;
-}
-
-void* FindEXIFBlock(void* pJPEGStream, int nStreamLength) {
-	uint8* pStream = (uint8*)pJPEGStream;
-	if (pStream == NULL || nStreamLength < 4 || pStream[0] != 0xFF || pStream[1] != 0xD8) {
-		return NULL; // not a JPEG
-	}
-	// Walk every header segment instead of stopping at the first APP1.
-	// A JPEG may legitimately carry an XMP APP1 before the Exif APP1 (exiftool
-	// -o, some phones and editors write them in that order). The old rule -
-	// "first 0xE1 or nothing" - returned NULL there, so the file lost its
-	// orientation, camera data and timestamp while every other viewer showed
-	// it correctly.
-	int nIndex = 2;
-	while (nIndex + 3 < nStreamLength) {
-		if (pStream[nIndex] != 0xFF) {
-			break; // entropy-coded data: no more header segments
-		}
-		while (nIndex < nStreamLength && pStream[nIndex] == 0xFF) nIndex++;
-		if (nIndex + 2 >= nStreamLength) break;
-		const unsigned char nSegmentMarker = pStream[nIndex];
-		if (nSegmentMarker == 0x00) break;                    // FF 00 is byte stuffing
-		if (nSegmentMarker == 0xDA || nSegmentMarker == 0xD9) break; // SOS / EOI
-		const int nBlockLength = pStream[nIndex + 1] * 256 + pStream[nIndex + 2];
-		if (nBlockLength < 2 || nIndex + 1 + nBlockLength > nStreamLength) {
-			break; // malformed: a length below 2 would not advance the index
-		}
-		// The segment starts at the 0xFF that precedes the marker byte, and the
-		// caller expects exactly that pointer (length at +2, "Exif" at +4).
-		if (nSegmentMarker == 0xE1 && nBlockLength >= 6 && nIndex >= 1 &&
-			nIndex + 7 <= nStreamLength &&
-			memcmp(pStream + nIndex + 3, "Exif", 4) == 0) {
-			return pStream + (nIndex - 1);
-		}
-		nIndex += 1 + nBlockLength;
 	}
 	return NULL;
 }

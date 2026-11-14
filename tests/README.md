@@ -103,6 +103,47 @@ CI runs both. The product PSD/JP2 wrappers themselves and the ICC
 profile paths are not covered here (they need MFC/lcms2) and still need
 a Windows device test against these same two files.
 
+## Loader regression tests (B-TEST1)
+
+The loader fixes the release notes call "covered by a regression case"
+now have cases in the repo. The decoders themselves are MFC-coupled and
+do not compile on Linux, so the testable logic was moved into plain
+headers that both the product and the test include:
+
+- PNM scaling: `src/JPEGView/PnmScale.h` holds the one scaling function
+  (`PnmScale::ScaleSamples`, moved verbatim out of `PPMWrapper.cpp`).
+  `tests/loader_pnm_test.cpp` decodes hand-written PNM samples with the
+  vendored stb_image and asserts the scaled pixels (8-bit maxval=15
+  white to 255, 16-bit maxval=4095 white to 255, maxval=255/65535
+  identity). `tests/check_pnm_scale.py` is the static gate: the
+  arithmetic lives only in `PnmScale.h`, and `PPMWrapper.cpp` must call
+  it exactly once and hold no second copy.
+- JPEG Exif APP1: `src/JPEGView/FindEXIFBlock.h` holds the segment walk
+  (moved verbatim out of `Helpers.cpp`; only `uint8` became
+  `unsigned char`, the same type). `tests/loader_jpeg_exif_test.cpp`
+  runs it over hand-written JPEG samples: Exif APP1 first, XMP APP1 in
+  front of Exif (still found), over-short "Exif" APP1 (rejected), and
+  no-Exif files (NULL).
+- TGA 15-bit RLE: the RLE decoder is embedded in `ReaderTGA.cpp` and
+  cannot be extracted, so there is no C++ test for it.
+  `tests/check_tga_rle_sample.py` is sample + reference validation only:
+  it decodes the hand-written 15-bit RLE samples per the TGA spec and
+  asserts the pixels. Decoding them through the real loader still needs
+  a Windows device test.
+
+```sh
+g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_pnm_test.cpp -o /tmp/loader_pnm_test
+/tmp/loader_pnm_test
+g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_jpeg_exif_test.cpp -o /tmp/loader_jpeg_exif_test
+/tmp/loader_jpeg_exif_test
+python3 tests/check_pnm_scale.py
+python3 tests/check_tga_rle_sample.py
+```
+
+CI runs all four. Samples live in `tests/samples/` (`pnm_*`, `jpeg_*`,
+`tga15_*`); each is a hand-written minimal file, and its expected
+pixels are stated in the test that reads it.
+
 ## Adding the next one
 
 If you are about to rely on a convention that is not visible in the source

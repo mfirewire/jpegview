@@ -75,3 +75,28 @@ jobs:
 
       - name: CMYK reference check
         run: python3 tests/cmyk_reference_check.py
+
+  loader-regression-test:
+    name: Loader regression tests (B-TEST1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: PNM scaling test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_pnm_test.cpp -o /tmp/loader_pnm_test
+          /tmp/loader_pnm_test
+
+      - name: JPEG Exif APP1 test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_jpeg_exif_test.cpp -o /tmp/loader_jpeg_exif_test
+          /tmp/loader_jpeg_exif_test
+
+      - name: PNM scale contract gate
+        run: python3 tests/check_pnm_scale.py
+
+      - name: TGA 15-bit RLE sample check
+        run: python3 tests/check_tga_rle_sample.py
