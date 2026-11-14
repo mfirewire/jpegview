@@ -338,8 +338,13 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 	::GlobalUnlock(hMem); 
 	if (::SetClipboardData(CF_DIB, hMem) == NULL) {
 		// The handle belongs to the clipboard only on success; on
-		// failure it is still ours and must be freed.
+		// failure it is still ours and must be freed. Do not copy the
+		// file name either: EmptyClipboard above already destroyed the
+		// old contents, so copying only the name would leave the
+		// clipboard holding just the name after the image failed (R-A15).
 		::GlobalFree(hMem);
+		::CloseClipboard();
+		return;
 	}
 
 	if (fileName != NULL) {
