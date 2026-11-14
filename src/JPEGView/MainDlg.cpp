@@ -2574,6 +2574,21 @@ bool CMainDlg::SaveImageNoPrompt(LPCTSTR sFileName, bool bFullSize, bool bJxlTra
 
 	HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));	
 
+	// R-A6: m_bSaveLossless is a sticky member, set by the save dialog from
+	// the chosen filter. A silent save (Ctrl+S) must not reuse it as-is:
+	// after one lossless WebP dialog save it stayed true and a later Ctrl+S
+	// on a .jxl/.jp2 file silently saved losslessly. Recompute it from the
+	// target extension and the per-format choice, so the flag always matches
+	// the encoder that will actually run (Helpers::GetImageFormat is the
+	// same dispatch SaveImage uses). Other formats have no lossless
+	// variant, so the flag is false for them. The dialog path itself is
+	// untouched: it still sets the three per-format flags from the filter.
+	switch (Helpers::GetImageFormat(sFileName)) {
+	case IF_WEBP: m_bSaveLossless = m_bUseLosslessWEBP; break;
+	case IF_JXL: m_bSaveLossless = m_bUseLosslessJXL; break;
+	case IF_JP2: m_bSaveLossless = m_bUseLosslessJP2; break;
+	default: m_bSaveLossless = false; break;
+	}
 	bool result;
 	if (!bJxlTranscode) {
 		result = CSaveImage::SaveImage(sFileName, m_pCurrentImage, *m_pImageProcParams,
