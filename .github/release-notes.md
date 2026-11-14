@@ -17,9 +17,11 @@ and covered by a regression case.
 
 ## Known issues (not fixed in this version)
 
-- A file whose first load fails stays unopenable for the rest of the session.
-- A path given with forward slashes opens the image but builds no file list.
+- A file whose first load fails usually stays unopenable for the rest of the session; the dead request can be evicted under cache pressure, after which a non-RAW/TIFF file may load again on revisit.
+- A path given with forward slashes does not open the image at all: the window shows the no-image empty state and no file list is built.
 - Renaming with name sorting leaves the entry at its old position.
+- Shift+Delete permanently deletes the current file from disk (with a confirmation prompt); it does not use the Recycle Bin. Plain Delete moves the file to the Recycle Bin.
+- Colour management (embedded ICC profiles) applies to JPEG and PNG. Exceptions: images decoded through the WIC fallback get no colour management, and CMYK JPEGs always convert - the switch only chooses between the embedded CMYK profile and the shipped cmyk.icm (a naive formula is the last resort).
 
 ## Downloads
 

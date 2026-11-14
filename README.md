@@ -47,6 +47,7 @@ Press `Ctrl+Q` (or menu *Recognize text (OCR)*) to recognize the text in the cur
 
 * Mixed Chinese/English images are recognized with both engines and the results are merged line by line, so Chinese and English words appear in reading order.
 * Click or drag over words to select them; `Ctrl+C` copies the selection (or all recognized text when nothing is selected), `Ctrl+A` selects all. `Esc` hides the result.
+* For animated images, pause the animation first (Esc stops it) so the text is taken from a stable frame.
 * Configure it in `JPEGView.ini`: `OcrShortcut` (default `Ctrl+Q`) and `OcrLanguages` (default `zh-CN,zh-TW,en-US`; empty means the installed languages, in Windows' own order).
 * The result belongs to the image as recognized: changing the image, rotating, cropping or mirroring clears it.
 

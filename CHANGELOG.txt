@@ -17,6 +17,12 @@ Hardening:
 - Installer: .jpx and .jpf are now registered as JPEGView file types (SupportedTypes and SystemFileAssociations), matching the 47 endings the application itself already browses
 - YMCK polarity guard (rule 3) now also covers the JP2 naive CMYK converter (InkToRgb in component order), the raw-complement rule now catches the `~word` form, and the single InvertPlaneInPlace call has its pixel count and stride arguments checked too
 
+Documentation:
+- Release notes: the known-issue descriptions are corrected - a forward-slash path does not open the image at all (empty state, no file list), and a first load failure usually, not always, blocks the file for the session (the dead request can be evicted under cache pressure, after which a non-RAW/TIFF file may load again)
+- Release notes: Shift+Delete permanently deletes the current file from disk (with a confirmation prompt), it does not use the Recycle Bin; and the colour-management exceptions are now stated (the WIC fallback gets none, CMYK JPEGs always convert with the embedded profile or cmyk.icm)
+- INI: the UseEmbeddedColorProfiles comment no longer claims a PNG gAMA/sRGB chunk is always applied by libpng; it follows the switch (off means the chunk is ignored and the raw values are shown)
+- README: OCR now notes to pause the animation first (Esc stops it) so the text is taken from a stable frame
+
 [1.3.46-20261110] 2026-11-10
 New features:
 - Saving: the compression ratio of lossy JP2 files is configurable with the JP2LossyRate INI key (1..100, default 10, the historical 10:1); lossless JP2 ignores it
