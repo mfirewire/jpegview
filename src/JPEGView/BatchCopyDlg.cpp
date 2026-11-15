@@ -353,14 +353,30 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 		nIndex++;
 	}
 
+	// R-A10: undo failures are counted so the result line can report
+	// them; the undo calls below are checked like RemoveDirectory
+	// (P1-13) instead of silently reporting a full rollback.
+	int nRollbackFailed = 0;
 	if (bAborted && !done.empty()) {
 		// Undo in reverse order: delete what was copied, move renames back and
 		// remove directories this run created (only if they are empty now).
 		for (size_t i = done.size(); i-- > 0; ) {
 			if (done[i].bCopy) {
-				::DeleteFile(done[i].sTo);
+				if (!::DeleteFile(done[i].sTo)) {
+					CString sLog;
+					sLog.Format(_T("JPEGView: batch rollback: could not delete \"%s\" (error %u)\n"),
+						(LPCTSTR)done[i].sTo, (unsigned int)::GetLastError());
+					::OutputDebugString(sLog);
+					nRollbackFailed++;
+				}
 			} else {
-				::MoveFileEx(done[i].sTo, done[i].sFrom, 0);
+				if (!::MoveFileEx(done[i].sTo, done[i].sFrom, 0)) {
+					CString sLog;
+					sLog.Format(_T("JPEGView: batch rollback: could not move \"%s\" back to \"%s\" (error %u)\n"),
+						(LPCTSTR)done[i].sTo, (LPCTSTR)done[i].sFrom, (unsigned int)::GetLastError());
+					::OutputDebugString(sLog);
+					nRollbackFailed++;
+				}
 			}
 			if (!done[i].sCreatedDir.IsEmpty()) {
 				// P1-13: remove the chain this run created, deepest first, and
@@ -391,7 +407,11 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 
 	CString strResult;
 	if (bAborted) {
-		strResult.Format(CNLS::GetString(_T("%d file operation(s) rolled back.")), (int)done.size());
+		if (nRollbackFailed > 0) {
+			strResult.Format(CNLS::GetString(_T("%d file operation(s) rolled back, %d failed.")), (int)done.size(), nRollbackFailed);
+		} else {
+			strResult.Format(CNLS::GetString(_T("%d file operation(s) rolled back.")), (int)done.size());
+		}
 	} else {
 		strResult.Format(CNLS::GetString(_T("%d file(s) renamed, %d file(s) copied, %d folder(s) created")),
 			nFilesRenamed, nFilesCopied, nDirsCreated);

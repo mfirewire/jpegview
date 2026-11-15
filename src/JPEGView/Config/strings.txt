@@ -488,3 +488,4 @@ invalid file name
 target file already exists	
 the same target name is used more than once	
 %d file operation(s) rolled back.	
+%d file operation(s) rolled back, %d failed.	
