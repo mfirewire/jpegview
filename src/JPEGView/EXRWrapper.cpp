@@ -29,6 +29,7 @@
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "Helpers.h"
+#include "HdrToneMap.h"
 #include <new>
 
 void* EXRReader::ReadImage(int& width,
@@ -152,15 +153,34 @@ void* EXRReader::ReadImage(int& width,
 	}
 	// Zero the row padding so no uninitialised bytes reach the DIB.
 	memset(pPixelData, 0, allocSize);
-	// Tone map: scene-linear float -> 8-bit with gamma 2.2, the same
-	// choice as the HDR wrapper's stb_image path (HDRWrapper.cpp). Values
-	// above 1.0 clip to white; there is no exposure control in this pass.
-	// Alpha is composited over white in linear space first (white = 1.0),
-	// so a transparent pixel shows as white, not black.
+	// Tone map: composite alpha over white in linear space first
+	// (white = 1.0), so a transparent pixel shows as white, not black,
+	// then tone-map the scene-linear floats with
+	// HdrToneMap::ConvertLinearImage (BT.2390, linear 1.0 = SDR white).
+	// Highlights above linear 1.0 now roll off smoothly instead of
+	// hard-clipping to white; SDR-range content passes through the
+	// sRGB OETF.
+	// The composited linear RGB lives in a transient buffer (3 floats
+	// per pixel); it is smaller than the RGBA float buffer tinyexr
+	// already allocated, and is freed before returning.
+	size_t rgbFloats = 0;
+	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &rgbFloats)) {
+		outOfMemory = true;
+		free(pRGBA);
+		delete[] pPixelData;
+		return NULL;
+	}
+	float* pRGB = new(std::nothrow) float[(size_t)width * (size_t)height * 3];
+	if (pRGB == NULL) {
+		outOfMemory = true;
+		free(pRGBA);
+		delete[] pPixelData;
+		return NULL;
+	}
 	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < width; x++) {
 			size_t srcIdx = ((size_t)y * (size_t)width + (size_t)x) * 4;
-			size_t dstIdx = (size_t)y * padded_stride + (size_t)x * 3;
+			size_t dstIdx = ((size_t)y * (size_t)width + (size_t)x) * 3;
 			float r = pRGBA[srcIdx];
 			float g = pRGBA[srcIdx + 1];
 			float b = pRGBA[srcIdx + 2];
@@ -171,33 +191,25 @@ void* EXRReader::ReadImage(int& width,
 			// alpha would otherwise poison the composite below.
 			if (!(a >= 0.0f)) a = 0.0f;
 			if (a > 1.0f) a = 1.0f;
-			// Composite over white, then gamma-map each channel.
+			// Composite over white in linear space. Negative/NaN
+			// channels are clamped to 0 here (the !(x >= 0) test is
+			// true for NaN as well as negatives); ConvertLinearImage
+			// would clamp them too, but the composite must not see
+			// a NaN input.
 			float rw = r * a + (1.0f - a);
 			float gw = g * a + (1.0f - a);
 			float bw = b * a + (1.0f - a);
-			if (rw < 0.0f) rw = 0.0f;
-			if (gw < 0.0f) gw = 0.0f;
-			if (bw < 0.0f) bw = 0.0f;
-			// powf(..., 1/2.2): 0 -> 0, 1 -> 255, >1 clamps to 255 below.
-			float rf = powf(rw, 1.0f / 2.2f) * 255.0f;
-			float gf = powf(gw, 1.0f / 2.2f) * 255.0f;
-			float bf = powf(bw, 1.0f / 2.2f) * 255.0f;
-			if (rf > 255.0f) rf = 255.0f;
-			if (gf > 255.0f) gf = 255.0f;
-			if (bf > 255.0f) bf = 255.0f;
-			// R-12: NaN passes every comparison above (NaN < 0 and
-			// NaN > 255 are both false), so a NaN channel would reach
-			// the (unsigned char) cast below, which is UB. !(x >= 0)
-			// is true for NaN as well as negatives.
-			if (!(rf >= 0.0f)) rf = 0.0f;
-			if (!(gf >= 0.0f)) gf = 0.0f;
-			if (!(bf >= 0.0f)) bf = 0.0f;
-			// JPEGView pixels are BGR.
-			pPixelData[dstIdx] = (unsigned char)(bf + 0.5f);
-			pPixelData[dstIdx + 1] = (unsigned char)(gf + 0.5f);
-			pPixelData[dstIdx + 2] = (unsigned char)(rf + 0.5f);
+			if (!(rw >= 0.0f)) rw = 0.0f;
+			if (!(gw >= 0.0f)) gw = 0.0f;
+			if (!(bw >= 0.0f)) bw = 0.0f;
+			pRGB[dstIdx] = rw;
+			pRGB[dstIdx + 1] = gw;
+			pRGB[dstIdx + 2] = bw;
 		}
 	}
+	// Tone-map the composited linear floats to 8-bit sRGB BGR.
+	HdrToneMap::ConvertLinearImage(pRGB, width, height, (size_t)width * 3, pPixelData, padded_stride);
+	delete[] pRGB;
 	free(pRGBA);
 	return (void*)pPixelData;
 }
