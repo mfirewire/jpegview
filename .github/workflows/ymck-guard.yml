@@ -139,3 +139,16 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_test.cpp src/JPEGView/GainMap.cpp -o /tmp/gainmap_test
           /tmp/gainmap_test
+  avif-gainmap-test:
+    name: AVIF gain-map path test (Option D, Phase 4)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: AVIF gain-map unit test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/libavif/include tests/avif_gainmap_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/avif_gainmap_test
+          /tmp/avif_gainmap_test
