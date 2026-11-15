@@ -144,35 +144,6 @@ CI runs all four. Samples live in `tests/samples/` (`pnm_*`, `jpeg_*`,
 `tga15_*`); each is a hand-written minimal file, and its expected
 pixels are stated in the test that reads it.
 
-## OCR joining mirror (#84)
-
-The OCR word-joining logic (`SelectedText`, `NeedsSpaceBetween`,
-`SplitInsideLatinWord`, `PunctJoinsWithoutSpace`, `MergeEngineLines` in
-`src/JPEGView/OcrEngine.cpp`) is Windows-only (WinRT), so it cannot be
-compiled on Linux. `tests/check_ocr_84_mirror.py` is a Python mirror of
-exactly that logic, run over the two real samples in `tests/samples/`:
-
-- `ocr_ko_words.png` (1500x560, Malgun Gothic 72px): four Korean lines.
-  Before the fix the mirror joins them without spaces
-  ("안녕하세요세계"); after, the spaces are kept ("안녕하세요 세계").
-- `ocr_vertical_zh.png` (980x720, SimSun 96px, 3 columns x 5 chars):
-  the three columns share one vertical centre, so the old sort
-  degenerates to left-first and the order comes out reversed
-  ("夜来风雨声" first); after, the right column comes first
-  ("春眠不觉晓" first).
-
-The mirror measures the word/column boxes from the images themselves
-(projection analysis) and asserts the before/after text for both
-samples, plus the vertical-gap direction for the Latin-word check and
-the Chinese/Japanese no-space regression. It verifies the joining
-logic only; the WinRT recognition itself (whether vertical text comes
-back as one column per line) still needs a Windows device test on
-these same two files.
-
-```sh
-python3 tests/check_ocr_84_mirror.py
-```
-
 ## Adding the next one
 
 If you are about to rely on a convention that is not visible in the source
