@@ -343,7 +343,11 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
             text = L"OCR";
             const std::wstring& tag = m_result.languageTag.empty() ? m_result.language : m_result.languageTag;
             if (!tag.empty()) { text += L" ["; text += tag; text += L"]"; }
-            text += L": click words to toggle, drag for a range | Ctrl+A select all | Ctrl+C copy | Esc hide";
+            // #91: the hint must state the empty-selection meaning of Ctrl+C
+            // (it copies all text when nothing is selected). The suffix is a
+            // CNLS string so it can be translated like other UI text.
+            text += L": ";
+            text += CNLS::GetString(_T("click words to toggle, drag for a range | Ctrl+A select all | Ctrl+C copy (all text if nothing selected) | Esc hide"));
         }
         const int saved = ::SaveDC(dc);
         ::SetTextColor(dc, RGB(255, 255, 255));

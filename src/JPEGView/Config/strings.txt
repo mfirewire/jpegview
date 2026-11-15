@@ -389,6 +389,7 @@ Zoom in (%s)/Zoom out (%s)
 Zoom in/out image	
 Zoom mode (drag mouse to zoom)	
 and image processing (brightness/contrast/sharpen) parameters between images	
+click words to toggle, drag for a range | Ctrl+A select all | Ctrl+C copy (all text if nothing selected) | Esc hide	
 cm	
 in	
 new menu entry	
