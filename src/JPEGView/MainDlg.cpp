@@ -1080,6 +1080,11 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 		}
 	}
 	bool bHandled = false;
+	// #74 (L-U02): look the key up in the KeyMap before the hardcoded
+	// digit slideshow and F1 help below, so a user rebinding of those
+	// keys takes effect. With the default KeyMap neither digits nor F1
+	// are bound, so the hardcoded branches are reached unchanged.
+	int nCommand = m_pKeyMap->GetCommandIdForKey((int)wParam, bAlt, bCtrl, bShift);
 	if (wParam == VK_ESCAPE && CloseHelpDlg()) {
 		bHandled = true;
 	} else if (wParam == VK_ESCAPE && m_pCropCtl->IsCropping()) {
@@ -1095,6 +1100,9 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 		bHandled = true;
 		m_pFileList->SetNavigationMode(Helpers::NM_LoopSubDirectories);
 		GotoImage(POS_Next);
+	} else if (nCommand > 0) {
+		bHandled = true;
+		ExecuteCommand(nCommand);
 	} else if (wParam >= '1' && wParam <= '9' && (!bShift || bCtrl)) {
 		// Start the slideshow
 		bHandled = true;
@@ -1110,12 +1118,6 @@ LRESULT CMainDlg::OnKeyDown(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOO
 	} else if (wParam == VK_F1) {
 		bHandled = true;
 		ExecuteCommand(IDM_HELP);
-	} else {
-		int nCommand = m_pKeyMap->GetCommandIdForKey((int)wParam, bAlt, bCtrl, bShift);
-		if (nCommand > 0) {
-			bHandled = true;
-			ExecuteCommand(nCommand);
-		}
 	}
 
 	if (!bHandled) {
