@@ -356,4 +356,80 @@ void ConvertImage(const float* srcRgb, int width, int height, size_t srcStrideFl
     }
 }
 
+double ComputePeakLinear(const float* srcRgb, int width, int height, size_t srcStrideFloats) {
+    if (srcRgb == NULL || width <= 0 || height <= 0) return 0.0;
+    double peak = 0.0;
+    for (int y = 0; y < height; y++) {
+        const float* srcRow = srcRgb + (size_t)y * srcStrideFloats;
+        for (int x = 0; x < width; x++) {
+            double r = (double)srcRow[(size_t)x * 3 + 0];
+            double g = (double)srcRow[(size_t)x * 3 + 1];
+            double b = (double)srcRow[(size_t)x * 3 + 2];
+            // Negative/NaN channels contribute 0 (ConvertLinearPixel
+            // clamps them to 0); skip them here so a NaN cannot poison
+            // the peak.
+            if (!(r >= 0.0)) r = 0.0;
+            if (!(g >= 0.0)) g = 0.0;
+            if (!(b >= 0.0)) b = 0.0;
+            double yLum = r * kSrgbLuma[0] + g * kSrgbLuma[1] + b * kSrgbLuma[2];
+            if (yLum > peak) peak = yLum;
+        }
+    }
+    return peak;
+}
+
+void ConvertLinearPixel(double r, double g, double b, double peakLinear,
+                        uint8_t& outR, uint8_t& outG, uint8_t& outB) {
+    // Linear 1.0 is SDR white. The content peak in nits is peakLinear *
+    // kSdrWhiteNits; Bt2390EetfPq is the identity when that peak is at
+    // or below SDR white, so SDR-range content passes through the sRGB
+    // OETF unchanged. Negative/NaN inputs clamp to 0 (the !(v >= 0)
+    // test is true for NaN as well as negatives).
+    double peakNits = peakLinear * kSdrWhiteNits;
+    if (!(peakNits > 0.0)) peakNits = kSdrWhiteNits;
+    double cr = r, cg = g, cb = b;
+    if (!(cr >= 0.0)) cr = 0.0;
+    if (!(cg >= 0.0)) cg = 0.0;
+    if (!(cb >= 0.0)) cb = 0.0;
+    // Linear -> nits -> PQ signal -> EETF -> nits -> display-linear
+    // (SDR white = 1.0), the same PQ-domain roll-off as the PQ/HLG
+    // path, so both share one highlight curve.
+    double sigR = PqNitsToSignal(cr * kSdrWhiteNits);
+    double sigG = PqNitsToSignal(cg * kSdrWhiteNits);
+    double sigB = PqNitsToSignal(cb * kSdrWhiteNits);
+    double eR = Bt2390EetfPq(sigR, peakNits);
+    double eG = Bt2390EetfPq(sigG, peakNits);
+    double eB = Bt2390EetfPq(sigB, peakNits);
+    double linR = PqSignalToNits(eR) / kSdrWhiteNits;
+    double linG = PqSignalToNits(eG) / kSdrWhiteNits;
+    double linB = PqSignalToNits(eB) / kSdrWhiteNits;
+    // Gamut is identity (sRGB primaries); GamutMap still runs as a
+    // safety clamp for out-of-range values.
+    GamutMap(&linR, &linG, &linB);
+    outR = ToByte(SrgbOetf(linR));
+    outG = ToByte(SrgbOetf(linG));
+    outB = ToByte(SrgbOetf(linB));
+}
+
+void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
+                        uint8_t* dstBgr, size_t dstStrideBytes) {
+    if (srcRgb == NULL || dstBgr == NULL || width <= 0 || height <= 0) return;
+    double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
+    for (int y = 0; y < height; y++) {
+        const float* srcRow = srcRgb + (size_t)y * srcStrideFloats;
+        uint8_t* dstRow = dstBgr + (size_t)y * dstStrideBytes;
+        for (int x = 0; x < width; x++) {
+            double r = (double)srcRow[(size_t)x * 3 + 0];
+            double g = (double)srcRow[(size_t)x * 3 + 1];
+            double b = (double)srcRow[(size_t)x * 3 + 2];
+            uint8_t outR = 0, outG = 0, outB = 0;
+            ConvertLinearPixel(r, g, b, peakLinear, outR, outG, outB);
+            // JPEGView pixels are BGR.
+            dstRow[(size_t)x * 3 + 0] = outB;
+            dstRow[(size_t)x * 3 + 1] = outG;
+            dstRow[(size_t)x * 3 + 2] = outR;
+        }
+    }
+}
+
 }  // namespace HdrToneMap

@@ -222,6 +222,80 @@ void TestComputePeakNits() {
           "ComputePeakNits black image falls back to 203");
 }
 
+void TestConvertLinearPixel() {
+    using namespace HdrToneMap;
+    uint8_t outR = 0, outG = 0, outB = 0;
+    // Linear 1.0 is SDR white: with a peak of 1.0 it must come out 255.
+    ConvertLinearPixel(1.0, 1.0, 1.0, 1.0, outR, outG, outB);
+    Check(outR == 255 && outG == 255 && outB == 255,
+          "linear 1.0 (peak 1.0) -> sRGB 255");
+    // Black stays black.
+    ConvertLinearPixel(0.0, 0.0, 0.0, 1.0, outR, outG, outB);
+    Check(outR == 0 && outG == 0 && outB == 0, "linear black -> 0");
+    // 18% grey, peak 1.0: sRGB OETF(0.18) = 0.4614, * 255 = 117.6 -> 118.
+    // (The old pow(v, 1/2.2) path gave 117; the sRGB OETF is the
+    // standards-correct curve, so a +/-2 band is used here.)
+    ConvertLinearPixel(0.18, 0.18, 0.18, 1.0, outR, outG, outB);
+    Check(outR >= 116 && outR <= 120 &&
+          outG >= 116 && outG <= 120 &&
+          outB >= 116 && outB <= 120,
+          "linear 18% grey (peak 1.0) -> sRGB ~118");
+    // Mid-tone, peak 1.0: sRGB OETF(0.5) = 0.7354, * 255 = 187.5 -> 188.
+    ConvertLinearPixel(0.5, 0.5, 0.5, 1.0, outR, outG, outB);
+    Check(outR >= 186 && outR <= 190,
+          "linear 0.5 (peak 1.0) -> sRGB ~188");
+    // HDR roll-off: with a peak of 16.0, linear 1.0 must NOT clip to
+    // 255 (the old pow() path gave 255) - it rolls off to ~211.
+    ConvertLinearPixel(1.0, 1.0, 1.0, 16.0, outR, outG, outB);
+    Check(outR > 180 && outR < 255,
+          "linear 1.0 (peak 16) rolls off, does not clip");
+    // Linear 4.0 with a peak of 16.0: ~249, still below white.
+    ConvertLinearPixel(4.0, 4.0, 4.0, 16.0, outR, outG, outB);
+    Check(outR > 230 && outR < 255,
+          "linear 4.0 (peak 16) rolls off, does not clip");
+    // The peak itself maps to white.
+    ConvertLinearPixel(16.0, 16.0, 16.0, 16.0, outR, outG, outB);
+    Check(outR == 255 && outG == 255 && outB == 255,
+          "linear peak (16) -> sRGB 255");
+    // Negative and NaN inputs map to 0 (the !(v >= 0) guard).
+    ConvertLinearPixel(-1.0, -1.0, -1.0, 1.0, outR, outG, outB);
+    Check(outR == 0 && outG == 0 && outB == 0, "linear negative -> 0");
+    double nan = std::nan("");
+    ConvertLinearPixel(nan, nan, nan, 1.0, outR, outG, outB);
+    Check(outR == 0 && outG == 0 && outB == 0, "linear NaN -> 0");
+}
+
+void TestComputePeakLinear() {
+    using namespace HdrToneMap;
+    // A 2x1 image: one 0.5-grey pixel, one black. Peak luminance is 0.5.
+    float img[6] = { 0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 0.0f };
+    double peak = ComputePeakLinear(img, 2, 1, 6);
+    Check(Near(peak, 0.5, 1e-9), "ComputePeakLinear finds 0.5 for grey chart");
+    // All-black image: peak is 0 (the caller maps it to SDR white).
+    float black[3] = { 0.0f, 0.0f, 0.0f };
+    Check(Near(ComputePeakLinear(black, 1, 1, 3), 0.0, 1e-12),
+          "ComputePeakLinear black image -> 0");
+    // A NaN channel must not poison the peak.
+    float withNan[6] = { 0.25f, 0.25f, 0.25f, (float)std::nan(""), 0.0f, 0.0f };
+    Check(Near(ComputePeakLinear(withNan, 2, 1, 6), 0.25, 1e-9),
+          "ComputePeakLinear ignores NaN channel");
+}
+
+void TestConvertLinearImage() {
+    using namespace HdrToneMap;
+    // A 2x1 image: white (linear 1.0) and 18% grey. Peak is 1.0, so the
+    // output must be sRGB white and ~118. Output is BGR (JPEGView order).
+    float img[6] = { 1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f };
+    uint8_t out[6] = { 0, 0, 0, 0, 0, 0 };
+    ConvertLinearImage(img, 2, 1, 6, out, 6);
+    Check(out[0] == 255 && out[1] == 255 && out[2] == 255,
+          "ConvertLinearImage white pixel -> BGR 255,255,255");
+    Check(out[3] >= 116 && out[3] <= 120 &&
+          out[4] >= 116 && out[4] <= 120 &&
+          out[5] >= 116 && out[5] <= 120,
+          "ConvertLinearImage grey pixel -> BGR ~118");
+}
+
 }  // namespace
 
 int main() {
@@ -232,6 +306,9 @@ int main() {
     TestConvertPixel();
     TestDetection();
     TestComputePeakNits();
+    TestConvertLinearPixel();
+    TestComputePeakLinear();
+    TestConvertLinearImage();
     std::printf("hdr_tonemap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

@@ -123,4 +123,48 @@ void ConvertImage(const float* srcRgb, int width, int height, size_t srcStrideFl
                   uint8_t* dstRgb, size_t dstStrideBytes,
                   Transfer transfer, Primaries primaries);
 
+// ---- Linear-float input (Radiance .hdr / OpenEXR) ----
+//
+// These take scene-linear float RGB (sRGB primaries), the format
+// HDRWrapper (.hdr) and EXRWrapper (.exr) decode to. Linear 1.0 is SDR
+// white (kSdrWhiteNits): a pixel at linear 1.0 maps to sRGB 255, and
+// the BT.2390 EETF is the identity when the content peak is at or below
+// linear 1.0, so SDR-range content passes through the sRGB OETF
+// unchanged (up to the sRGB-OETF-vs-2.2-gamma difference from the old
+// pow(v, 1/2.2) path, which is a few levels in the deep shadows and
+// +/-2 in the mid-tones, and is the standards-correct curve). Linear
+// values above 1.0 are HDR: the content peak (in nits, peakLinear *
+// kSdrWhiteNits) drives the same BT.2390 EETF as the PQ/HLG path, so
+// highlights roll off smoothly to SDR white instead of hard-clipping.
+//
+// NOTE: this anchors linear 1.0 to SDR white. An earlier draft mapped
+// the content peak to kHdrPeakNits (1000 nits) instead; that is wrong
+// for SDR-range content, because it re-exposes the whole image (a
+// linear 0.18 grey came out at 223 instead of 118). Verified
+// numerically in Python before this was written.
+
+// Compute the content peak in scene-linear units from an interleaved
+// float RGB buffer (width x height, 3 floats per pixel, srcStrideFloats
+// floats between rows). Returns the max linear luminance (sRGB luma
+// coefficients). Returns 0.0 when there is no positive value. A single
+// very hot pixel (sun, light source) can dominate the peak and darken
+// the rest; v1 uses the max for consistency with ComputePeakNits
+// (PQ/HLG). No percentile/exposure control in v1.
+double ComputePeakLinear(const float* srcRgb, int width, int height, size_t srcStrideFloats);
+
+// Convert one scene-linear float RGB pixel (sRGB primaries) to 8-bit
+// sRGB. `peakLinear` is the content peak from ComputePeakLinear.
+// Negative/NaN inputs map to 0. Output is sRGB bytes (R, G, B).
+void ConvertLinearPixel(double r, double g, double b, double peakLinear,
+                        uint8_t& outR, uint8_t& outG, uint8_t& outB);
+
+// Convert a whole image of interleaved float RGB (width x height x 3
+// floats, scene-linear, sRGB primaries) to 8-bit sRGB BGR (width x
+// height x 3 bytes, B,G,R, the JPEGView pixel order). Computes the
+// content peak internally. `srcStrideFloats` is the float stride between
+// rows (usually width*3); `dstStrideBytes` the byte stride between rows
+// (padded).
+void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
+                        uint8_t* dstBgr, size_t dstStrideBytes);
+
 }  // namespace HdrToneMap
