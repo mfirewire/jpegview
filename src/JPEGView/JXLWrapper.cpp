@@ -10,6 +10,7 @@
 #include "jxl/resizable_parallel_runner.h"
 #include "jxl/resizable_parallel_runner_cxx.h"
 #include "Helpers.h"
+#include "HdrToneMap.h"
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
@@ -36,8 +37,70 @@ bool JxlReader::ExifReserve(size_t new_size) {
 
 // based on https://github.com/libjxl/libjxl/blob/main/examples/decode_oneshot.cc
 // and https://github.com/libjxl/libjxl/blob/main/examples/decode_exif_metadata.cc
+// HDR (Option A): convert the 16-bit RGBA pixels libjxl wrote (depth 16,
+// values scaled to [0, 65535]) to 8-bit BGRA via the HdrToneMap helper.
+// Two passes: build a float RGB buffer and compute the content peak
+// (for the content-adaptive EETF), then tone-map each pixel. Returns a
+// new 8-bit BGRA buffer (caller owns it), or NULL on allocation failure.
+// The alpha channel is ignored (the tone mapper works on RGB); the output
+// alpha is opaque.
+static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp)
+{
+	size_t rgbSize = 0;
+	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &rgbSize))
+		return NULL;
+	float* rgb = new(std::nothrow) float[(size_t)width * height * 3];
+	if (rgb == NULL)
+		return NULL;
+	// Pass 1: 16-bit RGBA -> float RGB (0..1). RGBA order: R, G, B, A.
+	const uint16_t* p16 = (const uint16_t*)pixels16;
+	for (int y = 0; y < height; y++)
+	{
+		for (int x = 0; x < width; x++)
+		{
+			const uint16_t* px = p16 + ((size_t)y * width + x) * 4;
+			float* dst = rgb + ((size_t)y * width + x) * 3;
+			dst[0] = (float)((double)px[0] / 65535.0);
+			dst[1] = (float)((double)px[1] / 65535.0);
+			dst[2] = (float)((double)px[2] / 65535.0);
+		}
+	}
+	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cicp.transfer);
+	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cicp.primaries);
+	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)width * height, transfer, primaries);
+	// Pass 2: tone-map each pixel to 8-bit BGRA.
+	size_t outSize = 0;
+	if (!IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &outSize)) {
+		delete[] rgb;
+		return NULL;
+	}
+	unsigned char* out = new(std::nothrow) unsigned char[outSize];
+	if (out == NULL) {
+		delete[] rgb;
+		return NULL;
+	}
+	for (int y = 0; y < height; y++)
+	{
+		for (int x = 0; x < width; x++)
+		{
+			const float* src = rgb + ((size_t)y * width + x) * 3;
+			unsigned char* dst = out + ((size_t)y * width + x) * 4;
+			uint8_t r = 0, g = 0, b = 0;
+			HdrToneMap::ConvertPixel((double)src[0], (double)src[1], (double)src[2],
+				transfer, primaries, peakNits, r, g, b);
+			dst[0] = b;
+			dst[1] = g;
+			dst[2] = r;
+			dst[3] = 0xff;
+		}
+	}
+	delete[] rgb;
+	return out;
+}
+
 bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector<uint8_t>* pixels, int& xsize,
-	int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory, bool& isSizeLimitExceeded) {
+	int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory, bool& isSizeLimitExceeded,
+	bool& isHdr, HdrToneMap::Cicp& cicp) {
 
 	// F-16: true only on the first decode of a file, when the decoder is
 	// created below; the total frame count is counted on that call (JXL
@@ -92,6 +155,14 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 
 	JxlBasicInfo info;
 	JxlPixelFormat format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
+	// HDR (Option A): the COLOR_ENCODING event fires only once per
+	// file, so a sequential animation frame never sees it again.
+	// Seed the format and the out-params from the cache (set on the
+	// first decode of this file); the event below updates them.
+	isHdr = cache.isHdr;
+	cicp = cache.cicp;
+	if (cache.isHdr)
+		format.data_type = JXL_TYPE_UINT16;
 	const constexpr size_t kChunkSize = 65536;
 	size_t output_pos = 0;
 
@@ -125,19 +196,53 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 				cache.runner,
 				JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
 		} else if (status == JXL_DEC_COLOR_ENCODING) {
-			// Get the ICC color profile of the pixel data
-			size_t icc_size;
-			if (JXL_DEC_SUCCESS !=
-				JxlDecoderGetICCProfileSize(
-					cache.decoder, JXL_COLOR_PROFILE_TARGET_DATA, &icc_size)) {
-				return false;
+			// HDR (Option A): read the structured color encoding
+			// first. If it declares PQ/HLG, the helper tone-maps the
+			// image INSTEAD of the lcms2 ICC path: lcms2 applies the
+			// ICC profile colorimetrically (no BT.2390 highlight
+			// roll-off), so applying both would double-apply the
+			// transfer and the result would still be too dark.
+			// The ICC profile is then not fetched at all. If the
+			// image has no structured profile (XYB or a custom ICC
+			// profile - GetColorAsEncodedProfile fails), the ICC
+			// path below is used exactly as before. JXL P3 (11) + a
+			// D65 white point is Display P3 = CICP 12.
+			JxlColorEncoding enc;
+			if (JXL_DEC_SUCCESS == JxlDecoderGetColorAsEncodedProfile(
+				cache.decoder, JXL_COLOR_PROFILE_TARGET_DATA, &enc)) {
+				cicp.primaries = (int)enc.primaries;
+				if (enc.primaries == JXL_PRIMARIES_P3 && enc.white_point == JXL_WHITE_POINT_D65)
+					cicp.primaries = 12;
+				cicp.transfer = (int)enc.transfer_function;
+				cicp.matrix = 0; // JXL pixel data is RGB; no YUV matrix
+				cicp.fullRange = 1;
+				isHdr = HdrToneMap::IsHdr(cicp);
+				cache.isHdr = isHdr;
+				cache.cicp = cicp;
+				if (isHdr) {
+					// Decode to 16-bit so the PQ/HLG signal survives
+					// quantization (libjxl scales the native bit depth
+					// to [0, 65535]); the helper normalizes by 65535.
+					// The NEED_IMAGE_OUT_BUFFER event comes after
+					// this one, so the changed format takes effect.
+					format.data_type = JXL_TYPE_UINT16;
+				}
 			}
-			icc_profile->resize(icc_size);
-			if (JXL_DEC_SUCCESS != JxlDecoderGetColorAsICCProfile(
-				cache.decoder,
-				JXL_COLOR_PROFILE_TARGET_DATA,
-				icc_profile->data(), icc_profile->size())) {
-				return false;
+			if (!isHdr) {
+				// Get the ICC color profile of the pixel data
+				size_t icc_size;
+				if (JXL_DEC_SUCCESS !=
+					JxlDecoderGetICCProfileSize(
+						cache.decoder, JXL_COLOR_PROFILE_TARGET_DATA, &icc_size)) {
+					return false;
+				}
+				icc_profile->resize(icc_size);
+				if (JXL_DEC_SUCCESS != JxlDecoderGetColorAsICCProfile(
+					cache.decoder,
+						JXL_COLOR_PROFILE_TARGET_DATA,
+						icc_profile->data(), icc_profile->size())) {
+					return false;
+				}
 			}
 		} else if (status == JXL_DEC_FRAME) {
 			nFrameEvents++; // F-16: count frames as they are decoded
@@ -156,10 +261,12 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			}
 			// A1-4: xsize/ysize are uint32_t; the product must be computed in
 			// size_t or it wraps above ~1073 MP and the image is mis-rejected.
-			if (buffer_size != (size_t)cache.info.xsize * cache.info.ysize * 4) {
+			// HDR decodes to 16-bit, so the pixel is 8 bytes, not 4.
+			size_t bytesPerPixel = (format.data_type == JXL_TYPE_UINT16) ? 8 : 4;
+			if (buffer_size != (size_t)cache.info.xsize * cache.info.ysize * bytesPerPixel) {
 				return false;
 			}
-			pixels->resize((size_t)cache.info.xsize * cache.info.ysize * 4);
+			pixels->resize((size_t)cache.info.xsize * cache.info.ysize * bytesPerPixel);
 			void* pixels_buffer = (void*)pixels->data();
 			size_t pixels_buffer_size = pixels->size() * sizeof(uint8_t);
 			if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(cache.decoder, &format,
@@ -290,6 +397,8 @@ void* JxlReader::ReadImage(int& width,
 
 	std::vector<uint8_t> pixels;
 	std::vector<uint8_t> icc_profile;
+	bool isHdr = false;
+	HdrToneMap::Cicp cicp;
 	// Decode the requested frame: one call for the sequential fast path,
 	// frame_index + 1 calls after a (re)wind (the first returns frame 0).
 	// The intermediate results overwrite the same vectors; only the last
@@ -298,7 +407,8 @@ void* JxlReader::ReadImage(int& width,
 	// rewind before decoding again.
 	for (int i = 0; i < nSteps; i++) {
 		if (!DecodeJpegXlOneShot((const uint8_t*)buffer, sizebytes, &pixels, width, height,
-			has_animation, frame_count, frame_time, &icc_profile, outOfMemory, isSizeLimitExceeded)) {
+			has_animation, frame_count, frame_time, &icc_profile, outOfMemory, isSizeLimitExceeded,
+			isHdr, cicp)) {
 			cache.frame_index = -1;
 			return NULL;
 		}
@@ -310,9 +420,22 @@ void* JxlReader::ReadImage(int& width,
 		outOfMemory = true;
 		return NULL;
 	}
-	if (cache.transform == NULL)
+	if (isHdr) {
+		// HDR: the pixels are 16-bit RGBA; tone-map them to 8-bit
+		// BGRA with the helper INSTEAD of the lcms2 ICC path (the
+		// ICC profile was not even fetched for HDR images). The
+		// helper is the only colour conversion on this path.
+		unsigned char* hdrPixels = ConvertJxlHdrToSdr(pixels.data(), width, height, cicp);
+		if (hdrPixels == NULL) {
+			delete[] pPixelData;
+			outOfMemory = true;
+			return NULL;
+		}
+		memcpy(pPixelData, hdrPixels, size);
+		delete[] hdrPixels;
+	} else if (cache.transform == NULL)
 		cache.transform = ICCProfileTransform::CreateTransform(icc_profile.data(), icc_profile.size(), ICCProfileTransform::FORMAT_RGBA);
-	if (!ICCProfileTransform::DoTransform(cache.transform, pixels.data(), pPixelData, width, height)) {
+	if (!isHdr && !ICCProfileTransform::DoTransform(cache.transform, pixels.data(), pPixelData, width, height)) {
 		// RGBA -> BGRA conversion (with little-endian integers)
 		uint32_t* data = (uint32_t*)pixels.data();
 		for (size_t i = 0; i * sizeof(uint32_t) < size; i++) {

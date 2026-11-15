@@ -6,6 +6,7 @@
 #include "jxl/decode_cxx.h"
 #include "jxl/resizable_parallel_runner.h"
 #include "jxl/resizable_parallel_runner_cxx.h"
+#include "HdrToneMap.h"
 
 class JxlReader
 {
@@ -70,6 +71,12 @@ private:
 		int frame_index;
 		int width;
 		int height;
+		// HDR (Option A): the image declares PQ/HLG, and the CICP from
+		// the structured color encoding. Set at COLOR_ENCODING and
+		// kept across animation frames (the event fires only once
+		// per file; a sequential frame decode never sees it again).
+		bool isHdr;
+		HdrToneMap::Cicp cicp;
 		void* transform;
 		uint8_t* exif;
 		size_t exif_size;
@@ -79,7 +86,8 @@ private:
 	jxl_cache cache = {};
 
 	bool DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector<uint8_t>* pixels, int& xsize,
-		int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory, bool& isSizeLimitExceeded);
+		int& ysize, bool& have_animation, int& frame_count, int& frame_time, std::vector<uint8_t>* icc_profile, bool& outOfMemory, bool& isSizeLimitExceeded,
+		bool& isHdr, HdrToneMap::Cicp& cicp);
 	// R-01: grow the Exif scratch buffer to new_size bytes. The allocation is
 	// never shrunk: libjxl may still hold the buffer pointer from the last
 	// JxlDecoderSetBoxBuffer call, and a shrinking realloc could move it.
