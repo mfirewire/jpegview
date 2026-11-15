@@ -203,6 +203,12 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 		return NULL;
 	}
 
+// HDR rows are 16-bit (2 bytes per channel, 8 bytes/pixel); SDR rows
+	// are 8-bit (4 bytes/pixel). The frame copy and the dispose clear
+	// below must use the row's bytes per pixel, not a hardcoded 4 -
+	// a hardcoded 4 copies only half an HDR row, so the right half
+	// of every HDR PNG stayed black (uninitialised rows_image).
+	const size_t bytesPerPixel = (size_t)cache.channels * (cache.hdr ? 2 : 1);
 #ifdef PNG_APNG_SUPPORTED
 	if (cache.dop == PNG_DISPOSE_OP_PREVIOUS)
 		memcpy(cache.p_temp, cache.p_image, cache.size);
@@ -212,7 +218,7 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 	else
 #endif
 		for (j = 0; j < cache.h0; j++)
-			memcpy(cache.rows_image[j + cache.y0] + cache.x0 * 4, cache.rows_frame[j], cache.w0 * 4);
+			memcpy(cache.rows_image[j + cache.y0] + cache.x0 * bytesPerPixel, cache.rows_frame[j], cache.w0 * bytesPerPixel);
 
 	void* pixels = NULL;
 	{
@@ -248,7 +254,7 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 	else
 		if (cache.dop == PNG_DISPOSE_OP_BACKGROUND)
 			for (j = 0; j < cache.h0; j++)
-				memset(cache.rows_image[j + cache.y0] + cache.x0 * 4, 0, cache.w0 * 4);
+				memset(cache.rows_image[j + cache.y0] + cache.x0 * bytesPerPixel, 0, cache.w0 * bytesPerPixel);
 #endif
 	cache.frame_index++;
 	cache.frame_index %= cache.frame_count;
