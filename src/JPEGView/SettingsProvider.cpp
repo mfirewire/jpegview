@@ -696,8 +696,17 @@ void CSettingsProvider::UpdateUserSettings() {
 	}
 
 	delete[] buffer;
-	if (::MoveFile(sINIFileName, sINIFileName + _T(".old"))) {
-		::MoveFile(newINIFileName, sINIFileName);
+	// #45 (M-U9): swap the new INI into place with a single ReplaceFile
+	// call, which is atomic. The old two-step MoveFile sequence could
+	// lose the settings if the second move failed after the original
+	// had already been moved away. The preconditions hold here: the
+	// target exists (checked above) and the .new file is on the same
+	// volume. The replaced file is kept as "<ini>.old", as before.
+	if (!::ReplaceFile(sINIFileName, newINIFileName, sINIFileName + _T(".old"), REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL)) {
+		CString sLog;
+		sLog.Format(_T("JPEGView: failed to replace INI file \"%s\" with \"%s\" (error %u)\n"),
+			(LPCTSTR)sINIFileName, (LPCTSTR)newINIFileName, (unsigned int)::GetLastError());
+		::OutputDebugString(sLog);
 	}
 }
 
