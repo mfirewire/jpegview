@@ -28,7 +28,7 @@ Rules (project sources: src/JPEGView/*.cpp, *.h - vendored trees are skipped)
   4. No raw `~` complement on a pixel buffer outside the header. This
      catches `~(*p)`, `~*p` and `~word`. Known-safe idioms are excluded:
      `& ~FLAG` flag clearing, `~x & 1` parity, `~c + 2` PackBits run length,
-     and dcraw_mod.cpp (vendored); a `~Name(` form is excluded so
+     and only the `~word` rule excludes dcraw_mod.cpp (vendored); a `~Name(` form is excluded so
      destructor definitions are not flagged.
 
 Exit code 0 = clean, 1 = at least one violation.
@@ -102,6 +102,8 @@ def _is_pixel_complement(line, m):
         return False  # flag/mask clearing: `& ~FLAG`, `&= ~FLAG`
     after = line[m.end():]
     rest = after.lstrip()
+    if rest.startswith("->"):
+        return True  # member access: `~p->field` is a pixel complement, not a safe idiom
     if rest[:1] in ("&", "|", "+", "-"):
         return False  # parity/bitmask/arithmetic: `~x & 1`, `~c + 2` (PackBits run length)
     return True
