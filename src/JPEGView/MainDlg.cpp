@@ -797,11 +797,19 @@ LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPA
 	// too-small length made the division below truncate and the -1 underflow to
 	// SIZE_MAX, which CString then read as "scan to the terminating NUL" past the
 	// message payload. Only accept a whole number of characters.
+	// A bare NUL (cbData == sizeof(TCHAR)) is an empty payload and must
+	// not overwrite m_sStartupFile with an empty string, so only assign
+	// when there is more than one character. The PostMessage below still
+	// runs for an empty payload: the sender needs the KEY_MAGIC receipt
+	// (otherwise it starts a second instance), and OnLoadFileAsynch then
+	// just activates the existing window.
 	// lpData is attacker-controlled too: cbData > 0 with a NULL lpData would
 	// make the CString construction below read a null pointer.
 	if (pData != NULL && pData->lpData != NULL && pData->dwData == KEY_MAGIC && pData->cbData >= sizeof(TCHAR) && pData->cbData % sizeof(TCHAR) == 0 && 
 		((m_bFullScreenMode && CSettingsProvider::This().SingleFullScreenInstance()) || CSettingsProvider::This().SingleInstance())) {
-		m_sStartupFile = CString((LPCTSTR)pData->lpData, pData->cbData / sizeof(TCHAR) - 1);
+		if (pData->cbData > sizeof(TCHAR)) {
+			m_sStartupFile = CString((LPCTSTR)pData->lpData, pData->cbData / sizeof(TCHAR) - 1);
+		}
 		::PostMessage(m_hWnd, WM_LOAD_FILE_ASYNCH, 0, KEY_MAGIC);
 		bHandled = TRUE;
 		return KEY_MAGIC;
@@ -812,6 +820,13 @@ LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPA
 LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
 	bHandled = lParam == KEY_MAGIC;
 	if (lParam == KEY_MAGIC && ::IsWindowEnabled(m_hWnd)) {
+		if (m_sStartupFile.IsEmpty()) {
+			// #76: an empty payload must only bring the existing window to
+			// the front, never rebuild the file list with an empty name.
+			ShowWindow(SW_RESTORE);
+			::SetForegroundWindow(m_hWnd);
+			return 0;
+		}
 		m_pPanelMgr->CancelModalPanel();
 		GetNavPanelCtl()->HideNavPanelTemporary(true);
 		StopMovieMode();
