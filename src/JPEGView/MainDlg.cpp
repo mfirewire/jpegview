@@ -846,7 +846,7 @@ LRESULT CMainDlg::OnOcrCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lPar
 	return 0;
 }
 
-LRESULT CMainDlg::OnActivate(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+LRESULT CMainDlg::OnActivate(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& bHandled) {
 	// #87 C (i): a modal dialog disables this window; an OCR error that
 	// completed while disabled was deferred instead of popping a modal box
 	// over it. Show it now that the window is active again.
