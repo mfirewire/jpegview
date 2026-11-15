@@ -178,7 +178,14 @@ void * HeifReader::ReadImage(int &width,
 		// helper normalises by (1<<bpp)-1. The ICC transform is
 		// skipped for HDR (HDR HEIFs use nclx, not an ICC profile);
 		// the tone mapper is the only colour conversion.
-		int bpp = image.get_bits_per_pixel(heif_channel_interleaved);
+		// get_bits_per_pixel returns the STORAGE depth (16 for the
+		// uint16_t RRGGBBAA_LE plane), but libheif keeps the native
+		// depth in the samples (a 12-bit file gives 0..4095, not
+		// scaled to 0..65535). get_bits_per_pixel_range returns the
+		// actual value depth (m_bit_depth), which is what the
+		// normalisation in ConvertHeifHdrToSdr needs. Using the
+		// storage depth made every HDR HEIF 16x too dark (black).
+		int bpp = image.get_bits_per_pixel_range(heif_channel_interleaved);
 		if (bpp < 8 || bpp > 16)
 			bpp = 16;
 		unsigned char* hdrPixels = ConvertHeifHdrToSdr(data, stride, width, height, bpp, cicp);
