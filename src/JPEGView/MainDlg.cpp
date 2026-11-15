@@ -846,6 +846,15 @@ LRESULT CMainDlg::OnOcrCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lPar
 	return 0;
 }
 
+LRESULT CMainDlg::OnActivate(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+	// #87 C (i): a modal dialog disables this window; an OCR error that
+	// completed while disabled was deferred instead of popping a modal box
+	// over it. Show it now that the window is active again.
+	if (LOWORD(wParam) != WA_INACTIVE && m_pOcrController) m_pOcrController->ShowPendingOcrMessage(*this);
+	bHandled = FALSE;
+	return 0;
+}
+
 LRESULT CMainDlg::OnClose(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
 	// R-A19(b): only record the rect for a normal (restored) window. A
 	// maximized or minimized rect must not be saved as the sticky

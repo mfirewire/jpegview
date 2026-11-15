@@ -2,6 +2,7 @@
 
 #include "OcrEngine.h"
 #include <memory>
+#include <string>
 #include <thread>
 
 class CMainDlg;
@@ -15,6 +16,9 @@ public:
     void Reset();
     void Shutdown();
     void Complete(CMainDlg& main);
+    // #87 C (i): show an OCR error message deferred while the main window
+    // was disabled by a modal dialog; called from CMainDlg::OnActivate.
+    void ShowPendingOcrMessage(CMainDlg& main);
     void Paint(CMainDlg& main, HDC dc);
     bool MouseDown(CMainDlg& main, CPoint point);
     bool MouseMove(CMainDlg& main, CPoint point);
@@ -39,6 +43,9 @@ private:
     // a canceled worker is reclaimed by the next Toggle or Shutdown.
     std::thread m_worker;
     Ocr::Result m_result;
+    // #87 C (i): error text deferred while the main window is disabled;
+    // empty means nothing is pending.
+    std::wstring m_pendingOcrMessage;
     bool m_active = false, m_selecting = false;
     // #87 (D): this image already ran recognition and found no text.
     // Toggle re-activates the empty state instead of starting another run.

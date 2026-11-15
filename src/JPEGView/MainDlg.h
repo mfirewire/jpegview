@@ -91,6 +91,7 @@ public:
 		MESSAGE_HANDLER(WM_LOAD_FILE_ASYNCH, OnLoadFileAsynch)
 		MESSAGE_HANDLER(WM_COPYDATA, OnAnotherInstanceStarted) 
 		MESSAGE_HANDLER(WM_OCR_COMPLETED, OnOcrCompleted)
+		MESSAGE_HANDLER(WM_ACTIVATE, OnActivate)
 		MESSAGE_HANDLER(WM_KILLFOCUS, OnKillFocus)
 		MESSAGE_HANDLER(WM_CAPTURECHANGED, OnCaptureChanged)
 		COMMAND_ID_HANDLER(IDOK, OnOK)
@@ -137,6 +138,7 @@ public:
 	LRESULT OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& /*bHandled*/);
 	LRESULT OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& /*bHandled*/);
 	LRESULT OnOcrCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/);
+	LRESULT OnActivate(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/);
 	LRESULT OnClose(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& /*bHandled*/);
 
 	// Called by main()

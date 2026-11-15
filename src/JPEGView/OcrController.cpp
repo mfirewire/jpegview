@@ -34,6 +34,7 @@ bool COcrController::Busy() const {
 void COcrController::Reset() {
     if (m_job) m_job->canceled.store(true);
     m_result = {};
+    m_pendingOcrMessage.clear();
     m_selected.clear();
     m_active = m_selecting = m_hovering = false;
     m_bRecognizedEmpty = false;
@@ -186,10 +187,31 @@ void COcrController::Complete(CMainDlg& main) {
     m_selected.assign(m_result.words.size(), false);
     main.Invalidate(FALSE);
     if (!m_result.error.empty()) {
-        ::MessageBox(main.GetHWND(), m_result.error.c_str(), _T("OCR"), MB_OK | MB_ICONINFORMATION);
-    } else if (!m_active && main.GetCurrentImage() && !m_result.language.empty()) {
-        ::MessageBox(main.GetHWND(), CNLS::GetString(_T("No text found in this image.")), _T("OCR"), MB_OK | MB_ICONINFORMATION);
+        // #87 C (i): never pop a modal box over a window disabled by a
+        // modal dialog; defer the message until the window is enabled
+        // and activated again (see ShowPendingOcrMessage).
+        if (::IsWindowEnabled(main.GetHWND())) {
+            ::MessageBox(main.GetHWND(), m_result.error.c_str(), _T("OCR"), MB_OK | MB_ICONINFORMATION);
+        } else {
+            m_pendingOcrMessage = m_result.error;
+        }
+    } else {
+        m_pendingOcrMessage.clear();
+        // #87 C (ii): "No text found" is de-modalized: no dialog here.
+        // Paint() shows it in the canvas status line when the empty
+        // result qualifies (see showEmpty there). m_bRecognizedEmpty
+        // is NOT reassigned here, so the #87 (D) Toggle cache keeps
+        // its exact meaning.
     }
+}
+
+// #87 C (i): show an error message deferred by Complete() once the main
+// window is enabled again. No-op when nothing is pending.
+void COcrController::ShowPendingOcrMessage(CMainDlg& main) {
+    if (m_pendingOcrMessage.empty() || !::IsWindowEnabled(main.GetHWND())) return;
+    std::wstring message = std::move(m_pendingOcrMessage);
+    m_pendingOcrMessage.clear();
+    ::MessageBox(main.GetHWND(), message.c_str(), _T("OCR"), MB_OK | MB_ICONINFORMATION);
 }
 
 int COcrController::Hit(CMainDlg& main, CPoint point) const {
@@ -335,10 +357,18 @@ void COcrController::Paint(CMainDlg& main, HDC dc) {
     // 左上角状态行：识别中显示进度，识别完显示实际使用的语言标签。
     // 认不出文字时，"是哪个引擎在跑"是第一个要排查的问题，所以直接摆在屏幕上。
     const bool busy = Busy();
-    if (busy || m_active) {
+    // #87 C (ii): an error-free empty result shows "No text found" in
+    // this status line instead of a modal dialog. The display condition
+    // is the old dialog branch's (image + language), evaluated here so
+    // the #87 (D) Toggle cache flag keeps its exact meaning.
+    const bool showEmpty = m_bRecognizedEmpty && main.GetCurrentImage() && !m_result.language.empty();
+    if (busy || m_active || showEmpty) {
         std::wstring text;
         if (busy) {
             text = L"OCR [recognizing...]";
+        } else if (showEmpty) {
+            text = L"OCR: ";
+            text += CNLS::GetString(_T("No text found in this image."));
         } else {
             text = L"OCR";
             const std::wstring& tag = m_result.languageTag.empty() ? m_result.language : m_result.languageTag;
