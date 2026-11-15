@@ -19,6 +19,14 @@ Bugs fixed:
 - Keyboard: a user KeyMap binding now takes effect for digit keys and F1 (the KeyMap is consulted before the hardcoded digit-slideshow and F1-help branches); with the default KeyMap the behaviour is unchanged
 - KeyMap generator: the script now uses cross-platform Path joins instead of Windows backslash paths, so it runs on Linux; the generated symbols.km is byte-identical
 - Colour management: a failed CMYK profile load is no longer memoized for the life of the process, so a transient lock no longer leaves CMYK unconverted until restart; only a successful load is cached (sRGB/Lab are unchanged)
+- Single instance: an empty COPYDATA payload no longer clears the startup file, so launching with no file brings the running window forward
+- OCR: start errors are now split by exception type instead of always blaming memory (a preparation failure says the image could not be prepared for recognition)
+- OCR: the OCR menu item is greyed out with no image, an empty result is cached so re-toggling does not start another run, and Recognize errors are split
+- OCR: the canvas hint now states that Ctrl+C copies all text when nothing is selected and that Esc exits OCR to copy the image (prompt wording only, no behaviour change)
+- OCR: losing focus or mouse capture now ends a word-drag selection
+- Slideshow lists: an overlong line is skipped to the next line instead of rejecting the whole file; the whole-file fallback is kept when no valid line exists
+- Saving: the save filter's lossless choice is now applied to a hand-typed extension's format (WEBP/JXL/JP2)
+- Clipboard: a failed image copy now reports the failure with a message box instead of failing silently
 
 Investigated (no change):
 - E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
