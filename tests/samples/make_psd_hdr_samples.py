@@ -318,13 +318,17 @@ def stored_planes(levels, channels, color_mode, bit_depth):
     linear = build_planes(levels, channels, color_mode)
     stored = []
     for ch in range(channels):
+        # The alpha plane is stored linear (round(a*65535) / float a),
+        # not sRGB-encoded like the colour planes.
+        is_alpha = (channels == 4 and ch == 3)
         rows = []
         for y in range(HEIGHT):
             row = []
             for x in range(len(levels)):
                 v = linear[ch][y][x]
                 if bit_depth == 16:
-                    row.append(round(srgb_oetf(v) * 65535))
+                    row.append(round(v * 65535) if is_alpha
+                               else round(srgb_oetf(v) * 65535))
                 else:
                     row.append(struct.unpack(">I", struct.pack(">f", v))[0])
             rows.append(row)
