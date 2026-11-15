@@ -304,10 +304,23 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			nLayerSize = ReadUIntFromFile(hFile);
 		}
 		unsigned char nLayerSizeBytes = 4 * nVersion;
-		SeekFile(hFile, nLayerSizeBytes);
-		short nLayerCount = ReadUShortFromFile(hFile);
-		bUseAlpha = bUseAlpha && (nLayerCount <= 0);
-		SeekFile(hFile, nLayerSize - 2 - nLayerSizeBytes);
+		// The layer count lives inside the section, after its length
+		// field, so it only exists when the section is long enough to
+		// hold it. A flattened file has an empty section (nLayerSize
+		// == 0) with no layer info at all: reading a count there would
+		// take the compression field and the first image bytes as a
+		// bogus count and decide alpha use from garbage. With no layers
+		// bUseAlpha is unchanged and the file position is already on
+		// the compression field; a malformed short section is skipped
+		// without reading a count.
+		if (nLayerSize >= 2 + nLayerSizeBytes) {
+			SeekFile(hFile, nLayerSizeBytes);
+			short nLayerCount = ReadUShortFromFile(hFile);
+			bUseAlpha = bUseAlpha && (nLayerCount <= 0);
+			SeekFile(hFile, nLayerSize - 2 - nLayerSizeBytes);
+		} else if (nLayerSize > 0) {
+			SeekFile(hFile, (LONG)nLayerSize);
+		}
 
 		// Compression. 0 = Raw Data, 1 = RLE compressed, 2 = ZIP without prediction, 3 = ZIP with prediction.
 		unsigned short nCompressionMethod = ReadUShortFromFile(hFile);
