@@ -20,6 +20,11 @@
 #include <cstdint>
 #include <vector>
 
+// This define is necessary for 32-bit builds to work, for some reason
+// (same as ICCProfileTransform.cpp: without it the Win32 link fails
+// with LNK2001 unresolved externals for the cms* functions, because
+// the lcms2 import library only provides the __imp_ symbols).
+#define CMS_DLL
 #include "lcms2.h"
 
 namespace PsdIcc {
