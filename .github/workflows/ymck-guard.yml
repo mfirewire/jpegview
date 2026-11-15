@@ -126,3 +126,16 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/hdr_tonemap_test.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/hdr_tonemap_test
           /tmp/hdr_tonemap_test
+  gainmap-test:
+    name: Gain-map helper test (Option D, Phase 1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Gain-map unit test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_test.cpp src/JPEGView/GainMap.cpp -o /tmp/gainmap_test
+          /tmp/gainmap_test
