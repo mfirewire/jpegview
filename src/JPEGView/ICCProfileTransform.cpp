@@ -23,9 +23,13 @@ void* ICCProfileTransform::sRGBProfile = NULL;
 void* ICCProfileTransform::LabProfile = NULL;
 void* ICCProfileTransform::CMYKProfile = NULL;
 // E3 (S-L3): two decoder threads could enter the lazy initialisers at the
-// same time and both create (and leak) a profile. Guard each one with
-// call_once; the profiles are process-wide and never freed by design.
-static std::once_flag s_sRGBProfileOnce, s_LabProfileOnce, s_CMYKProfileOnce;
+// same time and both create (and leak) a profile. Guard the sRGB and Lab
+// profiles with call_once; the profiles are process-wide and never freed
+// by design. The CMYK profile has its own mutex below (R-A9): unlike
+// sRGB/Lab it can fail transiently, and call_once would memoize a
+// failure for the life of the process.
+static std::once_flag s_sRGBProfileOnce, s_LabProfileOnce;
+static std::mutex s_CMYKProfileMutex;
 
 
 void* ICCProfileTransform::GetsRGBProfile() {
@@ -48,9 +52,19 @@ void* ICCProfileTransform::GetLabProfile() {
 }
 
 void* ICCProfileTransform::GetCMYKProfile() {
-	std::call_once(s_CMYKProfileOnce, []() {
-		try {
-			CHAR path[MAX_PATH + 16];
+	// R-A9: cache only a successful load. A failure (missing cmyk.icm,
+	// transient file lock) is NOT cached: the next call retries under
+	// the same lock. With call_once a single failed attempt would have
+	// memoized NULL for the life of the process ("tried" is not
+	// "succeeded"). Note this does not rescue the common missing-file
+	// case - retrying cannot conjure up cmyk.icm; it only fixes the
+	// structure so a transient failure does not stick permanently.
+	std::lock_guard<std::mutex> lock(s_CMYKProfileMutex);
+	if (CMYKProfile != NULL) {
+		return CMYKProfile;
+	}
+	try {
+		CHAR path[MAX_PATH + 16];
 		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
 		// GetModuleFileNameA returns nSize and sets ERROR_INSUFFICIENT_BUFFER
 		// on truncation; testing the length directly avoids a stale last error.
@@ -59,8 +73,7 @@ void* ICCProfileTransform::GetCMYKProfile() {
 			lstrcatA(path, "\\cmyk.icm");
 			CMYKProfile = cmsOpenProfileFromFile(path, "r");
 		}
-		} catch (...) {}
-	});
+	} catch (...) {}
 	return CMYKProfile;
 }
 
