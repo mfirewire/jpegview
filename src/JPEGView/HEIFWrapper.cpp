@@ -94,23 +94,29 @@ void * HeifReader::ReadImage(int &width,
 	heif_item_id item_id = context.get_list_of_top_level_image_IDs().at(frame_index);
 	heif::ImageHandle handle = context.get_image_handle(item_id);
 	// HDR detection (Option A): the nclx (CICP) profile comes from the
-	// image handle. get_nclx_color_profile throws when there is no
-	// nclx (e.g. an ICC-profiled or untagged file), which means not
-	// HDR. Only PQ/HLG take the HDR path: decode to 16-bit and run
-	// the tone mapper. SDR keeps the 8-bit RGBA decode and the exact
-	// pre-existing path. Gain-map HEIFs (iPhone HDR photos) keep
-	// showing the SDR base image: the gain map is ignored, as today.
+	// image handle via the C API (heif::ImageHandle has no
+	// get_nclx_color_profile; only heif::Image does, and the image
+	// only exists after decode). heif_image_handle_get_nclx_color_
+	// profile returns heif_error_Color_profile_does_not_exist when
+	// there is no nclx (e.g. an ICC-profiled or untagged file), which
+	// means not HDR. Only PQ/HLG take the HDR path: decode to 16-bit
+	// and run the tone mapper. SDR keeps the 8-bit RGBA decode and
+	// the exact pre-existing path. Gain-map HEIFs (iPhone HDR photos)
+	// keep showing the SDR base image: the gain map is ignored, as
+	// today.
 	HdrToneMap::Cicp cicp;
 	bool isHdr = false;
-	try {
-		heif::ColorProfile_nclx nclx = handle.get_nclx_color_profile();
-		cicp.primaries = (int)nclx.get_color_primaries();
-		cicp.transfer = (int)nclx.get_transfer_characteristics();
-		cicp.matrix = (int)nclx.get_matrix_coefficients();
-		cicp.fullRange = nclx.is_full_range() ? 1 : 0;
-		isHdr = HdrToneMap::IsHdr(cicp);
-	} catch (const heif::Error&) {
-		// No nclx profile: not HDR (SDR path below).
+	{
+		heif_color_profile_nclx* nclx = nullptr;
+		heif_error err = heif_image_handle_get_nclx_color_profile(handle.get_raw_image_handle(), &nclx);
+		if (err.code == heif_error_Ok && nclx != nullptr) {
+			cicp.primaries = (int)nclx->color_primaries;
+			cicp.transfer = (int)nclx->transfer_characteristics;
+			cicp.matrix = (int)nclx->matrix_coefficients;
+			cicp.fullRange = nclx->full_range_flag ? 1 : 0;
+			isHdr = HdrToneMap::IsHdr(cicp);
+			heif_nclx_color_profile_free(nclx);
+		}
 	}
 	// F-06: gate on the header dimensions BEFORE decoding. decode_image
 	// below decodes the full frame; a 65535x65535 header would force
