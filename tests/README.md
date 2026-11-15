@@ -122,13 +122,19 @@ headers that both the product and the test include:
   (moved verbatim out of `Helpers.cpp`; only `uint8` became
   `unsigned char`, the same type). `tests/loader_jpeg_exif_test.cpp`
   runs it over hand-written JPEG samples: Exif APP1 first, XMP APP1 in
-  front of Exif (still found), over-short "Exif" APP1 (rejected), and
-  no-Exif files (NULL).
-- TGA 15-bit RLE: the RLE decoder is embedded in `ReaderTGA.cpp` and
-  cannot be extracted, so there is no C++ test for it.
-  `tests/check_tga_rle_sample.py` is sample + reference validation only:
-  it decodes the hand-written 15-bit RLE samples per the TGA spec and
-  asserts the pixels. Decoding them through the real loader still needs
+  front of Exif (still found), over-short "Exif" APP1 (rejected),
+  length-6 APP1 (found: the boundary, 5 rejects and 6 finds), a fake
+  Exif APP1 after SOS (NULL: the walk stops at SOS), and no-Exif
+  files (NULL).
+- TGA 15-bit RLE: the packet decoder is `src/JPEGView/TgaRleDecode.h`
+  (extracted verbatim out of `ReaderTGA.cpp`; the product feeds it
+  from the open FILE*, the test from a memory buffer).
+  `tests/loader_tga_rle_test.cpp` drives it over the hand-written
+  15-bit RLE samples and in-memory 24/32-bit and 8-bit streams, and
+  asserts the pixels plus exact stream consumption (which is what
+  pins the F-04 `channels` regression). `tests/check_tga_rle_sample.py`
+  stays as the independent spec check of the samples themselves.
+  The file-level loader path (header checks, flip, alpha) still needs
   a Windows device test.
 
 ```sh
@@ -138,9 +144,11 @@ g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_jpeg_exif_test.cpp
 /tmp/loader_jpeg_exif_test
 python3 tests/check_pnm_scale.py
 python3 tests/check_tga_rle_sample.py
+g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_tga_rle_test.cpp -o /tmp/loader_tga_rle_test
+/tmp/loader_tga_rle_test
 ```
 
-CI runs all four. Samples live in `tests/samples/` (`pnm_*`, `jpeg_*`,
+CI runs all five. Samples live in `tests/samples/` (`pnm_*`, `jpeg_*`,
 `tga15_*`); each is a hand-written minimal file, and its expected
 pixels are stated in the test that reads it.
 

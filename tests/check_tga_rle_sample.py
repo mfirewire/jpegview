@@ -10,14 +10,14 @@ ReaderTGA.cpp's RLE loop used channels = bits/8, which is 1 byte for a
 consumed one byte too few and the stream drifted from the second pixel on.
 The fix is channels = (bits + 7) / 8 (ReaderTGA.cpp:302).
 
-C++ side note: the RLE decoder is embedded in CReaderTGA::ReadTgaImage,
-which takes a FILE* and MFC types, so it cannot be extracted into a
-header the Linux CI can compile the way PnmScale.h and FindEXIFBlock.h
-were. This script is therefore sample + reference validation, NOT a test
-of the C++ decoder: it proves, per the TGA specification, that the sample
-files themselves are well-formed and that their expected pixels are the
-ones stated here. Decoding the samples through the real loader still
-needs a Windows device test.
+C++ side note: the RLE decoder has since been extracted into
+src/JPEGView/TgaRleDecode.h, and tests/loader_tga_rle_test.cpp drives
+it over these same samples. This script stays as sample + reference
+validation, NOT a test of the C++ decoder: it proves, per the TGA
+specification, that the sample files themselves are well-formed and
+that their expected pixels are the ones stated here. Decoding the
+samples through the real loader (file-level header checks, flip,
+alpha) still needs a Windows device test.
 
 Expected pixels (TGA 15-bit 5-5-5, little-endian word; the reader unpacks
 b = (v & 0x1f) << 3, g = ((v >> 5) & 0x1f) << 3, r = ((v >> 10) & 0x1f) << 3):

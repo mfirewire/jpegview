@@ -20,6 +20,12 @@
  *    jpeg_exif_first.jpg      Exif APP1 first; expect offset 2
  *    jpeg_xmp_then_exif.jpg   XMP APP1 first, Exif second; expect offset 35
  *    jpeg_short_exif.jpg      APP1 length 5, payload "Exi"; expect NULL
+ *    jpeg_exif_len6.jpg       APP1 length exactly 6, payload just
+ *                             "Exif" (no \0\0, no TIFF header);
+ *                             expect offset 2 (boundary: 5 rejects, 6 finds)
+ *    jpeg_fake_exif_after_sos.jpg  SOS first, then a fake Exif APP1
+ *                             inside the scan data; expect NULL (the
+ *                             walk stops at SOS)
  *    jpeg_truncated_exif.jpg  APP1 length 20 but the file ends after
  *                             "Exif\0\0"; expect NULL
  *    jpeg_no_exif.jpg         JFIF APP0 + XMP APP1 only; expect NULL
@@ -66,7 +72,7 @@ bool ReadFile(const std::string& path, std::vector<unsigned char>& out) {
     return read == out.size();
 }
 
-void CheckFound(const std::string& path, long wantOffset) {
+void CheckFound(const std::string& path, long wantOffset, long wantLength = 20) {
     std::vector<unsigned char> buf;
     char what[256];
     std::snprintf(what, sizeof(what), "read %s", path.c_str());
@@ -83,9 +89,9 @@ void CheckFound(const std::string& path, long wantOffset) {
         // Caller contract: 0xFF 0xE1 at the pointer, length at +2, "Exif" at +4.
         const bool layout = (found[0] == 0xFF && found[1] == 0xE1 &&
                              std::memcmp(found + 4, "Exif", 4) == 0 &&
-                             (found[2] * 256 + found[3]) == 20);
-        std::snprintf(what, sizeof(what), "%s: returned pointer layout (FF E1, len 20, Exif)",
-                      path.c_str());
+                             (found[2] * 256 + found[3]) == wantLength);
+        std::snprintf(what, sizeof(what), "%s: returned pointer layout (FF E1, len %ld, Exif)",
+                      path.c_str(), wantLength);
         Check(layout, what);
     }
 }
@@ -136,6 +142,8 @@ void TestSamples(const std::string& dir) {
     CheckFound(dir + "/jpeg_exif_first.jpg", 2);
     CheckFound(dir + "/jpeg_xmp_then_exif.jpg", 35);
     CheckNull(dir + "/jpeg_short_exif.jpg");
+    CheckFound(dir + "/jpeg_exif_len6.jpg", 2, 6);
+    CheckNull(dir + "/jpeg_fake_exif_after_sos.jpg");
     CheckNull(dir + "/jpeg_truncated_exif.jpg");
     CheckNull(dir + "/jpeg_no_exif.jpg");
 }

@@ -5,6 +5,7 @@
 #include "BasicProcessing.h"
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
+#include "TgaRleDecode.h"
 
 // The TGA reader has been adapted and extended from the TGA reader used in an example of the BOINC project
 // http://www.filewatcher.com/p/boinc-server-maker_7.0.27+dfsg-5_armhf.deb.5191030/usr/share/doc/boinc-server-maker/examples/tgalib.h.html
@@ -33,6 +34,16 @@ static bool IsAlphaChannelValid(int width, int height, uint32* pImageData)
 	return pixel != 0;
 }
 
+// FILE-backed TgaRle::ByteReader: streams the RLE payload from disk,
+// so the extraction changes no I/O behaviour (no extra buffer).
+struct TgaFileReader : public TgaRle::ByteReader {
+	TgaFileReader(FILE* f) : m_pFile(f) {}
+	bool Read(void* dst, size_t n) override {
+		return std::fread(dst, 1, n, m_pFile) == n;
+	}
+	FILE* m_pFile;
+};
+
 
 CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundColor, bool& bOutOfMemory, bool& bSizeLimitExceeded) {
 
@@ -49,7 +60,6 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	FILE *pFile = NULL;					// The file pointer
 	int channels = 0;					// The channels of the image (3 = RGA : 4 = RGBA)
 	int stride = 0;						// The stride (channels * width)
-	size_t i = 0;						// A counter
 
 	// Open a file pointer to the targa file and check if it was found and opened 
 	if((pFile = _tfopen(strFileName, _T("rb"))) == NULL) 
@@ -272,147 +282,18 @@ CJPEGImage* CReaderTGA::ReadTgaImage(LPCTSTR strFileName, COLORREF backgroundCol
 	// Else, it must be Run-Length Encoded (RLE)
 	else
 	{
-		// First, let me explain real quickly what RLE is.  
-		// For further information, check out Paul Bourke's intro article at: 
-		// http://astronomy.swin.edu.au/~pbourke/dataformats/rle/
-		// 
-		// Anyway, we know that RLE is a basic type compression.  It takes
-		// colors that are next to each other and then shrinks that info down
-		// into the color and a integer that tells how much of that color is used.
-		// For instance:
-		// aaaaabbcccccccc would turn into a5b2c8
-		// Well, that's fine and dandy and all, but how is it down with RGB colors?
-		// Simple, you read in an color count (rleID), and if that number is less than 128,
-		// it does NOT have any optimization for those colors, so we just read the next
-		// pixels normally.  Say, the color count was 28, we read in 28 colors like normal.
-		// If the color count is over 128, that means that the next color is optimized and
-		// we want to read in the same pixel color for a count of (colorCount - 127).
-		// It's 127 because we add 1 to the color count, as you'll notice in the code.
-
-		// Create some variables to hold the rleID, current colors read, channels, & stride.
-		byte rleID = 0;
-		// P0-5: size_t, not int. The buffer may be up to MAX_IMAGE_BYTES
-		// (4 GB - 1 on x64), so a signed 32-bit accumulator overflows past
-		// 2 GB and pImage[colorsRead + n] would write before the buffer.
-		size_t colorsRead = 0;
-		// Bytes actually stored per pixel. 15bpp is a two-byte 5-5-5 word, so
-		// bits/8 (== 1) made every RLE packet consume one byte too few and the
-		// stream drifted from the second pixel on: the image decoded to noise
-		// instead of the solid colour the file holds.
-		channels = (bits + 7) / 8;
-		int x = 0;
-		size_t padding = targetStride - (size_t)targetChannels * width; // P0-5: no int round-trip
-
-		uint8 colors[4];
-		byte* pColors = (byte*)colors;
-		byte* pImage = pImageData;
-
-		// Load in all the pixel data
-		// width*height as int goes negative near the pixel limit, which made the RLE
-		// loop read nothing and return an uninitialised buffer.
-		size_t numPixels = (size_t)width * height;
-		while(i < numPixels)
+		// The packet decoder is TgaRle::DecodeRlePackets (TgaRleDecode.h),
+		// shared with the Linux loader test; it reads through a
+		// TgaByteReader, so the product still streams the payload
+		// from the file and a truncated stream still fails cleanly.
+		TgaFileReader fileReader(pFile);
+		if (!TgaRle::DecodeRlePackets(fileReader, bits, isIndexed, width, height,
+				targetChannels, targetStride, palette, pImageData))
 		{
-			// Read in the current color count + 1
-			// F-13: short read -> truncated file, fail cleanly (and do
-			// not spin on EOF with a stale rleID).
-			if (fread(&rleID, sizeof(byte), 1, pFile) != 1)
-			{
-				delete[] pImageData;
-				fclose(pFile);
-				return NULL;
-			}
-			
-			// Check if we don't have an encoded string of colors
-			bool useSameColor;
-			if(rleID < 128)
-			{
-				// Increase the count by 1
-				rleID++;
-				useSameColor = false;
-			}
-			// Else, let's read in a string of the same character
-			else
-			{
-				// Minus the 128 ID + 1 (127) to get the color count that needs to be read
-				rleID -= 127;
-				useSameColor = true;
-
-				// Read in the current color, which is the same for a while
-				// F-13: short read -> truncated file, fail cleanly.
-				if (fread(pColors, sizeof(byte) * channels, 1, pFile) != 1)
-				{
-					delete[] pImageData;
-					fclose(pFile);
-					return NULL;
-				}
-			}
-
-			// Go through and read all the unique colors found
-			while(rleID && i < numPixels)
-			{
-				if (!useSameColor)
-				{
-					// Read in the current color
-					// F-13: short read -> truncated file, fail cleanly.
-					if (fread(pColors, sizeof(byte) * channels, 1, pFile) != 1)
-					{
-						delete[] pImageData;
-						fclose(pFile);
-						return NULL;
-					}
-				}
-
-				if(bits == 32)
-				{
-					*((uint32*)(pImage + colorsRead)) = *((uint32*)pColors);
-				}
-				else
-				{
-					if (bits == 8)
-					{
-						if (isIndexed)
-						{
-							int index = pColors[0] * 3;
-							pImage[colorsRead + 0] = palette[index];
-							pImage[colorsRead + 1] = palette[index + 1];
-							pImage[colorsRead + 2] = palette[index + 2];
-						} else {
-							pImage[colorsRead + 0] = pColors[0];
-							pImage[colorsRead + 1] = pColors[0];
-							pImage[colorsRead + 2] = pColors[0];
-						}
-					} else if (bits == 16 || bits == 15) {
-						// 16/15-bit pixel is a 5-5-5 packed short; the RLE
-						// branch only read 2 bytes, so unpack it the same
-						// way as the non-RLE path (F-04).
-						unsigned short pixel = (unsigned short)(pColors[0] | (pColors[1] << 8));
-						pImage[colorsRead + 0] = (pixel & 0x1f) << 3;
-						pImage[colorsRead + 1] = ((pixel >> 5) & 0x1f) << 3;
-						pImage[colorsRead + 2] = ((pixel >> 10) & 0x1f) << 3;
-					} else {
-						pImage[colorsRead + 0] = pColors[0];
-						pImage[colorsRead + 1] = pColors[1];
-						pImage[colorsRead + 2] = pColors[2];
-					}
-
-					// do padding target lines when 24 bpp
-					x++;
-					if (x == width)
-					{
-						x = 0;
-						colorsRead += padding;
-					}
-				}
-
-				// Increase the current pixels read, decrease the amount
-				// of pixels left, and increase the starting index for the next pixel.
-				i++;
-				rleID--;
-				colorsRead += targetChannels;
-			}
-				
-		} // end of RLE pixel loop
+			delete[] pImageData;
+			fclose(pFile);
+			return NULL;
+		}
 	}
 
 	// Close the file pointer that opened the file

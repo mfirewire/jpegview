@@ -102,3 +102,8 @@ jobs:
 
       - name: TGA 15-bit RLE sample check
         run: python3 tests/check_tga_rle_sample.py
+
+      - name: TGA RLE decoder test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_tga_rle_test.cpp -o /tmp/loader_tga_rle_test
+          /tmp/loader_tga_rle_test
