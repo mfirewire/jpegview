@@ -7,6 +7,8 @@
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
+#include "HdrToneMap.h"
+#include "FindCicpChunk.h"
 #include <stdexcept>
 #include <new>
 
@@ -132,6 +134,62 @@ bool PngReader::ReadFrameData()
 	return true;
 }
 
+// HDR (Option A): convert the 16-bit BGRA rows in cache.rows_image to
+// 8-bit BGRA in `pixels` via the HdrToneMap helper. Two passes: build a
+// float RGB buffer and compute the content peak (for the
+// content-adaptive EETF), then tone-map each pixel. The 16-bit values
+// are native-endian here because BeginReading called png_set_swap for
+// HDR, so they read directly as png_uint_16. The alpha channel is
+// ignored (the tone mapper works on RGB); the output alpha is opaque,
+// matching the SDR path, which fills alpha with 0xff via
+// png_set_add_alpha.
+bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
+{
+	const unsigned int w = cache.width;
+	const unsigned int h = cache.height;
+	size_t rgbSize = 0;
+	if (!IsImageBufferSizeOk((size_t)w * 3 * sizeof(float), (size_t)h, &rgbSize))
+		return false;
+	float* rgb = new(std::nothrow) float[(size_t)w * h * 3];
+	if (rgb == NULL)
+		return false;
+	// Pass 1: 16-bit BGRA rows -> float RGB (0..1). The rows are in BGRA
+	// order (png_set_bgr), so B is first, R third, A last.
+	for (unsigned int y = 0; y < h; y++)
+	{
+		const png_uint_16* row = (const png_uint_16*)cache.rows_image[y];
+		for (unsigned int x = 0; x < w; x++)
+		{
+			const png_uint_16* px = row + x * 4;
+			float* dst = rgb + ((size_t)y * w + x) * 3;
+			dst[0] = (float)((double)px[2] / 65535.0);
+			dst[1] = (float)((double)px[1] / 65535.0);
+			dst[2] = (float)((double)px[0] / 65535.0);
+		}
+	}
+	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cache.cicp.transfer);
+	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cache.cicp.primaries);
+	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)w * h, transfer, primaries);
+	// Pass 2: tone-map each pixel to 8-bit BGRA.
+	for (unsigned int y = 0; y < h; y++)
+	{
+		for (unsigned int x = 0; x < w; x++)
+		{
+			const float* src = rgb + ((size_t)y * w + x) * 3;
+			unsigned char* dst = pixels + ((size_t)y * w + x) * 4;
+			uint8_t r = 0, g = 0, b = 0;
+			HdrToneMap::ConvertPixel((double)src[0], (double)src[1], (double)src[2],
+				transfer, primaries, peakNits, r, g, b);
+			dst[0] = b;
+			dst[1] = g;
+			dst[2] = r;
+			dst[3] = 0xff;
+		}
+	}
+	delete[] rgb;
+	return true;
+}
+
 void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 {
 	unsigned int j;
@@ -171,8 +229,18 @@ void* PngReader::ReadNextFrame(void** exif_chunk, png_uint_32* exif_size)
 	}
 	if (pixels == NULL)
 		return NULL;
-	for (j = 0; j < cache.height; j++)
-		memcpy((char*)pixels + j * cache.width * cache.channels, cache.rows_image[j], cache.width * cache.channels);
+	if (cache.hdr) {
+		// HDR: rows_image holds 16-bit BGRA; tone-map to 8-bit BGRA.
+		// The icc_transform below is NULL for HDR (never created),
+		// so the tone mapper is the only colour conversion.
+		if (!ConvertHdrRowsToPixels((unsigned char*)pixels)) {
+			delete[] (unsigned char*)pixels;
+			return NULL;
+		}
+	} else {
+		for (j = 0; j < cache.height; j++)
+			memcpy((char*)pixels + j * cache.width * cache.channels, cache.rows_image[j], cache.width * cache.channels);
+	}
 
 #ifdef PNG_APNG_SUPPORTED
 	if (cache.dop == PNG_DISPOSE_OP_PREVIOUS)
@@ -257,11 +325,33 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 		// (and the read offset) through the reader passed as io_ptr.
 		png_set_read_fn(png_ptr, this, ReadDataCallback);
 		png_read_info(png_ptr, info_ptr);
+		// HDR detection (Option A): a cICP chunk declaring a PQ/HLG
+		// transfer, and not animated. The buffer here is the
+		// signature-stripped data (cache.buffer), so the cICP scan
+		// starts at offset 0. acTL is a header chunk, so it is known
+		// right after png_read_info. HDR is the only case that keeps
+		// 16-bit rows and runs the tone mapper; an HDR APNG falls back
+		// to the SDR path because the 8-bit APNG blend (BlendOver)
+		// cannot composite 16-bit rows. SDR PNGs never set cache.hdr
+		// and take the exact pre-existing path below.
+		{
+			HdrToneMap::Cicp cicp;
+			const bool bHasAcTL = png_get_valid(png_ptr, info_ptr, PNG_INFO_acTL) != 0;
+			cache.hdr = PngCicp::FindCicpChunk(buffer, sizebytes, 0, cicp) && HdrToneMap::IsHdr(cicp) && !bHasAcTL;
+			if (cache.hdr)
+				cache.cicp = cicp;
+		}
 		png_set_expand(png_ptr);
-		png_set_strip_16(png_ptr);
+		if (!cache.hdr)
+			png_set_strip_16(png_ptr);
 		png_set_gray_to_rgb(png_ptr);
 		png_set_add_alpha(png_ptr, 0xff, PNG_FILLER_AFTER);
 		png_set_bgr(png_ptr);
+		if (cache.hdr)
+			// 16-bit values are stored big-endian in the file; swap to
+			// native (little-endian on x86) so the HDR conversion in
+			// ReadNextFrame reads them directly as png_uint_16.
+			png_set_swap(png_ptr);
 
 		// gAMA / sRGB chunks used to be ignored here: the libpng path displayed the
 		// raw values as sRGB while the GDI+ path applied the gamma, so the same file
@@ -279,8 +369,11 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 			// UseEmbeddedColorProfiles. With the switch off the gAMA/sRGB chunk
 			// is ignored and the raw values are displayed, which is what
 			// "ignore embedded colour information" is supposed to mean.
+			// HDR files carry no gAMA/sRGB/iCCP, so this is already
+			// skipped for them; the !cache.hdr makes that explicit -
+			// the tone mapper, not libpng gamma, sets the output.
 			if (CSettingsProvider::This().UseEmbeddedColorProfiles()
-				&& !bHasICCP && (bHasSRGB || (bHasGAMA && dFileGamma > 0.0))) {
+				&& !cache.hdr && !bHasICCP && (bHasSRGB || (bHasGAMA && dFileGamma > 0.0))) {
 				// Screen gamma 2.2 approximates sRGB; an sRGB chunk means the file
 				// gamma is 1/2.2 regardless of what gAMA says.
 				png_set_gamma(png_ptr, 2.2, bHasSRGB ? 0.45455 : dFileGamma);
@@ -375,7 +468,9 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 #ifdef PNG_iCCP_SUPPORTED
 				// libpng has already inflated the iCCP chunk by the time we get
 				// here, so this is the profile itself, not its deflate stream.
-				if (CSettingsProvider::This().UseEmbeddedColorProfiles()) {
+				// HDR files carry no iCCP; the !cache.hdr keeps the tone
+				// mapper the only colour conversion for them.
+				if (CSettingsProvider::This().UseEmbeddedColorProfiles() && !cache.hdr) {
 					png_charp profile_name = NULL;
 					int compression = 0;
 					png_bytep profile = NULL;
@@ -541,6 +636,16 @@ bool PngReader::MustUseLibpng(const void* bufferIn, size_t sizebytes) {
 	// GDI+ fails if the uncompressed image size is over INT_MAX
 	if (sizebytes < 24) {
 		return false;
+	}
+
+	// HDR: GDI+ has no PQ/HLG tone mapping, so a PNG whose cICP chunk
+	// declares a PQ or HLG transfer must go through libpng, where the
+	// HDR tone mapper runs. SDR PNGs (no cICP, or an sRGB transfer)
+	// keep the existing routing.
+	{
+		HdrToneMap::Cicp cicp;
+		if (PngCicp::FindCicpChunk(bufferIn, sizebytes, 8, cicp) && HdrToneMap::IsHdr(cicp))
+			return true;
 	}
 	unsigned int width = _byteswap_ulong(*(unsigned int*)(buffer + 16));
 	unsigned int height = _byteswap_ulong(*(unsigned int*)(buffer + 20));

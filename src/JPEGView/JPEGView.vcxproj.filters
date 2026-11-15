@@ -611,6 +611,9 @@
     <ClInclude Include="HdrToneMap.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
+    <ClInclude Include="FindCicpChunk.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
     <ClInclude Include="PBMWrapper.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>

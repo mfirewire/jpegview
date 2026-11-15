@@ -3,6 +3,7 @@
 
 #ifndef WINXP
 #include "png.h"
+#include "HdrToneMap.h"
 #endif
 
 class PngReader
@@ -77,6 +78,13 @@ private:
 		void* buffer;
 		size_t buffer_size;
 		size_t buffer_offset;
+		// HDR tone mapping (Option A): true when the file carries a cICP
+		// chunk with a PQ/HLG transfer and is not animated. When true,
+		// BeginReading keeps 16-bit rows and ReadNextFrame runs the
+		// HdrToneMap helper; SDR PNGs never set this and take the exact
+		// pre-existing path. Set in BeginReading, read in ReadNextFrame.
+		bool hdr = false;
+		HdrToneMap::Cicp cicp = {};
 		// Transform from the iCCP profile this file carries to sRGB, NULL when the
 		// file has none, when it already is sRGB or when the setting is off. Built
 		// once per image: every frame of an APNG goes through the same transform.
@@ -86,6 +94,10 @@ private:
 	png_cache cache = {};
 
 	bool BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, bool& isSizeLimitExceeded);
+	// HDR (Option A): convert the 16-bit BGRA rows in cache.rows_image to
+	// 8-bit BGRA in `pixels` via the HdrToneMap helper. Only called when
+	// cache.hdr is true. Returns false on allocation failure.
+	bool ConvertHdrRowsToPixels(unsigned char* pixels);
 	bool ReadFrameData();
 	void* ReadNextFrame(void** exif_chunk, unsigned int* exif_size);
 	// R-A4: one logical animation frame from the decoder (a single

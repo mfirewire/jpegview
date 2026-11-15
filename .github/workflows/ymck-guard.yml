@@ -108,6 +108,11 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_tga_rle_test.cpp -o /tmp/loader_tga_rle_test
           /tmp/loader_tga_rle_test
 
+      - name: PNG cICP chunk scan test (HDR routing)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_png_cicp_test.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/loader_png_cicp_test
+          /tmp/loader_png_cicp_test
+
   hdr-tonemap-test:
     name: HDR tone-mapping helper test (Option A)
     runs-on: ubuntu-latest

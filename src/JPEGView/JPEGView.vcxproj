@@ -464,6 +464,7 @@
     <ClInclude Include="PPMWrapper.h" />
     <ClInclude Include="HDRWrapper.h" />
     <ClInclude Include="HdrToneMap.h" />
+    <ClInclude Include="FindCicpChunk.h" />
     <ClInclude Include="PBMWrapper.h" />
     <ClInclude Include="PAMWrapper.h" />
     <ClInclude Include="JP2Wrapper.h" />
