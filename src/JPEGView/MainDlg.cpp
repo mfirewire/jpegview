@@ -832,7 +832,13 @@ LRESULT CMainDlg::OnOcrCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lPar
 }
 
 LRESULT CMainDlg::OnClose(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
-	GetWindowRect(m_windowRectOnClose);
+	// R-A19(b): only record the rect for a normal (restored) window. A
+	// maximized or minimized rect must not be saved as the sticky
+	// window rect; leaving the initial empty rect makes the save side
+	// skip it (SaveStickyWindowRect ignores empty rects).
+	if (!IsZoomed() && !IsIconic()) {
+		GetWindowRect(m_windowRectOnClose);
+	}
 	bHandled = FALSE;
 	return 0;
 }
@@ -3920,7 +3926,11 @@ void CMainDlg::CleanupAndTerminate() {
 	// P1-15: OnClose records the window rect, but ESC (OnCancel) and the
 	// Exit command reach this function without a WM_CLOSE, so the sticky
 	// window position was never saved on those paths.
-	GetWindowRect(m_windowRectOnClose);
+	// R-A19(b): same guard as OnClose - a maximized or minimized rect
+	// must not be recorded as the sticky window rect.
+	if (!IsZoomed() && !IsIconic()) {
+		GetWindowRect(m_windowRectOnClose);
+	}
 	StopMovieMode();
 	StopAnimation();
 	// P0-2/P0-4: stop the watcher first so it cannot queue new
