@@ -1259,7 +1259,7 @@ LRESULT CMainDlg::OnTimer(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL&
 					// to the rescheduled timer tick (#78).
 					::KillTimer(this->m_hWnd, SLIDESHOW_TIMER_EVENT_ID);
 					::SetTimer(this->m_hWnd, SLIDESHOW_TIMER_EVENT_ID, m_nCurrentTimeout - nRealDisplayTimeMs, NULL);
-					return;
+					return 0;
 				}
 			}
 			GotoImage((wParam == ANIMATION_TIMER_EVENT_ID) ? POS_NextAnimation : POS_NextSlideShow, NO_REMOVE_KEY_MSG);
