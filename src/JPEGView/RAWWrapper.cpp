@@ -56,6 +56,22 @@ CJPEGImage* RawReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 	if (!bGetThumb) {
 		RawProcessor.imgdata.params.output_bps = 8;
 
+		// Use the camera's as-shot white balance. Without it LibRaw uses
+		// its default daylight white balance (pre_mul derived from the
+		// camera colour matrix), which is wrong for shots taken under
+		// indoor/tungsten light, so the full-size decode comes out
+		// strongly red - while the embedded JPEG thumbnail, processed by
+		// the camera with the as-shot white balance, looks neutral.
+		// (Verified on a Panasonic DMC-G3 RW2: daylight pre_mul
+		// [2.80,0.93,1.31] gave mean R/G=1.63, B/G=0.58; as-shot
+		// cam_mul [498,265,577] gives R/G=1.19, B/G=0.98, matching the
+		// thumbnail's R/G=1.17, B/G=1.02.) LibRaw falls back to
+		// grey-world auto WB when the file carries no usable cam_mul,
+		// and a cam_mul of [1,1,1,1] (e.g. Nikon D1) still decodes red -
+		// that case stays a known limitation. Thumbnail path unaffected
+		// (embedded JPEG).
+		RawProcessor.imgdata.params.use_camera_wb = 1;
+
 		// Must unpack and process first to get accurate info
 		if (RawProcessor.unpack() != LIBRAW_SUCCESS || RawProcessor.dcraw_process() != LIBRAW_SUCCESS) {
 			return NULL;
