@@ -1254,10 +1254,12 @@ LRESULT CMainDlg::OnTimer(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL&
 			int nRealDisplayTimeMs = ::GetTickCount() - m_nLastSlideShowImageTickCount;
 			if (m_nCurrentTimeout > 250 && wParam == SLIDESHOW_TIMER_EVENT_ID) {
 				if (m_nCurrentTimeout - nRealDisplayTimeMs > 100) {
-					// restart timer
-					::Sleep(m_nCurrentTimeout - nRealDisplayTimeMs);
+					// restart timer with the remaining time instead of
+					// sleeping on the UI thread: the advance is deferred
+					// to the rescheduled timer tick (#78).
 					::KillTimer(this->m_hWnd, SLIDESHOW_TIMER_EVENT_ID);
-					::SetTimer(this->m_hWnd, SLIDESHOW_TIMER_EVENT_ID, m_nCurrentTimeout, NULL);
+					::SetTimer(this->m_hWnd, SLIDESHOW_TIMER_EVENT_ID, m_nCurrentTimeout - nRealDisplayTimeMs, NULL);
+					return;
 				}
 			}
 			GotoImage((wParam == ANIMATION_TIMER_EVENT_ID) ? POS_NextAnimation : POS_NextSlideShow, NO_REMOVE_KEY_MSG);
