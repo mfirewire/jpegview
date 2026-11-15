@@ -1454,6 +1454,7 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 	const int LINE_BUFF_SIZE = 512;
 	TCHAR lineBuff[LINE_BUFF_SIZE + 1];
 	bool bValid = true;
+	bool bAnyValidLine = false;
 	int nTotalChars = 0;
 
 	do {
@@ -1470,6 +1471,14 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 			bValid = nNumChars < LINE_BUFF_SIZE && !bIsNull;
 			if (bValid) {
 				memcpy(lineBuff, wideFileBuff, (pRunning - wideFileBuff)*sizeof(TCHAR));
+			} else if (nTotalChars < nRealFileSizeChars && *pRunning != L'\n') {
+				// #68: overlong line - skip the rest of it up to the next
+				// newline instead of rejecting the whole list. (A short
+				// NUL line already stopped at its newline, so there is
+				// nothing to skip for it.)
+				while (nTotalChars < nRealFileSizeChars && *pRunning != L'\n') {
+					pRunning++; nTotalChars++;
+				}
 			}
 			wideFileBuff = pRunning+1;
 			nTotalChars++;
@@ -1492,16 +1501,25 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 				size_t nConverted = 0;
 				mbstowcs_s(&nConverted, lineBuff, LINE_BUFF_SIZE, fileBuff, (size_t)(pRunning - fileBuff));
 				nNumChars = (nConverted < (size_t)LINE_BUFF_SIZE) ? (int)nConverted : LINE_BUFF_SIZE - 1;
+			} else if (nTotalChars < nRealFileSizeChars && *pRunning != '\n') {
+				// #68: overlong line - skip the rest of it up to the next
+				// newline instead of rejecting the whole list. (A short
+				// NUL line already stopped at its newline, so there is
+				// nothing to skip for it.)
+				while (nTotalChars < nRealFileSizeChars && *pRunning != '\n') {
+					pRunning++; nTotalChars++;
+				}
 			}
 			fileBuff = pRunning+1;
 			nTotalChars++;
 		}
 		if (!bValid) {
-			// the file contains very long lines or null characters, it is most likely not a text file
-			fclose(fptr);
-			delete[] fileBuffOrig;
-			return false;
+			// #68: reject only this line (overlong or NUL-containing) and
+			// keep scanning the list; the rest of an overlong line was
+			// already skipped above.
+			continue;
 		}
+		bAnyValidLine = true;
 		// one line in lineBuff, check if there is a valid file name
 		bool bRelativePath = false;
 		lineBuff[nNumChars] = _T('\n'); // force end
@@ -1539,6 +1557,14 @@ bool CFileList::TryReadingSlideShowList(const CString & sSlideShowFile) {
 			}
 		}
 	} while (nTotalChars < nRealFileSizeChars);
+
+	// #68: if no line at all was usable, keep the old fallback behavior
+	// (the caller treats the file as not a list).
+	if (!bAnyValidLine) {
+		fclose(fptr);
+		delete[] fileBuffOrig;
+		return false;
+	}
 
 	fclose(fptr);
 	delete[] fileBuffOrig;
