@@ -900,6 +900,7 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 	} else {
 		std::list<CFileDesc>::iterator thisIter = m_iter;
 		int nSavedIndex = m_nCurrentIndex;
+		int nSavedMarkedIndexShow = m_nMarkedIndexShow;
 		LPCTSTR sFileName;
 		if (nIndex != 0) {
 			CFileList* pFL = bForward ? Next() : Prev();
@@ -909,6 +910,9 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 		}
 		m_iter = thisIter;
 		m_nCurrentIndex = nSavedIndex;
+		// #64: Next()/Prev() reset m_nMarkedIndexShow to -1, so a peek
+		// must restore it too, or the marked-file toggle state is lost.
+		m_nMarkedIndexShow = nSavedMarkedIndexShow;
 		return sFileName;
 	}
 }
