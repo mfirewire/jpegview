@@ -572,6 +572,12 @@ static void* CompressAndSave(LPCTSTR sFileName, CJPEGImage * pImage,
 			// must not survive either - Explorer would keep showing the old
 			// picture. DeleteThumbnail() unlinks IFD1, which drops it.
 			exifReader.DeleteThumbnail();
+		} else {
+			// R-A12: neither flag is set when the EXIFReader constructor
+			// bailed out early (e.g. IFD1 without a compression tag), but
+			// the stale thumbnail bytes are still in the block. m_pLastIFD0
+			// was already set by then, so DeleteThumbnail() unlinks IFD1.
+			exifReader.DeleteThumbnail();
 		}
 
 		int nJFIFLength = GetJFIFBlockLength(pTargetStream);
