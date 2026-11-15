@@ -50,6 +50,8 @@
 #include "ICCProfileTransform.h"
 #include "SettingsProvider.h"
 #include "YmckDecode.h"
+#include "PsdHdr.h"
+#include "HdrToneMap.h"
 
 
 #define PSD_HEADER_SIZE 26
@@ -120,6 +122,8 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		return NULL;
 	}
 	char* pBuffer = NULL;
+	float* pLinearRgb = NULL;
+	unsigned char* pAlphaBuf = NULL;
 	void* pPixelData = NULL;
 	void* pEXIFData = NULL;
 	char* pICCProfile = NULL;
@@ -159,9 +163,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 		// PSD can have bit depths of 1, 2, 4, 8, 16, 32
 		unsigned short nBitDepth = ReadUShortFromFile(hFile);
-		// Only 8-bit is supported for now
-		// F-03 (known limitation, documented not implemented): 16-bit, 32-bit, ZIP-compressed, indexed-color and bitmap PSDs are rejected here; supporting them needs a 16-bit/ZIP/palette path.
-		ThrowIf(nBitDepth != 8);
+		// F-03 (known limitation, narrowed): 16-bit and 32-bit RGB and
+		// grayscale PSDs are now supported via the PSD HDR path below
+		// (PsdHdr decode + HdrToneMap); 1/2/4-bit depths are still
+		// rejected here, and 16/32-bit indexed-color, bitmap, CMYK,
+		// Lab, multichannel and duotone files are rejected at the
+		// colour-mode check below. ZIP stays rejected on the 8-bit path.
+		ThrowIf(nBitDepth != 8 && nBitDepth != 16 && nBitDepth != 32);
 
 		
 		// Read color mode
@@ -190,6 +198,20 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			nChannels = 1;
 		}
 		ThrowIf(!nChannels);
+
+		// PSD HDR scope: 16/32-bit is supported only for RGB (3 or 4
+		// channels) and grayscale (1 channel). Any other mode at
+		// 16/32-bit keeps the F-03 rejection; PsdHdr rejects those
+		// modes too, but failing here keeps the rejection at the same
+		// place the 8-bit path rejects unsupported modes. bHdrAlpha
+		// is decided in the HDR branch below, once bUseAlpha is final.
+		const bool bIsHdr = (nBitDepth == 16 || nBitDepth == 32);
+		bool bHdrAlpha = false;
+		if (bIsHdr) {
+			const bool bHdrModeOk = (nColorMode == MODE_RGB && (nRealChannels == 3 || nRealChannels == 4)) ||
+				(nColorMode == MODE_Grayscale && nRealChannels == 1);
+			ThrowIf(!bHdrModeOk);
+		}
 
 		// Skip color mode data
 		unsigned int nColorDataSize = ReadUIntFromFile(hFile);
@@ -289,8 +311,12 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 		// Compression. 0 = Raw Data, 1 = RLE compressed, 2 = ZIP without prediction, 3 = ZIP with prediction.
 		unsigned short nCompressionMethod = ReadUShortFromFile(hFile);
-		// F-03 (known limitation): ZIP without/with prediction (2/3) is rejected here; only raw and RLE are implemented.
-		ThrowIf(nCompressionMethod != COMPRESSION_RLE && nCompressionMethod != COMPRESSION_None);
+		// F-03 (known limitation, narrowed): ZIP without/with prediction
+		// (2/3) is supported only on the PSD HDR path (16/32-bit, where
+		// PsdHdr inflates it); an 8-bit ZIP PSD is still rejected here -
+		// the 8-bit loops below cannot decompress ZIP.
+		ThrowIf(nCompressionMethod != COMPRESSION_RLE && nCompressionMethod != COMPRESSION_None &&
+			!(bIsHdr && (nCompressionMethod == COMPRESSION_ZipWithoutPrediction || nCompressionMethod == COMPRESSION_ZipWithPrediction)));
 
 		unsigned int nImageDataSize = nFileSize - TellFile(hFile);
 		pBuffer = new(std::nothrow) char[nImageDataSize];
@@ -300,12 +326,74 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		}
 		ReadFromFile(pBuffer, hFile, nImageDataSize);
 
+		if (bIsHdr) {
+			// PSD HDR: 16/32-bit RGB/grayscale. Decode the planar image
+			// data to linear-float RGB here (PsdHdr); the tone map into
+			// the 8-bit BGR pPixelData happens in the bIsHdr arm below,
+			// once the shared block has allocated it at the right
+			// stride. The 8-bit decompress loops and the ICC transform
+			// are skipped on this path (see the bIsHdr guards below):
+			// the tone-mapped output is already sRGB, so applying the
+			// file profile on top would double-convert - the same
+			// limitation as .hdr/EXR, which also ignore ICC. EXIF was
+			// already parsed in the resource loop above and is kept.
+			// nHdrChannels is the number of planes in the file data:
+			// RGB is 3 or 4 (checked above); grayscale is 1 - a
+			// grayscale file with an alpha plane (2 channels) keeps
+			// the F-03 rejection, PsdHdr only takes 1 grey channel.
+			const int nHdrChannels = (nColorMode == MODE_RGB) ? (int)nRealChannels : 1;
+			// The 4th plane is alpha only when bUseAlpha says so (alpha
+			// identifiers, or their absence); a 4-channel file whose
+			// 4th plane is not alpha is decoded with channels = 4 but
+			// rendered as 3-channel BGR, the same as the 8-bit path
+			// dropping the plane. PsdHdr decodes (and discards) the
+			// alpha plane in that case, so ZIP stays consistent.
+			bHdrAlpha = (nColorMode == MODE_RGB && nHdrChannels == 4 && bUseAlpha);
+			// Grayscale HDR renders as 3-channel BGR (PsdHdr already
+			// replicates the grey plane to R = G = B), unlike the 8-bit
+			// grayscale path which yields nChannels = 1: CJPEGImage
+			// handles 3 channels fine, and it keeps the tone-mapped
+			// output identical to an RGB rendering of the same grey.
+			nChannels = (unsigned short)(bHdrAlpha ? 4 : 3);
+			size_t nLinearBytes = 0;
+			if (!IsImageBufferSizeOk((size_t)nWidth * 3 * sizeof(float), (size_t)nHeight, &nLinearBytes)) {
+				bOutOfMemory = true;
+				ThrowIf(true);
+			}
+			pLinearRgb = new(std::nothrow) float[nLinearBytes / sizeof(float)];
+			if (pLinearRgb == NULL) {
+				bOutOfMemory = true;
+				ThrowIf(true);
+			}
+			if (bHdrAlpha) {
+				size_t nAlphaBytes = 0;
+				if (!IsImageBufferSizeOk((size_t)nWidth, (size_t)nHeight, &nAlphaBytes)) {
+					bOutOfMemory = true;
+					ThrowIf(true);
+				}
+				pAlphaBuf = new(std::nothrow) unsigned char[nAlphaBytes];
+				if (pAlphaBuf == NULL) {
+					bOutOfMemory = true;
+					ThrowIf(true);
+				}
+			}
+			// A decode failure rejects the file exactly as the F-03
+			// gates above do (throw -> Image stays NULL, no crash,
+			// no garbage pixels); pLinearRgb/pAlphaBuf are freed in
+			// the cleanup at the end of this function.
+			if (!PsdHdr::DecodeImageData((const unsigned char*)pBuffer, (size_t)nImageDataSize, (int)nWidth, (int)nHeight, nHdrChannels, (int)nColorMode, (int)nBitDepth, (int)nCompressionMethod, (int)nVersion, pLinearRgb, bHdrAlpha ? pAlphaBuf : NULL, (size_t)nWidth)) {
+				ThrowIf(true);
+			}
+		}
+
 		if (!bUseAlpha && nColorMode != MODE_CMYK) {
 			nChannels = min(nChannels, 3);
 		}
 
 		// Apply ICC Profile
-		if (nChannels >= 3) {
+		// (skipped on the PSD HDR path: the tone-mapped output is
+		// already sRGB, see the HDR branch above)
+		if (!bIsHdr && nChannels >= 3) {
 			if (nColorMode == MODE_Lab) {
 				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 4 ? ICCProfileTransform::FORMAT_LabA : ICCProfileTransform::FORMAT_Lab);
 				if (transform == NULL) {
@@ -345,7 +433,24 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		// non-8bit must first be decompressed as arbitrary data
 		// TODO: continue next row at end of row bytes (to support corrupt images)
 		unsigned char* p = (unsigned char*)pBuffer;
-		if (nCompressionMethod == COMPRESSION_RLE) {
+		if (bIsHdr) {
+			// Tone-map the linear RGB decoded in the HDR branch above
+			// into the 8-bit BGR pPixelData allocated by the shared
+			// block above (nRowSize already matches the 3/4-channel
+			// layout set there). ConvertLinearImage writes BGR
+			// triples; the 4th byte of each BGRA pixel is filled from
+			// the alpha plane below, so the existing alpha-blend block
+			// runs unchanged.
+			HdrToneMap::ConvertLinearImage(pLinearRgb, (int)nWidth, (int)nHeight, (size_t)nWidth * 3, (unsigned char*)pPixelData, (size_t)nRowSize);
+			if (bHdrAlpha) {
+				unsigned char* pDst = (unsigned char*)pPixelData;
+				for (unsigned int y = 0; y < nHeight; y++) {
+					for (unsigned int x = 0; x < nWidth; x++) {
+						pDst[(size_t)y * nRowSize + (size_t)x * 4 + 3] = pAlphaBuf[(size_t)y * nWidth + x];
+					}
+				}
+			}
+		} else if (nCompressionMethod == COMPRESSION_RLE) {
 			// Skip byte counts for scanlines. The table size is computed in
 			// 64 bit: nHeight * nRealChannels * 2 * nVersion overflows 32 bit
 			// for large headers (65535 x 65535 x 2 x 2 wraps), and the table
@@ -449,7 +554,9 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 		COLORREF backgroundColor = CSettingsProvider::This().ColorTransparency();
 
-		if (nColorMode == MODE_CMYK) {
+		// Skipped on the PSD HDR path (bIsHdr): the tone-mapped output
+		// is already sRGB, see the HDR branch above.
+		if (!bIsHdr && nColorMode == MODE_CMYK) {
 			// Plane polarity lives in YmckDecode.h: PSD stores 255 = no ink and
 			// lcms' TYPE_YMCK_8 wants ink amounts, so the plane is inverted
 			// exactly once, here, and both paths below work in ink space.
@@ -517,7 +624,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				// past the buffer allocated for nChannels bytes per pixel.
 				backgroundColor = 0;
 			}
-		} else {
+		} else if (!bIsHdr) {
 			ICCProfileTransform::DoTransform(transform, pPixelData, pPixelData, nWidth, nHeight, nRowSize);
 		}
 
@@ -538,6 +645,8 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		delete[] pPixelData;
 	}
 	delete[] pBuffer;
+	delete[] pLinearRgb;
+	delete[] pAlphaBuf;
 	delete[] pEXIFData;
 	delete[] pICCProfile;
 	ICCProfileTransform::DeleteTransform(transform);
