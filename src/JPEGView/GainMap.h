@@ -103,6 +103,32 @@ bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out);
 // yields the essential fields, or when a found gamma is <= 0.
 bool ParseXmpMetadata(const std::string& xmp, Metadata& out);
 
+// Find the gain-map JPEG embedded in an UltraHDR JPEG (MPF APP2).
+// Scans the JPEG markers for the MPF APP2 ("MPF\0" + TIFF header),
+// reads the TIFF IFD (0xB001 NumberOfImages, 0xB002 MP entry list)
+// and returns the SECOND image's absolute file offset and size — the
+// gain map (image 0 is the primary). MPF data_offset values are
+// relative to the TIFF header start inside the MPF segment. Returns
+// false (out params left 0) when there is no MPF segment, fewer than
+// 2 images, the TIFF/IFD/entry data is malformed or out of bounds,
+// offset+size runs past the end of the buffer, or the gain-map bytes
+// do not start with the JPEG SOI (FFD8). A truncated MPF segment
+// (its length field running past the buffer) also returns false.
+bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_t& gainSize);
+
+// Find the ISO 21496-1 binary metadata APP2 inside a JPEG —
+// normally the GAIN-MAP JPEG (callers get it via FindGainMapJpeg).
+// Scans the JPEG markers for the APP2 whose payload starts with the
+// URN "urn:iso:std:iso:ts:21496:-1\0" and returns a pointer + size
+// into the original buffer (no copy). Returns false when no such
+// APP2 exists or the JPEG markers are malformed/truncated. The
+// finder is URN-based only: a version-only ISO segment (as in some
+// primary JPEGs, 32-byte payload) also matches, and
+// ParseIso21496Metadata rejects it for being short — callers must
+// run the parser and fall back (e.g. to XMP) when it fails.
+bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
+                         const uint8_t*& payload, size_t& payloadSize);
+
 // Reconstruct scene-linear HDR float RGB from an 8-bit sRGB base image
 // and a single-channel 8-bit gain map, using the ISO 21496-1 formula
 // above. `baseSrgb` is width*height*3 bytes, 8-bit sRGB, RGB order.

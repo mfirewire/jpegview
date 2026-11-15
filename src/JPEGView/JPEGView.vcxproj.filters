@@ -291,6 +291,9 @@
     <ClCompile Include="HDRWrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
+    <ClCompile Include="GainMap.cpp">
+      <Filter>Source Files\Image Types</Filter>
+    </ClCompile>
     <ClCompile Include="HdrToneMap.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
@@ -606,6 +609,9 @@
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="HDRWrapper.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
+    <ClInclude Include="GainMap.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="HdrToneMap.h">

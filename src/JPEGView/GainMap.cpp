@@ -32,6 +32,64 @@ uint32_t ReadU32Be(const uint8_t* p) {
            (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
 }
 
+uint16_t ReadU16Le(const uint8_t* p) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) |
+                                 static_cast<uint16_t>(p[1] << 8));
+}
+
+uint32_t ReadU32Le(const uint8_t* p) {
+    return static_cast<uint32_t>(p[0]) |
+           (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+}
+
+// --- JPEG marker scan (shared by FindGainMapJpeg / FindIso21496Payload) ---
+
+// Advance `pos` (starting just after the SOI) to the next segment.
+// On success sets `marker`, `segData` (first payload byte, after the
+// 2-byte length field) and `segSize` (payload byte count = length
+// field minus 2), and `pos` to the start of the NEXT segment. Returns
+// false at SOS (scan data follows, no more visible markers), at EOI
+// or any standalone marker, at the end of the buffer, or when a
+// segment length runs past the buffer (truncated / malformed JPEG).
+// A 0xFF fill byte before a marker code is skipped.
+bool NextJpegSegment(const uint8_t* jpeg, size_t size, size_t& pos,
+                     uint8_t& marker, const uint8_t*& segData, size_t& segSize) {
+    segData = nullptr;
+    segSize = 0;
+    while (pos + 1 < size) {
+        if (jpeg[pos] != 0xFF) {
+            return false;  // not a marker: malformed header
+        }
+        marker = jpeg[pos + 1];
+        if (marker == 0xFF) {
+            ++pos;  // fill byte before the marker code
+            continue;
+        }
+        pos += 2;
+        if (marker == 0xD8 || marker == 0xD9 || marker == 0x01 ||
+            (marker >= 0xD0 && marker <= 0xD7)) {
+            return false;  // standalone marker (SOI/EOI/TEM/RSTn): no segments
+        }
+        if (marker == 0xDA) {
+            return false;  // SOS: scan data follows
+        }
+        if (pos + 2 > size) {
+            return false;  // truncated length field
+        }
+        uint16_t len = ReadU16Be(jpeg + pos);
+        if (len < 2 || pos + len > size) {
+            return false;  // truncated segment
+        }
+        segData = jpeg + pos + 2;
+        segSize = static_cast<size_t>(len) - 2;
+        pos += len;
+        return true;
+    }
+    return false;
+}
+
 // sRGB EOTF inverse in double (c is a normalised sRGB code, 0..1).
 double SrgbToLinearDouble(double c) {
     if (c <= 0.04045) {
@@ -235,6 +293,134 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
         }
     }
 
+    return false;
+}
+
+bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_t& gainSize) {
+    gainOffset = 0;
+    gainSize = 0;
+    if (jpeg == nullptr || size < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) {
+        return false;
+    }
+    size_t pos = 2;
+    uint8_t marker = 0;
+    const uint8_t* seg = nullptr;
+    size_t segSize = 0;
+    while (NextJpegSegment(jpeg, size, pos, marker, seg, segSize)) {
+        if (marker != 0xE2 || segSize < 4 || std::memcmp(seg, "MPF\0", 4) != 0) {
+            continue;
+        }
+        // TIFF header starts right after "MPF\0" (marker 2 + length 2
+        // + "MPF\0" 4 = 8 bytes before the TIFF header).
+        const uint8_t* tiff = seg + 4;
+        size_t tiffSize = segSize - 4;
+        size_t tiffStart = static_cast<size_t>(tiff - jpeg);
+        if (tiffSize < 8) {
+            return false;
+        }
+        bool bigEndian = false;
+        if (tiff[0] == 'M' && tiff[1] == 'M') {
+            bigEndian = true;
+        } else if (tiff[0] == 'I' && tiff[1] == 'I') {
+            bigEndian = false;
+        } else {
+            return false;  // not a TIFF header
+        }
+        auto rd16 = [&](const uint8_t* p) -> uint16_t {
+            return bigEndian ? ReadU16Be(p) : ReadU16Le(p);
+        };
+        auto rd32 = [&](const uint8_t* p) -> uint32_t {
+            return bigEndian ? ReadU32Be(p) : ReadU32Le(p);
+        };
+        if (rd16(tiff + 2) != 42) {
+            return false;  // bad TIFF magic
+        }
+        uint32_t ifdOff = rd32(tiff + 4);
+        // Two-step bound check: ifdOff is untrusted u32, so check it
+        // against tiffSize before adding (no wraparound on 32-bit).
+        if (ifdOff > tiffSize || ifdOff + 2 > tiffSize) {
+            return false;
+        }
+        uint16_t entryCount = rd16(tiff + ifdOff);
+        if (ifdOff + 2 + static_cast<size_t>(entryCount) * 12 > tiffSize) {
+            return false;
+        }
+        // Find 0xB001 (NumberOfImages, LONG x1) and 0xB002 (MP entry
+        // list, UNDEFINED, 16 bytes per image).
+        bool haveCount = false;
+        bool haveList = false;
+        uint32_t numImages = 0;
+        uint32_t listOff = 0;
+        uint32_t listBytes = 0;
+        for (uint16_t k = 0; k < entryCount; ++k) {
+            const uint8_t* e = tiff + ifdOff + 2 + static_cast<size_t>(k) * 12;
+            uint16_t tag = rd16(e);
+            uint16_t type = rd16(e + 2);
+            uint32_t count = rd32(e + 4);
+            if (tag == 0xB001 && type == 4 && count == 1) {
+                numImages = rd32(e + 8);
+                haveCount = true;
+            } else if (tag == 0xB002 && type == 7) {
+                // count <= 4 would be inline, but an entry list for
+                // >= 1 image is 16 bytes, so it is always an offset.
+                if (count <= 4) {
+                    return false;
+                }
+                listOff = rd32(e + 8);
+                listBytes = count;
+                haveList = true;
+            }
+        }
+        if (!haveCount || !haveList || numImages < 2 || listBytes < 32) {
+            return false;
+        }
+        if (listOff > tiffSize || listOff + 32 > tiffSize) {
+            return false;
+        }
+        // Entry 1 is the gain map (entry 0 is the primary):
+        // attr u32, size u32, data_offset u32 (relative to the TIFF
+        // header start), then 4 bytes reserved.
+        const uint8_t* entry1 = tiff + listOff + 16;
+        uint32_t imgSize = rd32(entry1 + 4);
+        uint32_t dataOff = rd32(entry1 + 8);
+        if (dataOff > size || tiffStart > size - dataOff) {
+            return false;
+        }
+        size_t absOff = tiffStart + dataOff;
+        if (imgSize < 2 || imgSize > size - absOff) {
+            return false;
+        }
+        if (jpeg[absOff] != 0xFF || jpeg[absOff + 1] != 0xD8) {
+            return false;  // gain-map bytes are not a JPEG
+        }
+        gainOffset = absOff;
+        gainSize = imgSize;
+        return true;
+    }
+    return false;
+}
+
+bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
+                         const uint8_t*& payload, size_t& payloadSize) {
+    payload = nullptr;
+    payloadSize = 0;
+    if (jpeg == nullptr || size < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) {
+        return false;
+    }
+    static const char kUrn[] = "urn:iso:std:iso:ts:21496:-1";
+    const size_t kUrnLen = 27;
+    size_t pos = 2;
+    uint8_t marker = 0;
+    const uint8_t* seg = nullptr;
+    size_t segSize = 0;
+    while (NextJpegSegment(jpeg, size, pos, marker, seg, segSize)) {
+        if (marker == 0xE2 && segSize >= kUrnLen + 1 &&
+            std::memcmp(seg, kUrn, kUrnLen) == 0 && seg[kUrnLen] == 0) {
+            payload = seg;
+            payloadSize = segSize;
+            return true;
+        }
+    }
     return false;
 }
 

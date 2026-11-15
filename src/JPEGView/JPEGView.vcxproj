@@ -344,6 +344,9 @@
     <ClCompile Include="QOIWrapper.cpp" />
     <ClCompile Include="PPMWrapper.cpp" />
     <ClCompile Include="HDRWrapper.cpp" />
+    <ClCompile Include="GainMap.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="HdrToneMap.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -463,6 +466,7 @@
     <ClInclude Include="QOIWrapper.h" />
     <ClInclude Include="PPMWrapper.h" />
     <ClInclude Include="HDRWrapper.h" />
+    <ClInclude Include="GainMap.h" />
     <ClInclude Include="HdrToneMap.h" />
     <ClInclude Include="FindCicpChunk.h" />
     <ClInclude Include="PBMWrapper.h" />
