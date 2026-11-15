@@ -27,6 +27,8 @@ Bugs fixed:
 - Slideshow lists: an overlong line is skipped to the next line instead of rejecting the whole file; the whole-file fallback is kept when no valid line exists
 - Saving: the save filter's lossless choice is now applied to a hand-typed extension's format (WEBP/JXL/JP2)
 - Clipboard: a failed image copy now reports the failure with a message box instead of failing silently
+- Slideshow: advancing no longer sleeps on the UI thread; the timer is re-armed with the remaining display time and the advance happens on the rescheduled tick
+- OCR: "No text found" no longer pops a modal dialog (it shows in the canvas status line instead); an OCR error that completes while a modal dialog is up is deferred and shown once the window is active again
 
 Investigated (no change):
 - E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
@@ -35,6 +37,7 @@ Hardening:
 - The JPEGVIEW_DISABLE_CMYK_ICC=1 test hook is now compiled out of Release builds (#ifndef NDEBUG), so it cannot silently disable CMYK colour management in a shipped build; it still works in debug builds
 - Installer: .jpx and .jpf are now registered as JPEGView file types (SupportedTypes and SystemFileAssociations), matching the 47 endings the application itself already browses
 - YMCK polarity guard (rule 3) now also covers the JP2 naive CMYK converter (InkToRgb in component order), the raw-complement rule now catches the `~word` form, and the single InvertPlaneInPlace call has its pixel count and stride arguments checked too
+- YMCK polarity guard: the raw-complement rule now also flags `~p->field` (member access is a pixel complement, not arithmetic)
 
 Documentation:
 - Release notes: the known-issue descriptions are corrected - a forward-slash path does not open the image at all (empty state, no file list), and a first load failure usually, not always, blocks the file for the session (the dead request can be evicted under cache pressure, after which a non-RAW/TIFF file may load again)
@@ -42,10 +45,12 @@ Documentation:
 - INI: the UseEmbeddedColorProfiles comment no longer claims a PNG gAMA/sRGB chunk is always applied by libpng; it follows the switch (off means the chunk is ignored and the raw values are shown)
 - README: OCR now notes to pause the animation first (Esc stops it) so the text is taken from a stable frame
 - Minimum supported OS is now Windows 10: the System Requirements (README), the runtime note (COMPILING.txt) and the supported-OS list (readme.html) no longer list Windows 7/8/Vista/XP; the OCR note already said Windows 10 and later, so it is unchanged. Declaration only - no build setting was changed (the project already targets the Windows 10.0 SDK) and whether the binary actually starts on Windows 7 was not re-tested
+- Minimum supported OS: HowToInstall.txt (English and Russian) and the Russian/Ukrainian readmes now list only Windows 10/11 (the remaining leftovers); the Windows 2000 note stays. Declaration only - no build setting was changed
 
 Tests:
 - CMYK end-to-end pixel test: two 6x1 CMYK samples (PSD and JP2) with known ink values are now in tests/samples, and tests/cmyk_pixel_test.cpp decodes them and asserts the picture through the product's own YmckDecode.h conversion (PSD planar inversion, JP2 no inversion); an independent Python cross-check (tests/cmyk_reference_check.py) decodes both with Pillow/OpenJPEG. The product PSD/JP2 wrappers themselves and the ICC paths still need a Windows device test
-- Loader regression tests: the PNM scaling now lives in src/JPEGView/PnmScale.h (shared with tests/loader_pnm_test.cpp, which decodes hand-written PNM samples and asserts the scaled pixels) and the EXIF APP1 walk in src/JPEGView/FindEXIFBlock.h (shared with tests/loader_jpeg_exif_test.cpp, which runs hand-written JPEG samples); a static gate (tests/check_pnm_scale.py) keeps the PNM arithmetic in the one header. TGA 15-bit RLE has sample + reference validation only (tests/check_tga_rle_sample.py) because its decoder cannot be extracted from ReaderTGA.cpp; decoding those samples through the real loader still needs a Windows device test
+- Loader regression tests: the PNM scaling now lives in src/JPEGView/PnmScale.h (shared with tests/loader_pnm_test.cpp, which decodes hand-written PNM samples and asserts the scaled pixels) and the EXIF APP1 walk in src/JPEGView/FindEXIFBlock.h (shared with tests/loader_jpeg_exif_test.cpp, which runs hand-written JPEG samples); a static gate (tests/check_pnm_scale.py) keeps the PNM arithmetic in the one header. TGA 15-bit RLE: the packet decoder is now extracted into src/JPEGView/TgaRleDecode.h (shared with tests/loader_tga_rle_test.cpp, 18 checks over both 15-bit samples plus in-memory 24/32-bit and 8-bit streams) and the EXIF walk test gained the length-6 APP1 boundary and the fake-APP1-after-SOS samples (14 checks); the file-level loader path (header checks, flip, alpha) still needs a Windows device test
+- CMYK reference check: a missing or failing OpenJPEG tool is now a failure instead of a silent skip (CI installs libopenjp2-tools; local runs use --allow-missing-tools), and Pillow is pinned to 11.3.0 in CI (the oldest release with a Python 3.14 wheel)
 
 [1.3.46-20261110] 2026-11-10
 New features:
