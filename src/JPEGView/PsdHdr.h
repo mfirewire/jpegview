@@ -20,16 +20,23 @@
 // planar channel bytes into linear floats.
 //
 // Assumptions, all documented so a wrong one can be caught:
-//   * 16-bit PSD is sRGB gamma-encoded: Photoshop 16-bit mode stores
-//     samples in the document working space, normally sRGB, so the
-//     samples are linearized with the sRGB EOTF (SrgbEotf16). A file in
-//     another working space (Adobe RGB, ProPhoto) would be linearized
-//     with the wrong curve; that is a v1 limitation, not a silent
-//     success — the wrapper only routes files here when it knows the
-//     working space is sRGB (or untagged, which Photoshop treats as
-//     sRGB for this purpose).
+//   * 16-bit PSD samples are linearized with the file's own tone
+//     curve when the caller supplies a ColorSpace (built from the
+//     file's ICC profile by the wrapper — see PsdIcc.h), and with the
+//     sRGB EOTF (SrgbEotf16) when it does not (NULL ColorSpace, or a
+//     NULL per-channel table). A supplied ColorSpace also carries a
+//     3x3 matrix converting linear source RGB to linear sRGB, so a
+//     16/32-bit Adobe RGB or ProPhoto file decodes with correct
+//     colours instead of being linearized as if it were sRGB (H-02).
+//     The matrix is built from the profile's D50 (PCS) colorants
+//     against the D50 sRGB matrix, which folds the Bradford D50->D65
+//     adaptation into the fixed matrix — see the D50/D65 note in
+//     PsdIcc.h. An untagged file (no ICC profile) is treated as sRGB,
+//     which is what Photoshop assumes for this purpose.
 //   * 32-bit PSD is scene-linear already: Photoshop 32-bit mode stores
-//     linear float samples, so they are used as-is (after sanitize).
+//     linear float samples, so they are used as-is (after sanitize);
+//     a supplied ColorSpace still applies its primaries matrix to
+//     32-bit RGB (the samples are already linear, so no TRC step).
 //   * Planar channel order is R, G, B (, A) — the same order the 8-bit
 //     wrapper reads (it reverses the planes into BGR itself; this core
 //     outputs RGB, which is what HdrToneMap wants).
@@ -108,6 +115,25 @@ void ReverseDelta32(uint32_t* samples, int count);
 uint8_t FloatAlphaToByte(float a);
 uint8_t U16AlphaToByte(uint16_t a);
 
+// Colour space of the file's samples, for the HDR decode.
+// A NULL ColorSpace pointer (or one with all trc[] NULL and an identity
+// matrix) means sRGB: 16-bit samples are linearized with the sRGB EOTF
+// (SrgbEotf16) and no primaries conversion is applied — the pre-H-02
+// behaviour, byte-identical.
+struct ColorSpace {
+    // Per-channel linearization tables: trc[c] maps a 16-bit encoded
+    // sample (0..65535) to linear light (0..1). One table per channel
+    // (RGB); for grayscale only trc[0] is used. NULL means "use the
+    // sRGB EOTF for this channel". The caller owns the table storage;
+    // tables must outlive the DecodeImageData call. Each table is
+    // 65536 floats.
+    const float* trc[3];
+    // 3x3 matrix (row-major) converting linear source RGB to linear
+    // sRGB. Identity when the source primaries are sRGB. Only used
+    // for RGB (not grayscale).
+    float matrix[9];
+};
+
 // Decode the PSD image-data section.
 //
 //   src / srcSize : the image-data bytes after the 2-byte compression
@@ -133,6 +159,13 @@ uint8_t U16AlphaToByte(uint16_t a);
 //     Only written when channels == 4 (RGBA).
 //   outAlphaStride : byte stride between rows of outAlphaOrNull;
 //     ignored when outAlphaOrNull is NULL, must be >= width otherwise.
+//   colorSpaceOrNull : the file's colour space (see ColorSpace above),
+//     built from the ICC profile by the wrapper; NULL means sRGB
+//     (16-bit samples linearized with the sRGB EOTF, no primaries
+//     conversion — the pre-H-02 behaviour, byte-identical). When
+//     non-NULL, 16-bit samples are linearized with the supplied TRC
+//     tables and RGB is converted to linear sRGB with the supplied
+//     matrix; 32-bit samples (already linear) get the matrix only.
 //
 // Returns true on success, false on any unsupported or corrupt input
 // (bad dimensions, unsupported mode/depth/compression, truncated or
@@ -143,6 +176,7 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
                      int width, int height, int channels, int colorMode,
                      int bitDepth, int compression, int version,
                      float* outLinearRgb,
-                     uint8_t* outAlphaOrNull, size_t outAlphaStride);
+                     uint8_t* outAlphaOrNull, size_t outAlphaStride,
+                     const ColorSpace* colorSpaceOrNull);
 
 }  // namespace PsdHdr

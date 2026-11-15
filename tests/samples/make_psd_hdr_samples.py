@@ -18,6 +18,27 @@ pixel values, one per (bit depth, colour, compression) combination:
     psd_hdr_32bit_gray_raw.psd      9x2  32-bit grey  raw (0)
     psd_hdr_32bit_rgba_raw.psd      9x2  32-bit RGBA  raw (0)
 
+H-02 (non-sRGB 16-bit PSD, ICC colour space): the same 5x2 layout,
+but the stored samples are encoded in the file's own working space
+(gamma TRC, not the sRGB OETF) and the file carries an ICC profile
+as the 0x040F image resource:
+
+    psd_hdr_16bit_adobe_rgb_raw.psd   5x2  16-bit RGB   raw, Adobe RGB
+    psd_hdr_16bit_prophoto_rgb_raw.psd 5x2 16-bit RGB   raw, ProPhoto RGB
+    psd_hdr_16bit_adobe_gray_raw.psd  5x2  16-bit grey  raw, Adobe RGB grey
+
+The ICC bytes come from tests/samples/make_icc_profiles.c (lcms2:
+cmsCreateRGBProfile / cmsCreateGrayProfile + cmsSaveProfileToMem);
+the .icc files are checked in next to this script and this script
+reads them and embeds them as the 0x040F resource. If they are
+missing, the script rebuilds them with the helper (cc + lcms2) and
+fails with instructions if that is not possible. Do NOT hand-craft
+ICC bytes in Python. The expected BGR tables for these three files
+are computed below from the stored codes with the profile TRC
+(gamma) + the primaries matrix (RGB only), all in double, using the
+independent numpy computation documented at ADOBE_MATRIX /
+PROPHOTO_MATRIX — never by copying C++ output.
+
 Layout (row 0 = grey ramp, row 1 = colour ramp, left to right):
     16-bit levels (linear): 0.0, 0.18, 0.5, 0.75, 1.0
     32-bit levels (linear): 0.0, 0.18, 0.5, 0.75, 1.0, 2.0, 4.0, 8.0, 16.0
@@ -295,7 +316,7 @@ def encode_image_data(planes, channels, bit_depth, compression, version):
     raise ValueError("bad compression %d" % compression)
 
 def make_psd(path, version, channels, height, width, bit_depth, color_mode,
-             compression, planes):
+             compression, planes, icc_bytes=None):
     header = (
         b"8BPS"
         + struct.pack(">H", version)
@@ -306,7 +327,18 @@ def make_psd(path, version, channels, height, width, bit_depth, color_mode,
         + struct.pack(">H", bit_depth)
         + struct.pack(">H", color_mode)
     )
-    sections = struct.pack(">I", 0) + struct.pack(">I", 0)
+    if icc_bytes is None:
+        resource_section = struct.pack(">I", 0)
+    else:
+        # One image-resource block: "8BIM", id 0x040F (ICC profile),
+        # empty Pascal name (size byte 0 + 1 pad byte), size, data,
+        # padded to even length.
+        block = (b"8BIM" + struct.pack(">H", 0x040F) + b"\x00\x00"
+                 + struct.pack(">I", len(icc_bytes)) + icc_bytes)
+        if len(icc_bytes) % 2:
+            block += b"\x00"
+        resource_section = struct.pack(">I", len(block)) + block
+    sections = struct.pack(">I", 0) + resource_section
     # Layer/mask info: length field 0 (empty section). 4 bytes for PSD
     # v1, 8 bytes for PSB v2.
     sections += struct.pack(">Q", 0) if version == 2 else struct.pack(">I", 0)
@@ -384,9 +416,30 @@ def check_psd(path):
     bit_depth = struct.unpack(">H", data[22:24])[0]
     color_mode = struct.unpack(">H", data[24:26])[0]
     pos = 26
-    for _ in range(2):
-        n = struct.unpack(">I", data[pos:pos+4])[0]
-        pos += 4 + n
+    # Colour-mode data: skip by length.
+    n = struct.unpack(">I", data[pos:pos+4])[0]
+    pos += 4 + n
+    # Image resources: walk the blocks, noting the 0x040F ICC profile.
+    res_len = struct.unpack(">I", data[pos:pos+4])[0]
+    pos += 4
+    res_end = pos + res_len
+    icc_size = 0
+    while pos < res_end:
+        assert data[pos:pos+4] == b"8BIM", "bad resource signature"
+        res_id = struct.unpack(">H", data[pos+4:pos+6])[0]
+        name_len = data[pos+6]
+        # Pascal name: 1 size byte + name bytes, padded to even total.
+        name_field = 1 + name_len
+        if name_field % 2:
+            name_field += 1
+        size_off = pos + 6 + name_field
+        size = struct.unpack(">I", data[size_off:size_off+4])[0]
+        if res_id == 0x040F:
+            icc_size = size
+        pos = size_off + 4 + size
+        if size % 2:
+            pos += 1
+    assert pos == res_end, "resource section overrun"
     layer_len_size = 8 if version == 2 else 4
     layer_len = int.from_bytes(data[pos:pos+layer_len_size], "big")
     pos += layer_len_size + layer_len
@@ -395,6 +448,7 @@ def check_psd(path):
     return {"version": version, "channels": channels, "width": width,
             "height": height, "bit_depth": bit_depth,
             "color_mode": color_mode, "compression": compression,
+            "icc_size": icc_size,
             "image_data_bytes": len(data) - pos - 2}
 
 def try_pillow(path):
@@ -405,6 +459,115 @@ def try_pillow(path):
             return "mode=%s size=%s" % (im.mode, im.size)
     except Exception as exc:  # noqa: BLE001 - report, do not fail
         return "Pillow cannot read: %s: %s" % (type(exc).__name__, exc)
+
+# ---------------------------------------------------------------- H-02
+# Primaries matrices (linear source RGB -> linear sRGB), computed
+# independently in numpy from the xy primaries, NOT from the C++
+# code. Method (reproducible): for each primary, XYZ = (x/y, 1,
+# (1-x-y)/y); Bradford-adapt each primary XYZ and the white-point
+# XYZ from the profile white to D50 (ICC colorants live in the D50
+# profile connection space); M = [R|G|B] columns, solve M*S = W for
+# the white, RGB->XYZ = M*diag(S); matrix = (D50 sRGB XYZ->RGB) *
+# (RGB->XYZ), where the D50 sRGB matrix is the Bradford-adapted one
+# from PsdIcc.cpp (3.1338561, -1.6168667, -0.4906146 / -0.9787684,
+# 1.9161415, 0.0334540 / 0.0719453, -0.2289914, 1.4052427). Using the
+# familiar D65 sRGB matrix instead gives matrix[0] = 1.488 for Adobe
+# RGB (wrong; the D50 route gives 1.398) and 2.142 for ProPhoto
+# (wrong; the D50 route gives 2.034). White (1,1,1) maps to (1,1,1)
+# within 3e-4 under both matrices, a check on the construction.
+ADOBE_MATRIX = [1.398348, -0.398085, 0.000027,
+                -0.000018, 0.999936, 0.000005,
+                -0.000013, -0.042949, 1.042820]
+PROPHOTO_MATRIX = [2.034294, -0.727303, -0.306703,
+                   -0.228838, 1.231677, -0.002917,
+                   -0.008571, -0.153280, 1.161708]
+
+def ensure_icc_profiles(here):
+    """Make sure the three .icc files exist, rebuilding them with the
+    lcms2 helper (tests/samples/make_icc_profiles.c) if missing."""
+    import subprocess
+    import tempfile
+    needed = ["adobe_rgb.icc", "prophoto_rgb.icc", "adobe_rgb_gray.icc"]
+    if all((here / n).exists() for n in needed):
+        return
+    helper = here / "make_icc_profiles.c"
+    if not helper.exists():
+        raise SystemExit("missing %s and its helper %s" % (needed, helper))
+    vendored = here.parent.parent / "src" / "JPEGView" / "lcms2" / "include"
+    with tempfile.TemporaryDirectory() as tmp:
+        exe = tmp + "/make_icc_profiles"
+        built = False
+        for cmd in (["cc", str(helper), "-o", exe, "-llcms2"],
+                    ["cc", "-I", str(vendored), str(helper), "-o", exe,
+                     "-l:liblcms2.so.2"]):
+            if subprocess.run(cmd, capture_output=True).returncode == 0:
+                built = True
+                break
+        if not built:
+            raise SystemExit(
+                "could not build make_icc_profiles.c: install liblcms2-dev "
+                "(-llcms2) or make sure liblcms2.so.2 is present")
+        rc = subprocess.run([exe, str(here)]).returncode
+        if rc != 0 or not all((here / n).exists() for n in needed):
+            raise SystemExit("make_icc_profiles failed (exit %d)" % rc)
+
+def stored_planes_gamma(levels, channels, color_mode, gamma):
+    """Linear planes -> stored uint16 samples encoded with a pure
+    gamma TRC (the H-02 profiles' curve), not the sRGB OETF."""
+    linear = build_planes(levels, channels, color_mode)
+    stored = []
+    for ch in range(channels):
+        is_alpha = (channels == 4 and ch == 3)
+        rows = []
+        for y in range(HEIGHT):
+            row = []
+            for x in range(len(levels)):
+                v = linear[ch][y][x]
+                if is_alpha:
+                    row.append(round(v * 65535))
+                elif v <= 0.0:
+                    row.append(0)
+                else:
+                    row.append(round(v ** (1.0 / gamma) * 65535))
+            rows.append(row)
+        stored.append(rows)
+    return stored
+
+def expected_bgr_colorspace(levels, channels, color_mode, gamma, matrix):
+    """Expected 8-bit BGR output for an H-02 fixture, from the stored
+    codes: linearize with the profile gamma TRC, apply the primaries
+    matrix for RGB (gray has no matrix), then the HdrToneMap
+    reference. The peak follows HdrToneMap::ComputePeakLinear:
+    negative channels (out-of-gamut after the matrix) count as 0."""
+    stored = stored_planes_gamma(levels, channels, color_mode, gamma)
+    width = len(levels)
+    lin = []
+    for y in range(HEIGHT):
+        row = []
+        for x in range(width):
+            if color_mode == 1:
+                v = stored[0][y][x]
+                l = (v / 65535.0) ** gamma
+                row.append((l, l, l))
+            else:
+                src = tuple((stored[ch][y][x] / 65535.0) ** gamma
+                            for ch in range(3))
+                row.append((matrix[0] * src[0] + matrix[1] * src[1] + matrix[2] * src[2],
+                            matrix[3] * src[0] + matrix[4] * src[1] + matrix[5] * src[2],
+                            matrix[6] * src[0] + matrix[7] * src[1] + matrix[8] * src[2]))
+        lin.append(row)
+    peak = 0.0
+    for y in range(HEIGHT):
+        for x in range(width):
+            r, g, b = lin[y][x]
+            peak = max(peak, max(r, 0.0) * 0.2126 + max(g, 0.0) * 0.7152
+                       + max(b, 0.0) * 0.0722)
+    out = []
+    for y in range(HEIGHT):
+        for x in range(width):
+            r, g, b = convert_linear_pixel(*lin[y][x], peak)
+            out.append((b, g, r))  # BGR, JPEGView order
+    return out, peak
 
 # ---------------------------------------------------------------- main
 
@@ -425,6 +588,14 @@ SPECS = [
     ("psd_hdr_32bit_rgba_raw.psd", 1, 32, 3, 4, 0),
 ]
 
+SPECS_H02 = [
+    # (filename, icc file, color_mode, gamma, primaries matrix or None)
+    ("psd_hdr_16bit_adobe_rgb_raw.psd", "adobe_rgb.icc", 3, 2.2, ADOBE_MATRIX),
+    ("psd_hdr_16bit_prophoto_rgb_raw.psd", "prophoto_rgb.icc", 3, 1.8,
+     PROPHOTO_MATRIX),
+    ("psd_hdr_16bit_adobe_gray_raw.psd", "adobe_rgb_gray.icc", 1, 2.2, None),
+]
+
 def main():
     here = Path(__file__).resolve().parent
     for name, version, bit_depth, color_mode, channels, compression in SPECS:
@@ -436,6 +607,26 @@ def main():
                  color_mode, compression, stored)
         info = check_psd(path)
         bgr, peak = expected_bgr(levels, channels, color_mode, bit_depth)
+        print("wrote %s (%d bytes, sha256 %s)" % (
+            name, path.stat().st_size,
+            hashlib.sha256(path.read_bytes()).hexdigest()[:16]))
+        print("  %s peak=%.4f Pillow: %s" % (info, peak, try_pillow(path)))
+        print("  expected BGR (row-major): %s" % (bgr,))
+    ensure_icc_profiles(here)
+    for name, icc_name, color_mode, gamma, matrix in SPECS_H02:
+        levels = LEVELS_16
+        width = len(levels)
+        channels = 3 if color_mode == 3 else 1
+        stored = stored_planes_gamma(levels, channels, color_mode, gamma)
+        path = here / name
+        make_psd(path, 1, channels, HEIGHT, width, 16,
+                 color_mode, 0, stored,
+                 icc_bytes=(here / icc_name).read_bytes())
+        info = check_psd(path)
+        assert info["icc_size"] == (here / icc_name).stat().st_size, \
+            "ICC resource size mismatch in %s" % name
+        bgr, peak = expected_bgr_colorspace(levels, channels, color_mode,
+                                            gamma, matrix)
         print("wrote %s (%d bytes, sha256 %s)" % (
             name, path.stat().st_size,
             hashlib.sha256(path.read_bytes()).hexdigest()[:16]))

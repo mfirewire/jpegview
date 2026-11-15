@@ -51,8 +51,10 @@
 #include "SettingsProvider.h"
 #include "YmckDecode.h"
 #include "PsdHdr.h"
+#include "PsdIcc.h"
 #include "HdrToneMap.h"
 
+#include <vector>
 
 #define PSD_HEADER_SIZE 26
 
@@ -344,12 +346,17 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			// data to linear-float RGB here (PsdHdr); the tone map into
 			// the 8-bit BGR pPixelData happens in the bIsHdr arm below,
 			// once the shared block has allocated it at the right
-			// stride. The 8-bit decompress loops and the ICC transform
-			// are skipped on this path (see the bIsHdr guards below):
-			// the tone-mapped output is already sRGB, so applying the
-			// file profile on top would double-convert - the same
-			// limitation as .hdr/EXR, which also ignore ICC. EXIF was
-			// already parsed in the resource loop above and is kept.
+			// stride. The 8-bit decompress loops and the post-tone-map
+			// ICC transform are skipped on this path (see the bIsHdr
+			// guards below): the tone-mapped output is already sRGB,
+			// so applying the file profile on top of it would
+			// double-convert. The ICC profile IS used on this path,
+			// but earlier: PsdIcc builds a ColorSpace from it below,
+			// and DecodeImageData linearizes with the file's TRC and
+			// converts the primaries to linear sRGB before the tone
+			// map (H-02). A missing/unparseable/sRGB profile yields
+			// NULL and the pre-H-02 sRGB behaviour. EXIF was already
+			// parsed in the resource loop above and is kept.
 			// nHdrChannels is the number of planes in the file data:
 			// RGB is 3 or 4 (checked above); grayscale is 1 - a
 			// grayscale file with an alpha plane (2 channels) keeps
@@ -394,7 +401,20 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			// gates above do (throw -> Image stays NULL, no crash,
 			// no garbage pixels); pLinearRgb/pAlphaBuf are freed in
 			// the cleanup at the end of this function.
-			if (!PsdHdr::DecodeImageData((const unsigned char*)pBuffer, (size_t)nImageDataSize, (int)nWidth, (int)nHeight, nHdrChannels, (int)nColorMode, (int)nBitDepth, (int)nCompressionMethod, (int)nVersion, pLinearRgb, bHdrAlpha ? pAlphaBuf : NULL, (size_t)nWidth)) {
+			// H-02: colour space for the HDR decode, from the ICC
+		// profile (0x040F resource) read above. hdrTrcStorage
+		// must outlive the DecodeImageData call below (the TRC
+		// tables point into it); pICCProfile is freed at the end
+		// of this function, after the call, but BuildColorSpace
+		// copies what it needs, so it retains no profile pointer.
+			PsdHdr::ColorSpace hdrColorSpace;
+			std::vector<float> hdrTrcStorage;
+			const PsdHdr::ColorSpace* pHdrColorSpace = NULL;
+			if (pICCProfile != NULL && nICCProfileSize > 0) {
+				if (PsdIcc::BuildColorSpace((const uint8_t*)pICCProfile, nICCProfileSize, hdrColorSpace, hdrTrcStorage))
+					pHdrColorSpace = &hdrColorSpace;
+			}
+			if (!PsdHdr::DecodeImageData((const unsigned char*)pBuffer, (size_t)nImageDataSize, (int)nWidth, (int)nHeight, nHdrChannels, (int)nColorMode, (int)nBitDepth, (int)nCompressionMethod, (int)nVersion, pLinearRgb, bHdrAlpha ? pAlphaBuf : NULL, (size_t)nWidth, pHdrColorSpace)) {
 				ThrowIf(true);
 			}
 		}
@@ -404,8 +424,11 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		}
 
 		// Apply ICC Profile
-		// (skipped on the PSD HDR path: the tone-mapped output is
-		// already sRGB, see the HDR branch above)
+		// (the post-tone-map transform is skipped on the PSD HDR
+		// path: the tone-mapped output is already sRGB. The ICC
+		// profile itself is NOT ignored there -- the HDR branch
+		// above already used it to linearize and convert the
+		// primaries to linear sRGB before tone mapping, H-02.)
 		if (!bIsHdr && nChannels >= 3) {
 			if (nColorMode == MODE_Lab) {
 				transform = ICCProfileTransform::CreateTransform(pICCProfile, nICCProfileSize, nChannels == 4 ? ICCProfileTransform::FORMAT_LabA : ICCProfileTransform::FORMAT_Lab);

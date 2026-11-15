@@ -217,7 +217,8 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
                      int width, int height, int channels, int colorMode,
                      int bitDepth, int compression, int version,
                      float* outLinearRgb,
-                     uint8_t* outAlphaOrNull, size_t outAlphaStride) {
+                     uint8_t* outAlphaOrNull, size_t outAlphaStride,
+                     const ColorSpace* colorSpaceOrNull) {
     if (src == NULL || outLinearRgb == NULL) {
         return false;
     }
@@ -387,6 +388,12 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
 
     // Convert the planar samples to interleaved linear RGB. Plane 0
     // is R (or grey), plane 1 G, plane 2 B, plane 3 alpha.
+    // When colorSpaceOrNull is NULL the loop below is exactly the
+    // pre-H-02 code (same float operations in the same order), so the
+    // sRGB path is byte-identical. When it is non-NULL, 16-bit samples
+    // are linearized with the file's TRC tables and RGB (both depths)
+    // is converted to linear sRGB with the supplied matrix; grayscale
+    // gets the TRC only (grey is grey, no matrix).
     const bool isGray = (colorMode == kColorModeGrayscale);
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -395,7 +402,12 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
             if (bitDepth == 16) {
                 for (int c = 0; c < (isGray ? 1 : 3); c++) {
                     const uint8_t* p = planes.data() + ((size_t)c * (size_t)height + (size_t)y) * rowBytes + (size_t)x * 2;
-                    lin[c] = SampleToLinear16(ReadBe16(p));
+                    const uint16_t v = ReadBe16(p);
+                    if (colorSpaceOrNull != NULL && colorSpaceOrNull->trc[c] != NULL) {
+                        lin[c] = colorSpaceOrNull->trc[c][v];
+                    } else {
+                        lin[c] = SampleToLinear16(v);
+                    }
                 }
             } else {
                 for (int c = 0; c < (isGray ? 1 : 3); c++) {
@@ -406,6 +418,15 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
             if (isGray) {
                 lin[1] = lin[0];
                 lin[2] = lin[0];
+            } else if (colorSpaceOrNull != NULL) {
+                // Row-major matrix: out[i] = sum_j m[i*3+j] * lin[j].
+                const float* m = colorSpaceOrNull->matrix;
+                const float r = m[0] * lin[0] + m[1] * lin[1] + m[2] * lin[2];
+                const float g = m[3] * lin[0] + m[4] * lin[1] + m[5] * lin[2];
+                const float b = m[6] * lin[0] + m[7] * lin[1] + m[8] * lin[2];
+                lin[0] = r;
+                lin[1] = g;
+                lin[2] = b;
             }
             outLinearRgb[pixel * 3 + 0] = lin[0];
             outLinearRgb[pixel * 3 + 1] = lin[1];

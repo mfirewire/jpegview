@@ -161,7 +161,19 @@ jobs:
         with:
           submodules: false
 
+      # H-02: the test builds ICC profiles on the fly with lcms2
+      # (PsdIcc.cpp), so it needs the lcms2 headers and -llcms2.
+      # A stock Ubuntu image has only the runtime library
+      # (liblcms2.so.2), not the dev package: without this step the
+      # link fails with "cannot find -llcms2" (verified on Ubuntu
+      # 24.04). The install is the documented fallback the task
+      # allows when the run proves it necessary.
+      - name: Install lcms2 dev package (H-02 test dependency)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends liblcms2-dev
+
       - name: PSD HDR unit test
         run: |
-          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/libpng-apng/include tests/psd_hdr_test.cpp src/JPEGView/PsdHdr.cpp src/JPEGView/HdrToneMap.cpp -lz -o /tmp/psd_hdr_test
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/libpng-apng/include tests/psd_hdr_test.cpp src/JPEGView/PsdHdr.cpp src/JPEGView/PsdIcc.cpp src/JPEGView/HdrToneMap.cpp -lz -llcms2 -o /tmp/psd_hdr_test
           /tmp/psd_hdr_test
