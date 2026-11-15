@@ -392,6 +392,7 @@ LRESULT CBatchCopyDlg::OnRename(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/
 						sLog.Format(_T("JPEGView: batch rollback: could not remove \"%s\" (error %u)\n"),
 							(LPCTSTR)strDir, (unsigned int)::GetLastError());
 						::OutputDebugString(sLog);
+						nRollbackFailed++;
 					}
 					if (strDir.CompareNoCase(done[i].sCreatedDir) == 0) break;
 					nSlash = strDir.ReverseFind(_T('\\'));
