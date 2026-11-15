@@ -83,9 +83,12 @@ void ResizeLuminance(Snapshot& result, const uint8_t* source, size_t stride) {
 // One engine's line of words, in image space.
 struct OcrLine {
     std::vector<Word> words;
-    float top = 0, bottom = 0, left = 0;
+    float top = 0, bottom = 0, left = 0, right = 0;
     float center() const { return (top + bottom) * 0.5f; }
     float height() const { return bottom - top; }
+    float width() const { return right - left; }
+    // 高大于宽的行是竖排的一列（字沿 y 排布）；否则是横排的一行。
+    bool vertical() const { return height() > width(); }
 };
 
 // CJK unified ideographs and their extensions/compatibility forms, BMP
@@ -161,7 +164,14 @@ std::vector<Word> MergeEngineLines(const std::vector<OcrLine>& zh,
     for (size_t j = 0; j < en.size(); ++j) {
         if (!enTaken[j]) picked.push_back({&en[j], false});
     }
-    std::sort(picked.begin(), picked.end(), [](const Picked& a, const Picked& b) {
+    // 竖排页：每行都是一列（高大于宽），各列垂直中心相同，center() 排序退化为
+    // 按 left 升序，即左列先出，整体正好倒序（#84）。全竖排时按 right 降序，
+    // 即右列先出，符合竖排从右向左的读序。非全竖排时保持原排序（横排按
+    // 垂直中心从上到下；混合页无单一正确读序，不改动）。
+    const bool allVertical = std::all_of(picked.begin(), picked.end(),
+        [](const Picked& p) { return p.line->vertical(); });
+    std::sort(picked.begin(), picked.end(), [allVertical](const Picked& a, const Picked& b) {
+        if (allVertical) return a.line->right > b.line->right;
         const float ca = a.line->center(), cb = b.line->center();
         if (ca != cb) return ca < cb;
         return a.line->left < b.line->left;
@@ -458,10 +468,12 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
                         ol.top = ol.words[0].corners[0].y;
                         ol.bottom = ol.words[0].corners[2].y;
                         ol.left = ol.words[0].corners[0].x;
+                        ol.right = ol.words[0].corners[1].x;
                         for (const auto& w : ol.words) {
                             if (w.corners[0].y < ol.top) ol.top = w.corners[0].y;
                             if (w.corners[2].y > ol.bottom) ol.bottom = w.corners[2].y;
                             if (w.corners[0].x < ol.left) ol.left = w.corners[0].x;
+                            if (w.corners[1].x > ol.right) ol.right = w.corners[1].x;
                         }
                         linesOut.push_back(std::move(ol));
                     }
@@ -554,18 +566,37 @@ bool Contains(const Word& word, Point point) {
 }
 
 namespace {
-// 中日韩文字之间不插空格——中文排版本来就没有词间空格，硬加会让整段难以阅读。
-// 拉丁文字之间才需要分隔。范围覆盖假名、统一表意文字、兼容表意文字、全角标点与韩文音节。
+// 中日文字之间不插空格——中文排版本来就没有词间空格，硬加会让整段难以阅读。
+// 拉丁文字之间才需要分隔。范围覆盖假名、统一表意文字、兼容表意文字与全角标点。
+// 韩文音节（U+AC00–D7AF）不在此列：韩文词间本应用空格，把它当 CJK 会把
+// "안녕하세요 세계" 粘成 "안녕하세요세계"（#84）。谚文字母（U+1100–11FF 等）
+// 同样是韩文，也不在此列——它们本来就不在 isCjk 里，行为与音节一致。
 bool NeedsSpaceBetween(wchar_t prev, wchar_t next) {
     auto isCjk = [](wchar_t c) {
         return (c >= 0x2E80 && c <= 0x9FFF)
             || (c >= 0xF900 && c <= 0xFAFF)
-            || (c >= 0xFF00 && c <= 0xFFEF)
-            || (c >= 0xAC00 && c <= 0xD7AF);
+            || (c >= 0xFF00 && c <= 0xFFEF);
     };
     return !(isCjk(prev) && isCjk(next));
 }
 } // namespace
+
+// 相邻词的排布方向：横排词在 y 上重叠、x 上分离；竖排词在 x 上重叠、y 上分离。
+// 用重叠量较大的方向判定；重叠量相等或都为 0 时按横排处理（默认）。
+// 竖排时沿 y 取间隙与字高，横排时沿 x 取间隙与字宽（#84）。
+static bool IsVerticalPair(const Word& prev, const Word& next) {
+    const float xOverlap = std::min(prev.corners[1].x, next.corners[1].x) - std::max(prev.corners[0].x, next.corners[0].x);
+    const float yOverlap = std::min(prev.corners[2].y, next.corners[2].y) - std::max(prev.corners[0].y, next.corners[0].y);
+    return xOverlap > yOverlap;
+}
+static float CharSizeAlong(const Word& w, bool vertical) {
+    if (w.text.empty()) return 0.0f;
+    const float span = vertical ? (w.corners[2].y - w.corners[0].y) : (w.corners[1].x - w.corners[0].x);
+    return span / float(w.text.size());
+}
+static float GapAlong(const Word& prev, const Word& next, bool vertical) {
+    return vertical ? (next.corners[0].y - prev.corners[2].y) : (next.corners[0].x - prev.corners[1].x);
+}
 
 // 中文模型会把拉丁词切碎（"expo rts"、"n ew"、"co pyi ng"）。两个纯 ASCII 片段
 // 之间的间隙明显小于一个字符宽度时，判定为同一个词被切开，拼接时不补空格。
@@ -579,10 +610,9 @@ static bool SplitInsideLatinWord(const Word& prev, const Word& next) {
         return true;
     };
     if (!asciiWord(prev.text) || !asciiWord(next.text)) return false;
-    const float prevChar = (prev.corners[1].x - prev.corners[0].x) / float(prev.text.size());
-    const float nextChar = (next.corners[1].x - next.corners[0].x) / float(next.text.size());
-    const float gap = next.corners[0].x - prev.corners[1].x;
-    const float reference = std::min(prevChar, nextChar);
+    const bool vertical = IsVerticalPair(prev, next);
+    const float reference = std::min(CharSizeAlong(prev, vertical), CharSizeAlong(next, vertical));
+    const float gap = GapAlong(prev, next, vertical);
     return reference > 0 && gap < reference * 0.2f;
 }
 
@@ -605,18 +635,17 @@ static bool PunctJoinsWithoutSpace(const Word& prev, const Word& next) {
     const bool prevPunct = IsStandaloneWordInternalPunct(prev.text);
     const bool nextPunct = IsStandaloneWordInternalPunct(next.text);
     if (!prevPunct && !nextPunct) return false;
-    auto charWidth = [](const Word& w) {
-        return w.text.empty() ? 0.0f : (w.corners[1].x - w.corners[0].x) / float(w.text.size());
-    };
+    const bool vertical = IsVerticalPair(prev, next);
+    auto charSize = [vertical](const Word& w) { return CharSizeAlong(w, vertical); };
     float reference = 0.0f;
     if (prevPunct && nextPunct) {
-        reference = std::min(charWidth(prev), charWidth(next));
+        reference = std::min(charSize(prev), charSize(next));
     } else if (prevPunct) {
-        reference = charWidth(next);
+        reference = charSize(next);
     } else {
-        reference = charWidth(prev);
+        reference = charSize(prev);
     }
-    const float gap = next.corners[0].x - prev.corners[1].x;
+    const float gap = GapAlong(prev, next, vertical);
     return reference > 0 && gap < reference * 0.2f;
 }
 
