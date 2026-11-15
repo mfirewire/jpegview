@@ -297,6 +297,9 @@
     <ClCompile Include="HdrToneMap.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
+    <ClCompile Include="PsdHdr.cpp">
+      <Filter>Source Files\Image Types</Filter>
+    </ClCompile>
     <ClCompile Include="PBMWrapper.cpp">
       <Filter>Source Files\Image Types</Filter>
     </ClCompile>
@@ -615,6 +618,9 @@
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="HdrToneMap.h">
+      <Filter>Header Files\Image Types</Filter>
+    </ClInclude>
+    <ClInclude Include="PsdHdr.h">
       <Filter>Header Files\Image Types</Filter>
     </ClInclude>
     <ClInclude Include="FindCicpChunk.h">

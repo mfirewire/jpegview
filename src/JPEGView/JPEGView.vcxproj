@@ -350,6 +350,9 @@
     <ClCompile Include="HdrToneMap.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="PsdHdr.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="PBMWrapper.cpp" />
     <ClCompile Include="PAMWrapper.cpp" />
     <ClCompile Include="JP2Wrapper.cpp" />
@@ -468,6 +471,7 @@
     <ClInclude Include="HDRWrapper.h" />
     <ClInclude Include="GainMap.h" />
     <ClInclude Include="HdrToneMap.h" />
+    <ClInclude Include="PsdHdr.h" />
     <ClInclude Include="FindCicpChunk.h" />
     <ClInclude Include="PBMWrapper.h" />
     <ClInclude Include="PAMWrapper.h" />
