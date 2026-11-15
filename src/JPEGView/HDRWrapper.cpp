@@ -12,24 +12,7 @@
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "Helpers.h"
-
-// Converts one HDR float channel to 8-bit, replicating stb's 8-bit
-// conversion (stbi__hdr_to_ldr) exactly: pow(v, invGamma) * 255 + 0.5,
-// clamped to [0, 255], truncated. pow() (double) matches stb, which also
-// calls the double pow() and casts the result to float before scaling.
-// The exponent is a float: for GAMMA=1.0 (or no GAMMA header) it is
-// exactly stb's 1.0f/2.2f, so the output is byte-identical to the old
-// stb 8-bit load (verified against the vendored stb on the test samples).
-static unsigned char ConvertHDRChannel(float fValue, float fInvGamma) {
-	// A2 (R-12 parity): pow() of a negative or NaN sample yields NaN, and both
-	// comparisons below are false for NaN, so the old code fell through to the
-	// int cast (undefined behaviour). !(z >= 0) catches NaN as well as negatives,
-	// which is the same test the EXR decoder uses.
-	float z = (float)pow((double)fValue, (double)fInvGamma) * 255.0f + 0.5f;
-	if (!(z >= 0.0f)) z = 0.0f;
-	if (z > 255.0f) z = 255.0f;
-	return (unsigned char)(int)z;
-}
+#include "HdrToneMap.h"
 
 // Parses the GAMMA header line (e.g. "GAMMA=0.454545") from a Radiance
 // header. Returns the value, or -1 when the header has no GAMMA line.
@@ -104,18 +87,17 @@ void* HDRReader::ReadImage(int& width,
 	// Header-aware gamma: stb_image's 8-bit load converts the float HDR
 	// data to 8-bit with a fixed gamma-2.2 tone mapping and ignores the
 	// file's GAMMA header, so a file written for gamma 0.454545 came out
-	// far too bright. Load floats instead and apply the gamma here:
-	// GAMMA=g means the stored values were encoded with exponent g
-	// (stored = linear^g), so displaying them needs stored^(1/(2.2*g)).
-	// g=0.454545 gives exponent 1 (as stored), g=1.0 gives 1/2.2 (the old
-	// stb behaviour). No GAMMA header means g=1.0; a missing or absurd
-	// value falls back to the old 2.2 display gamma.
+	// far too bright. Load floats instead and linearize here: GAMMA=g
+	// means the stored values were encoded with exponent g (stored =
+	// linear^g), so linear = stored^(1/g). g=0.454545 gives stored^2.2,
+	// g=1.0 (or no GAMMA header) is a no-op. A missing or absurd value
+	// falls back to g=1.0. The linearized floats are then tone-mapped
+	// by HdrToneMap::ConvertLinearImage (BT.2390, linear 1.0 = SDR
+	// white), which rolls highlights off instead of clipping them.
 	double dGamma = ParseHDRGamma(pMagic, sizebytes);
-	float fInvGamma;
+	double dInvGamma = 1.0;
 	if (dGamma > 0.0 && dGamma <= 4.0) {
-		fInvGamma = (float)(1.0 / (2.2 * dGamma));
-	} else {
-		fInvGamma = (float)(1.0 / 2.2);
+		dInvGamma = 1.0 / dGamma;
 	}
 	float* pDecodedFloat = stbi_loadf_from_memory(pMagic, sizebytes, &width, &height, &nChannels, 0);
 	if (pDecodedFloat == NULL)
@@ -145,16 +127,19 @@ void* HDRReader::ReadImage(int& width,
 	}
 	// Zero the row padding so no uninitialised bytes reach the DIB.
 	memset(pPixelData, 0, allocSize);
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
-			size_t srcIdx = ((size_t)y * (size_t)width + (size_t)x) * 3;
-			size_t dstIdx = (size_t)y * padded_stride + (size_t)x * 3;
-			// stb_image returns RGB; JPEGView pixels are BGR.
-			pPixelData[dstIdx] = ConvertHDRChannel(pDecodedFloat[srcIdx + 2], fInvGamma);
-			pPixelData[dstIdx + 1] = ConvertHDRChannel(pDecodedFloat[srcIdx + 1], fInvGamma);
-			pPixelData[dstIdx + 2] = ConvertHDRChannel(pDecodedFloat[srcIdx], fInvGamma);
+	// Linearize in place (GAMMA=g: linear = stored^(1/g)). For the
+	// common g=1.0 this is a no-op and is skipped. Negative/NaN stored
+	// values become NaN here; ConvertLinearImage clamps them to 0.
+	if (dInvGamma != 1.0) {
+		size_t nFloats = (size_t)width * (size_t)height * 3;
+		for (size_t i = 0; i < nFloats; i++) {
+			pDecodedFloat[i] = (float)pow((double)pDecodedFloat[i], dInvGamma);
 		}
 	}
+	// Tone-map the scene-linear floats to 8-bit sRGB BGR (BT.2390,
+	// linear 1.0 = SDR white). stb_image returns RGB; the helper
+	// writes BGR (JPEGView pixel order).
+	HdrToneMap::ConvertLinearImage(pDecodedFloat, width, height, (size_t)width * 3, pPixelData, padded_stride);
 	stbi_image_free(pDecodedFloat);
 	return (void*)pPixelData;
 }
