@@ -152,3 +152,16 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/libavif/include tests/avif_gainmap_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/avif_gainmap_test
           /tmp/avif_gainmap_test
+  psd-hdr-test:
+    name: PSD HDR decode core test (16/32-bit PSD)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: PSD HDR unit test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/libpng-apng/include tests/psd_hdr_test.cpp src/JPEGView/PsdHdr.cpp src/JPEGView/HdrToneMap.cpp -lz -o /tmp/psd_hdr_test
+          /tmp/psd_hdr_test
