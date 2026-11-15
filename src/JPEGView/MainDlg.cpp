@@ -2596,6 +2596,21 @@ bool CMainDlg::SaveImage(bool bFullSize, bool bJxlTranscode) {
 		m_bUseLosslessJXL = fileDlg.m_ofn.nFilterIndex == 8;
 		m_bUseLosslessJP2 = fileDlg.m_ofn.nFilterIndex == 16;
 		m_bSaveLossless = m_bUseLosslessWEBP || m_bUseLosslessJXL || m_bUseLosslessJP2;
+		// R-A6 (F1): the filter the user picked carries its own lossless
+		// bit, but the typed extension may name another format: picking
+		// "WEBP lossless" and typing foo.jxl must save lossless JXL, not
+		// silently fall back to the stale per-format flag for JXL. When the
+		// typed extension names a format with a lossless variant, take the
+		// filter's lossless bit for that format. SaveImageNoPrompt then
+		// recomputes m_bSaveLossless from the (now corrected) flag.
+		const bool bFilterLossless = fileDlg.m_ofn.nFilterIndex == 6 || fileDlg.m_ofn.nFilterIndex == 8 || fileDlg.m_ofn.nFilterIndex == 16;
+		switch (Helpers::GetImageFormat(fileDlg.m_szFileName)) {
+		case IF_WEBP: m_bUseLosslessWEBP = bFilterLossless; break;
+		case IF_JXL: m_bUseLosslessJXL = bFilterLossless; break;
+		case IF_JP2: m_bUseLosslessJP2 = bFilterLossless; break;
+		default: break;
+		}
+		m_bSaveLossless = m_bUseLosslessWEBP || m_bUseLosslessJXL || m_bUseLosslessJP2;
 		m_sSaveExtension = m_sSaveDirectory.Right(m_sSaveDirectory.GetLength() - m_sSaveDirectory.ReverseFind(_T('.')) - 1);
 		m_sSaveDirectory = m_sSaveDirectory.Left(m_sSaveDirectory.ReverseFind(_T('\\')) + 1);
 		return SaveImageNoPrompt(fileDlg.m_szFileName, bFullSize, bJxlTranscode);
