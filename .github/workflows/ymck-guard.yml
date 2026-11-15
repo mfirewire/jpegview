@@ -107,3 +107,17 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_tga_rle_test.cpp -o /tmp/loader_tga_rle_test
           /tmp/loader_tga_rle_test
+
+  hdr-tonemap-test:
+    name: HDR tone-mapping helper test (Option A)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: HDR tone-mapping unit test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/hdr_tonemap_test.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/hdr_tonemap_test
+          /tmp/hdr_tonemap_test
