@@ -9,6 +9,7 @@
 #include <gdiplus.h>
 #include <algorithm>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <cmath>
 #include <vector> // C2: one pass over the words for the fill and the border
@@ -95,6 +96,7 @@ void COcrController::Toggle(CMainDlg& main) {
     auto image = main.GetCurrentImage();
     if (!image) return;
     const std::shared_ptr<Job> previousJob = m_job;
+    CString sStartError;
     try {
         const void* pixels = image->OriginalPixels();
         auto snapshot = Ocr::MakeSnapshot(pixels, image->OrigWidth(), image->OrigHeight(), image->OriginalChannels());
@@ -130,7 +132,21 @@ void COcrController::Toggle(CMainDlg& main) {
         m_result = {};
         m_selected.clear();
         m_dragAnchor = m_dragEnd = m_dragLastHit = -1;
-    } catch (const std::exception&) {
+    } catch (const std::bad_alloc&) {
+        // #86: out of memory is the only case the old "Memory may be low"
+        // message was true for; keep it for exactly this type.
+        sStartError = CNLS::GetString(_T("Could not start text recognition. Memory may be low."));
+    } catch (const std::invalid_argument&) {
+        // #86: MakeSnapshot throws this for a null/degenerate image or an
+        // unsupported channel count - a bad image, not low memory.
+        sStartError = CNLS::GetString(_T("Could not start text recognition. The image could not be prepared for recognition."));
+    } catch (const std::exception& e) {
+        // #86: anything else gets its diagnostic attached instead of the
+        // misleading memory message. e.what() is narrow; CString converts
+        // it for the wide message box.
+        sStartError.Format(_T("Could not start text recognition: %s"), CString(e.what()));
+    }
+    if (!sStartError.IsEmpty()) {
         // Undo the publish. A job that is out but has no worker behind it would
         // never be marked done and never posts WM_OCR_COMPLETED, and the busy gate
         // at the top of Toggle turns away every later attempt for good - that is
@@ -138,7 +154,7 @@ void COcrController::Toggle(CMainDlg& main) {
         // none: the gate only lets us through when the job is null, done or
         // canceled).
         m_job = previousJob;
-        ::MessageBox(main.GetHWND(), CNLS::GetString(_T("Could not start text recognition. Memory may be low.")), _T("OCR"), MB_OK | MB_ICONERROR);
+        ::MessageBox(main.GetHWND(), sStartError, _T("OCR"), MB_OK | MB_ICONERROR);
     }
     main.Invalidate(FALSE);
 }
