@@ -4,6 +4,7 @@ Fixes from the c2adbf4 review: the three fix batches (cheap batch, OCR batch, te
 
 ## Bugs fixed
 
+- **RAW white balance**: the full-size RAW decode now uses the camera's as-shot white balance, so RAW files no longer come out strongly red next to their embedded JPEG thumbnail (e.g. Panasonic DMC-G3 RW2; the Nikon D1 red cast is fixed as well). Files without a usable camera white balance fall back to auto white balance.
 - **Lossless JPEG**: EXIF auto-rotation no longer marks the image as destructively processed, so the lossless menu stays available for rotated phone photos; the orientation tag is now composed with the transform, so a mirrored orientation-6 photo no longer flips twice on reload.
 - **Saving**: a silent save (Ctrl+S) no longer reuses the lossless flag left over from an earlier save dialog -- the flag is recomputed from the target extension, so a lossless WebP dialog save no longer makes a later Ctrl+S on a .jxl/.jp2 file save losslessly. The save filter's lossless choice now also applies to a hand-typed extension's format.
 - **16-bit PNM**: a maxval other than 65535 (e.g. 4095) no longer renders far too dark; the range is scaled to full brightness, as already done for 8-bit files.
