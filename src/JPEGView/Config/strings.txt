@@ -99,6 +99,7 @@ Copy file path of the image to clipboard
 Copy screen to clipboard / Copy processed full size image to clipboard	
 Copying parameter DB to file '%s' failed. Reason: %s	
 Correct converging lines (perspective correction)	
+Could not copy the image to the clipboard.	
 Could not start text recognition. The image could not be prepared for recognition.	
 Creation date/time	
 Crop image	

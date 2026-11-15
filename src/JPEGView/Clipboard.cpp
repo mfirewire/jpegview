@@ -344,6 +344,11 @@ void CClipboard::DoCopy(HWND hWnd, int nWidth, int nHeight, const void* pSourceI
 		// clipboard holding just the name after the image failed (R-A15).
 		::GlobalFree(hMem);
 		::CloseClipboard();
+		// R-A15: report the failure after releasing the clipboard, so
+		// the modal box does not hold the clipboard open. The wording
+		// deliberately does not blame memory: SetClipboardData can also
+		// fail because another program holds the clipboard open.
+		::MessageBox(hWnd, CNLS::GetString(_T("Could not copy the image to the clipboard.")), _T("JPEGView"), MB_OK | MB_ICONERROR);
 		return;
 	}
 
