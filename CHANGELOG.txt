@@ -4,7 +4,7 @@ JPEGView Changelog
 [Unreleased]
 
 New features:
-- HDR images with PQ (ST 2084) or HLG transfer now display tone-mapped to SDR (1000-nit peak, SDR white 203 nits) instead of showing the raw signal too dark; PNG support is in this build, AVIF/HEIF/JXL follow. SDR images are unaffected
+- HDR images with PQ (ST 2084) or HLG transfer now display tone-mapped to SDR (1000-nit peak, SDR white 203 nits) instead of showing the raw signal too dark; PNG and AVIF support is in this build, HEIF/JXL follow. SDR images are unaffected
 
 Bugs fixed:
 - Lossless JPEG transformations: EXIF auto-rotation no longer marks the image as destructively processed, so the lossless menu stays available for rotated phone photos; a real in-memory rotation still blocks it
