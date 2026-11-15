@@ -7,6 +7,9 @@
 #include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
 #include "HdrToneMap.h"
+#include "GainMap.h"
+#include <cmath>
+#include <vector>
 
 // HDR (Option A): convert the 16-bit BGRA pixels libavif wrote (depth 16,
 // values scaled to [0, 65535]) to 8-bit BGRA via the HdrToneMap helper.
@@ -69,6 +72,200 @@ static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, in
 	return out;
 }
 
+// Gain-map support (Option D, Phase 4): ISO 21496-1 AVIF gain map.
+//
+// A gain-map AVIF is an SDR base image plus a lower-resolution
+// single-channel gain-map image, with the reconstruction parameters
+// carried in the file's gain-map metadata box. libavif 1.4.2 parses
+// that metadata natively and decodes the gain-map image, but ONLY
+// when the decoder is told to: decoder->imageContentToDecode must
+// include AVIF_IMAGE_CONTENT_GAIN_MAP before avifDecoderParse()
+// (the default is colour+alpha only, so without the flag
+// decoder->image->gainMap stays NULL). After a successful
+// avifDecoderNthImage() the gain map is at decoder->image->gainMap:
+// gainMap->image holds the decoded planes (the Y plane is the gain
+// map; transformFlags is always AVIF_TRANSFORM_NONE) and
+// gainMapMin/gainMapMax/gainMapGamma/baseOffset/alternateOffset/
+// baseHdrHeadroom/alternateHdrHeadroom hold the metadata, per
+// channel as fractions.
+//
+// The gain math itself is NOT re-implemented here: the metadata
+// (channel 0 — the shared helper is single-channel, same convention
+// as its multi-channel handling) and the Y plane (normalised from
+// its native 8/10/12-bit depth to 8-bit) are fed into the shared
+// gainmap::ApplyGainMap, and the linear HDR output is tone-mapped
+// with HdrToneMap::ConvertLinearImage, exactly like the JPEG
+// UltraHDR and HEIF gain-map paths. libavif's own
+// avifImageApplyGainMap() is NOT used: it tone-maps for a display
+// headroom and bakes in its own tone mapping, while JPEGView wants
+// the full reconstruction (weight 1.0) plus its own BT.2390 path.
+//
+// TryApplyAvifGainMap runs only on the SDR path (a gain-map AVIF is
+// SDR base + gain map, never PQ/HLG) and returns a NEW 8-bit BGRA
+// buffer, or NULL when there is no gain map or anything fails — the
+// caller keeps the base BGRA unchanged in that case. A broken gain
+// map must never fail the whole load.
+
+// avifSignedFraction/avifUnsignedFraction -> double. Returns false
+// when the denominator is 0 or the value is non-finite.
+static bool AvifSignedFractionToDouble(const avifSignedFraction& f, double& out)
+{
+	if (f.d == 0)
+		return false;
+	out = (double)f.n / (double)f.d;
+	return std::isfinite(out);
+}
+
+static bool AvifUnsignedFractionToDouble(const avifUnsignedFraction& f, double& out)
+{
+	if (f.d == 0)
+		return false;
+	out = (double)f.n / (double)f.d;
+	return std::isfinite(out);
+}
+
+// Convert libavif's per-channel gain-map metadata (channel 0 only)
+// to the shared helper's Metadata. Returns false when any essential
+// fraction has a zero denominator, gamma is not > 0, or a value is
+// non-finite. A multi-channel gain map whose channels differ is
+// approximated with channel 0.
+static bool AvifGainMapToMetadata(const avifGainMap* gainMap, gainmap::Metadata& meta)
+{
+	meta = gainmap::Metadata();
+	if (gainMap == NULL)
+		return false;
+	double gainMapMin = 0.0, gainMapMax = 0.0, gamma = 1.0;
+	double baseOffset = 0.0, alternateOffset = 0.0;
+	double baseHeadroom = 0.0, alternateHeadroom = 0.0;
+	if (!AvifSignedFractionToDouble(gainMap->gainMapMin[0], gainMapMin) ||
+		!AvifSignedFractionToDouble(gainMap->gainMapMax[0], gainMapMax) ||
+		!AvifUnsignedFractionToDouble(gainMap->gainMapGamma[0], gamma) ||
+		!AvifSignedFractionToDouble(gainMap->baseOffset[0], baseOffset) ||
+		!AvifSignedFractionToDouble(gainMap->alternateOffset[0], alternateOffset) ||
+		!AvifUnsignedFractionToDouble(gainMap->baseHdrHeadroom, baseHeadroom) ||
+		!AvifUnsignedFractionToDouble(gainMap->alternateHdrHeadroom, alternateHeadroom))
+		return false;
+	if (!(gamma > 0.0))
+		return false;
+	meta.gainMapMin = gainMapMin;
+	meta.gainMapMax = gainMapMax;
+	meta.gamma = gamma;
+	meta.baseOffset = baseOffset;
+	meta.alternateOffset = alternateOffset;
+	meta.baseHdrHeadroom = baseHeadroom;
+	meta.alternateHdrHeadroom = alternateHeadroom;
+	meta.useBaseColorSpace = gainMap->useBaseColorSpace ? true : false;
+	meta.valid = true;
+	return true;
+}
+
+// Decode the gain-map Y plane to a packed single-channel 8-bit buffer
+// (gainW x gainH bytes). The gain map is usually YUV400 (monochrome)
+// but may be YUV444/422/420; in every case the Y plane is channel 0's
+// gain map at full resolution. Samples are normalised from the native
+// depth (8/10/12-bit, up to 16) to 8-bit with round-half-up. The gain
+// map must not be absurdly larger than the base (sanity cap 4x per
+// side — ApplyGainMap upsamples it bilinearly to base size).
+static bool DecodeAvifGainMapGray(const avifGainMap* gainMap, int baseWidth, int baseHeight,
+	std::vector<uint8_t>& gainGray, int& gainW, int& gainH)
+{
+	gainW = gainH = 0;
+	if (gainMap == NULL || gainMap->image == NULL)
+		return false;
+	const avifImage* gmImage = gainMap->image;
+	int depth = (int)gmImage->depth;
+	if (depth < 8 || depth > 16)
+		return false;
+	int gw = (int)avifImagePlaneWidth(gmImage, AVIF_CHAN_Y);
+	int gh = (int)avifImagePlaneHeight(gmImage, AVIF_CHAN_Y);
+	if (gw <= 0 || gh <= 0 || gw > baseWidth * 4 || gh > baseHeight * 4)
+		return false;
+	const uint8_t* plane = avifImagePlane(gmImage, AVIF_CHAN_Y);
+	uint32_t rowBytes = avifImagePlaneRowBytes(gmImage, AVIF_CHAN_Y);
+	if (plane == NULL || rowBytes == 0)
+		return false;
+	const uint32_t maxVal = (uint32_t)((1u << depth) - 1);
+	const size_t bytesPerSample = (depth > 8) ? 2 : 1;
+	if (rowBytes < (uint32_t)gw * bytesPerSample)
+		return false;
+	gainGray.assign((size_t)gw * gh, 0);
+	for (int y = 0; y < gh; y++) {
+		const uint8_t* srcRow = plane + (size_t)y * rowBytes;
+		uint8_t* dstRow = &gainGray[(size_t)y * gw];
+		if (depth == 8) {
+			memcpy(dstRow, srcRow, (size_t)gw);
+		} else {
+			// 16-bit planes are native-endian uint16_t (little-endian
+			// on Windows x86/x64).
+			const uint16_t* src16 = (const uint16_t*)srcRow;
+			for (int x = 0; x < gw; x++) {
+				uint32_t v = src16[x];
+				if (v > maxVal)
+					v = maxVal;
+				dstRow[x] = (uint8_t)((v * 255 + maxVal / 2) / maxVal);
+			}
+		}
+	}
+	gainW = gw;
+	gainH = gh;
+	return true;
+}
+
+// Apply the gain map of an SDR AVIF base image, if it has one.
+// `baseBgra` is the already-decoded 8-bit BGRA base (width x height,
+// after the ICC transform, so it is sRGB — the shared helper's input
+// format). Returns a NEW 8-bit BGRA buffer with the gain map applied
+// and tone-mapped via HdrToneMap::ConvertLinearImage, or NULL when
+// there is no gain map or anything fails — the caller keeps `baseBgra`
+// unchanged in that case.
+static unsigned char* TryApplyAvifGainMap(const avifImage* image,
+	const unsigned char* baseBgra, int width, int height)
+{
+	unsigned char* outBgra = NULL;
+	if (image == NULL || baseBgra == NULL || width <= 0 || height <= 0)
+		return NULL;
+	const avifGainMap* gainMap = image->gainMap;
+	if (gainMap == NULL)
+		return NULL;
+	gainmap::Metadata meta;
+	if (!AvifGainMapToMetadata(gainMap, meta))
+		return NULL;
+	std::vector<uint8_t> gainGray;
+	int gainW = 0, gainH = 0;
+	if (!DecodeAvifGainMapGray(gainMap, width, height, gainGray, gainW, gainH))
+		return NULL;
+	// Base BGRA -> RGB temp buffer (drop alpha), then reconstruct
+	// linear HDR floats, tone-map to BGR, and repack to BGRA
+	// (alpha opaque). ConvertLinearImage outputs BGR; the AVIF
+	// path needs BGRA, so the repack is explicit.
+	size_t rgbSize = 0, floatSize = 0, bgraSize = 0;
+	if (!IsImageBufferSizeOk((size_t)width * 3, (size_t)height, &rgbSize)
+		|| !IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &floatSize)
+		|| !IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
+		return NULL;
+	std::vector<uint8_t> rgb(rgbSize);
+	std::vector<float> linear(floatSize / sizeof(float));
+	std::vector<uint8_t> bgr(rgbSize);
+	for (size_t i = 0; i < (size_t)width * height; i++) {
+		rgb[i * 3 + 0] = baseBgra[i * 4 + 2];
+		rgb[i * 3 + 1] = baseBgra[i * 4 + 1];
+		rgb[i * 3 + 2] = baseBgra[i * 4 + 0];
+	}
+	if (!gainmap::ApplyGainMap(rgb.data(), width, height, gainGray.data(), gainW, gainH, meta, 1.0, linear.data()))
+		return NULL;
+	HdrToneMap::ConvertLinearImage(linear.data(), width, height, (size_t)width * 3, bgr.data(), (size_t)width * 3);
+	outBgra = new(std::nothrow) unsigned char[bgraSize];
+	if (outBgra == NULL)
+		return NULL;
+	for (size_t i = 0; i < (size_t)width * height; i++) {
+		outBgra[i * 4 + 0] = bgr[i * 3 + 0];
+		outBgra[i * 4 + 1] = bgr[i * 3 + 1];
+		outBgra[i * 4 + 2] = bgr[i * 3 + 2];
+		outBgra[i * 4 + 3] = 0xff;
+	}
+	return outBgra;
+}
+
 void* AvifReader::ReadImage(int& width,
 	int& height,
 	int& nchannels,
@@ -108,6 +305,13 @@ void* AvifReader::ReadImage(int& width,
 		}
 		cache.decoder->maxThreads = nthreads;
 		cache.decoder->strictFlags = AVIF_STRICT_DISABLED;
+		// Gain-map (Option D, Phase 4): ask libavif to decode the gain
+		// map too (imageContentToDecode is only honoured at Parse time,
+		// so this must be set before avifDecoderParse below). The
+		// default is colour+alpha only, which leaves
+		// decoder->image->gainMap NULL even for a gain-map file. Files
+		// without a gain map are unaffected (nothing extra is decoded).
+		cache.decoder->imageContentToDecode = AVIF_IMAGE_CONTENT_ALL;
 		result = avifDecoderSetIOMemory(cache.decoder, cache.data, sizebytes);
 		if (result != AVIF_RESULT_OK) {
 			DeleteCache();
@@ -275,6 +479,19 @@ void* AvifReader::ReadImage(int& width,
 		if (cache.transform == NULL)
 			cache.transform = ICCProfileTransform::CreateTransform(icc.data, icc.size, ICCProfileTransform::FORMAT_BGRA);
 		ICCProfileTransform::DoTransform(cache.transform, cache.rgb.pixels, cache.rgb.pixels, width, height);
+	}
+	if (!isHdr && flags == AVIF_TRANSFORM_NONE) {
+		// Gain-map (Option D, Phase 4): an SDR AVIF with a gain map is
+		// an HDR photo — reconstruct the HDR image and tone-map it.
+		// TryApplyAvifGainMap returns NULL when there is no gain map
+		// or anything fails; the SDR base is kept unchanged then.
+		// It runs after the ICC transform (the base it reconstructs
+		// from is sRGB, like the HEIF path).
+		unsigned char* gainMapped = TryApplyAvifGainMap(cache.decoder->image, cache.rgb.pixels, width, height);
+		if (gainMapped != NULL) {
+			delete[] cache.rgb.pixels;
+			cache.rgb.pixels = gainMapped;
+		}
 	}
 
 	avifRWData exif = cache.decoder->image->exif;
