@@ -23,7 +23,7 @@ SRC_PATH = Path(__file__).resolve().parent.parent.parent / "src"
 def keymap_resource_parse():
     """ returns 2 dicts, one with IDM_=int, and the other with IDM_=string(comment) """
 
-    RESOURCE_FILE = SRC_PATH / r"JPEGView\resource.h"
+    RESOURCE_FILE = SRC_PATH / "JPEGView" / "resource.h"
 
     d_int = {}
     d_comment = {}
@@ -50,7 +50,7 @@ def keymap_generate_internal_config():
 
         it is intentionally made to be less readable by not doing any padding
     """
-    TARGET_FILE = SRC_PATH / r"JPEGView\Config\symbols.km"  # make filename discreet, since it really shouldn't confuse the user
+    TARGET_FILE = SRC_PATH / "JPEGView" / "Config" / "symbols.km"  # make filename discreet, since it really shouldn't confuse the user
 
     (d_index, d_comment) = keymap_resource_parse()
 
@@ -79,7 +79,7 @@ def keymap_generate_reference_readme():
 
     the generated file is NOT PARSED by JPEGView at all, it's only a readme, so it can be translated without worry of a bad edit
     """
-    TARGET_FILE = SRC_PATH / r"JPEGView\Config\KeyMap-README.html"
+    TARGET_FILE = SRC_PATH / "JPEGView" / "Config" / "KeyMap-README.html"
 
     (d_index, d_comment) = keymap_resource_parse()
 
