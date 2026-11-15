@@ -32,8 +32,29 @@ polarity is the one real Photoshop files use. That proof remains the
 one in src/JPEGView/YmckDecode.h (cmyk_chart_rswop.psd on build
 19897de). The product wrappers still need a Windows device test.
 
+Mutations exercised (2026-11-15, Pillow 10.2.0, libopenjp2-tools
+2.5.0):
+  * PSD with one plane byte wrong (C plane, white patch, stored 255
+    -> 254): CAUGHT - the raw-planes check and the Pillow-pixels
+    check both fail, exit 1.
+  * JP2 with the colr patch reverted (enumCS 12 -> 0, as OpenJPEG
+    2.5.0 wrote it): CAUGHT by opj_decompress - without the CMYK
+    declaration it emits 4 components (24 bytes) instead of
+    converting to 3-component RGB (18 bytes), so the length check
+    fails, exit 1. (The Pillow check alone does not catch it:
+    Pillow reports the same mode (RGBA) and the same component
+    values either way; it does not interpret enumCS. opj_dump
+    numcomps=4 still passes.)
+  Count: the earlier "4 mutations" claim had 2 demonstrated (change
+  an expected value, add -DYMCK_PLANE_IS_INVERTED=0) and these 2
+  unrecorded; all 4 are now demonstrated caught.
+
 Usage (from the repository root):
-    python3 tests/cmyk_reference_check.py [tests/samples]
+    python3 tests/cmyk_reference_check.py [tests/samples] [--allow-missing-tools]
+
+libopenjp2-tools (opj_decompress, opj_dump) is installed in CI, so a
+missing or failing tool is a failure there, not a skip. Locally,
+pass --allow-missing-tools to skip the OpenJPEG checks explicitly.
 
 Exit code 0 = all checks passed, 1 = at least one failed.
 """
@@ -65,6 +86,19 @@ WIDTH, HEIGHT = 6, 1
 
 failures = 0
 checks = 0
+
+# Set from --allow-missing-tools (see the usage note above).
+ALLOW_MISSING_TOOLS = "--allow-missing-tools" in sys.argv
+
+
+def missing_tool(what, detail):
+    # A missing OpenJPEG CLI is an environment failure in CI, where
+    # libopenjp2-tools is installed; only an explicit local opt-out
+    # turns it back into a skip.
+    if ALLOW_MISSING_TOOLS:
+        print("skip  %s not available: %s" % (what, detail))
+    else:
+        check(False, "%s available (libopenjp2-tools installed)" % what, detail)
 
 
 def check(ok, what, detail=""):
@@ -134,8 +168,12 @@ def check_jp2(path):
             ["opj_decompress", "-i", str(path), "-o", "/tmp/cmyk_ref.raw"],
             capture_output=True, text=True, check=True,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        print("skip  JP2 opj_decompress not available/failed: %s" % e)
+    except FileNotFoundError as e:
+        missing_tool("opj_decompress", str(e))
+        return
+    except subprocess.CalledProcessError as e:
+        check(False, "JP2 opj_decompress converts CMYK to RGB",
+              "exit %d: %s" % (e.returncode, e.stderr.strip()))
         return
     raw = Path("/tmp/cmyk_ref.raw").read_bytes()
     check(len(raw) == 3 * WIDTH * HEIGHT,
@@ -153,14 +191,19 @@ def check_jp2(path):
             ["opj_dump", "-i", str(path)],
             capture_output=True, text=True, check=True,
         ).stdout
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        print("skip  JP2 opj_dump not available/failed: %s" % e)
+    except FileNotFoundError as e:
+        missing_tool("opj_dump", str(e))
+        return
+    except subprocess.CalledProcessError as e:
+        check(False, "JP2 opj_dump: numcomps=4",
+              "exit %d: %s" % (e.returncode, e.stderr.strip()))
         return
     check("numcomps=4" in dump, "JP2 opj_dump: numcomps=4")
 
 
 def main():
-    samples = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("tests/samples")
+    args = [a for a in sys.argv[1:] if a != "--allow-missing-tools"]
+    samples = Path(args[0]) if args else Path("tests/samples")
     print("CMYK reference check (samples: %s)" % samples)
     check_psd(samples / "cmyk_chart_6x1.psd")
     check_jp2(samples / "cmyk_chart_6x1.jpx")

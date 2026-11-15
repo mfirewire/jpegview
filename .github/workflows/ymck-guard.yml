@@ -65,7 +65,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenjp2-7-dev libopenjp2-tools
-          python3 -m pip install --break-system-packages Pillow
+          python3 -m pip install --break-system-packages Pillow==10.2.0
 
       - name: CMYK pixel test
         run: |
