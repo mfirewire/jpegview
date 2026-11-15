@@ -49,6 +49,12 @@ Mutations exercised (2026-11-15, Pillow 10.2.0, libopenjp2-tools
   an expected value, add -DYMCK_PLANE_IS_INVERTED=0) and these 2
   unrecorded; all 4 are now demonstrated caught.
 
+  CI pins Pillow 11.3.0 (oldest release with a Python 3.14 wheel):
+  10.2.0 has no cp314 wheel and its sdist fails to build on the
+  runner (KeyError: '__version__'). The mutations above were
+  exercised with 10.2.0; the script was re-run with 11.3.0 and
+  still passes 13/13, and both mutations are still caught.
+
 Usage (from the repository root):
     python3 tests/cmyk_reference_check.py [tests/samples] [--allow-missing-tools]
 

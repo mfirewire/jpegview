@@ -65,7 +65,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenjp2-7-dev libopenjp2-tools
-          python3 -m pip install --break-system-packages Pillow==10.2.0
+          # 11.3.0 is the oldest Pillow with a Python 3.14 wheel; 10.2.0
+          # has none and its sdist fails to build on the runner.
+          python3 -m pip install --break-system-packages Pillow==11.3.0
 
       - name: CMYK pixel test
         run: |
