@@ -2,21 +2,15 @@
 *****************************   Installation   *******************************
 ******************************************************************************
 1. Choose between 32 bit and 64 version
-JPEGView is provided in a 32 bit version and a 64 bit version. If you are using the 64 bit edition of Windows 7, 8 or 10, it is recommended to use the 64 bit version, in all other cases or when in doubt use the 32 bit version. With the 64 bit version, you can load images with more than 100 MegaPixels.
+JPEGView is provided in a 32 bit version and a 64 bit version. If you are using the 64 bit edition of Windows 10 or 11, it is recommended to use the 64 bit version, in all other cases or when in doubt use the 32 bit version. With the 64 bit version, you can load images with more than 100 MegaPixels.
 
 2. Check operation system requirements
 JPEGView32:
- Windows XP SP2 or SP3 (it does NOT work with SP1 only)
- Windows XP 64 bit SP2
- Windows Vista SP2
- Windows 7
- Windows 8/8.1
  Windows 10
+ Windows 11
 JPEGView64:
- Windows 7 64 bit edition
- Windows 8/8.1 64 bit edition
  Windows 10 64 bit edition
- (not supported: Windows XP 64 bit)
+ Windows 11 64 bit edition
 
 3. Extract directory
 JPEGView can be installed by simply extracting the directory with the chosen version to an arbitrary location on your hard disk, e.g.:
