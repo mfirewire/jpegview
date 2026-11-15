@@ -924,6 +924,20 @@ LRESULT CMainDlg::OnLButtonUp(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, B
 	return 0;
 }
 
+// #106: losing focus (or capture) leaves no WM_LBUTTONUP, so an OCR drag
+// would strand m_selecting and the drag preview until the next click, Esc
+// or image change. Finish the selection the same way a release would.
+// Only the OCR selection is touched here, never pan or crop.
+LRESULT CMainDlg::OnKillFocus(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+	if (m_pOcrController) m_pOcrController->MouseUp(*this);
+	return 0;
+}
+
+LRESULT CMainDlg::OnCaptureChanged(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+	if (m_pOcrController) m_pOcrController->MouseUp(*this);
+	return 0;
+}
+
 
 // based on https://www.codeproject.com/Articles/18400/How-to-move-a-dialog-which-does-not-have-a-caption
 // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-nchittest
