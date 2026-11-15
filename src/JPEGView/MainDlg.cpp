@@ -802,7 +802,10 @@ LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPA
 	// when there is more than one character. The PostMessage below still
 	// runs for an empty payload: the sender needs the KEY_MAGIC receipt
 	// (otherwise it starts a second instance), and OnLoadFileAsynch then
-	// just activates the existing window.
+	// just activates the existing window. The empty payload is signalled
+	// explicitly in wParam (WM_LOAD_FILE_ASYNCH_EMPTY_PAYLOAD), so the
+	// receiver does not infer it from m_sStartupFile, which a previously
+	// opened file would have overwritten (#76).
 	// lpData is attacker-controlled too: cbData > 0 with a NULL lpData would
 	// make the CString construction below read a null pointer.
 	if (pData != NULL && pData->lpData != NULL && pData->dwData == KEY_MAGIC && pData->cbData >= sizeof(TCHAR) && pData->cbData % sizeof(TCHAR) == 0 && 
@@ -810,19 +813,21 @@ LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPA
 		if (pData->cbData > sizeof(TCHAR)) {
 			m_sStartupFile = CString((LPCTSTR)pData->lpData, pData->cbData / sizeof(TCHAR) - 1);
 		}
-		::PostMessage(m_hWnd, WM_LOAD_FILE_ASYNCH, 0, KEY_MAGIC);
+		::PostMessage(m_hWnd, WM_LOAD_FILE_ASYNCH, pData->cbData == sizeof(TCHAR) ? WM_LOAD_FILE_ASYNCH_EMPTY_PAYLOAD : 0, KEY_MAGIC);
 		bHandled = TRUE;
 		return KEY_MAGIC;
 	}
 	return 0;
 }
 
-LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
+LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM wParam, LPARAM lParam, BOOL& bHandled) {
 	bHandled = lParam == KEY_MAGIC;
 	if (lParam == KEY_MAGIC && ::IsWindowEnabled(m_hWnd)) {
-		if (m_sStartupFile.IsEmpty()) {
+		if (wParam == WM_LOAD_FILE_ASYNCH_EMPTY_PAYLOAD) {
 			// #76: an empty payload must only bring the existing window to
 			// the front, never rebuild the file list with an empty name.
+			// The flag arrives in wParam with the message, so this holds
+			// no matter whether a file was opened before.
 			ShowWindow(SW_RESTORE);
 			::SetForegroundWindow(m_hWnd);
 			return 0;

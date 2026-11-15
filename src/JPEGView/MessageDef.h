@@ -14,6 +14,13 @@
 // Posted to main dialog for asynchronously loading the image with file name CMainDlg::m_sStartupFile
 #define WM_LOAD_FILE_ASYNCH (WM_APP + 24)
 
+// wParam of WM_LOAD_FILE_ASYNCH: WM_LOAD_FILE_ASYNCH_EMPTY_PAYLOAD (1) means
+// the COPYDATA payload that triggered it was empty, so the message must only
+// bring the existing window to the front; 0 means m_sStartupFile holds the
+// file to open. The flag travels with the message, so it stays correct even
+// if a file was opened before (#76).
+#define WM_LOAD_FILE_ASYNCH_EMPTY_PAYLOAD 1
+
 // Posted to main dialog when OCR text recognition on the current image has completed.
 #define WM_OCR_COMPLETED (WM_APP + 25)
 
