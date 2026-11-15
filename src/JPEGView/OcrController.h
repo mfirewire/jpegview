@@ -40,6 +40,9 @@ private:
     std::thread m_worker;
     Ocr::Result m_result;
     bool m_active = false, m_selecting = false;
+    // #87 (D): this image already ran recognition and found no text.
+    // Toggle re-activates the empty state instead of starting another run.
+    bool m_bRecognizedEmpty = false;
     bool m_hovering = false;
     // 多选：与 m_result.words 等长，true 表示该词被选中。点击切换单个词，
     // 拖动则用一段连续范围整体替换。复制时按索引顺序拼接，天然是原文顺序。

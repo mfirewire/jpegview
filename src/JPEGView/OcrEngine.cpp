@@ -15,7 +15,9 @@
 #include <cstring>
 #include <cwctype>
 #include <memory>
+#include <new>
 #include <stdexcept>
+#include <string>
 #include <wchar.h>
 
 // WinRT/WRL requires NTDDI_VERSION >= NTDDI_VISTA (Windows Vista),
@@ -520,8 +522,17 @@ Result Recognize(const Snapshot& image, const std::vector<std::wstring>& preferr
             // awaits translation in the other language files.
             result.error = CNLS::GetString(_T("No OCR engine could be created for the configured languages."));
         }
-    } catch (const std::exception&) {
-        result.error = L"OCR recognition failed.";
+    } catch (const std::bad_alloc&) {
+        result.error = L"OCR recognition failed: not enough memory.";
+    } catch (const std::invalid_argument&) {
+        result.error = L"OCR recognition failed: the image could not be prepared for recognition.";
+    } catch (const std::exception& e) {
+        // #87 (E): attach the diagnostic instead of the generic message.
+        // e.what() is narrow; widen it (ASCII diagnostic text) so it can
+        // be appended to the wide error shown by Complete().
+        const std::string detail(e.what());
+        result.error = L"OCR recognition failed: ";
+        result.error.append(detail.begin(), detail.end());
     } catch (...) {
         result.error = L"OCR recognition failed.";
     }

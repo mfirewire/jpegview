@@ -36,6 +36,7 @@ void COcrController::Reset() {
     m_result = {};
     m_selected.clear();
     m_active = m_selecting = m_hovering = false;
+    m_bRecognizedEmpty = false;
     m_dragAnchor = m_dragEnd = m_dragLastHit = -1;
 }
 
@@ -81,6 +82,13 @@ void COcrController::Toggle(CMainDlg& main) {
         return;
     }
     if (!m_result.words.empty()) {
+        m_active = true;
+        main.Invalidate(FALSE);
+        return;
+    }
+    if (m_bRecognizedEmpty) {
+        // #87 (D): this image already ran recognition and found no text;
+        // re-activate the empty state instead of starting another run.
         m_active = true;
         main.Invalidate(FALSE);
         return;
@@ -161,12 +169,19 @@ void COcrController::Toggle(CMainDlg& main) {
 
 void COcrController::Complete(CMainDlg& main) {
     if (!m_job) return;
+    bool bCanceled = false;
     {
         std::lock_guard lock(m_job->mutex);
         if (!m_job->done) return;
-        if (!m_job->canceled.load()) m_result = std::move(m_job->result);
+        bCanceled = m_job->canceled.load();
+        if (!bCanceled) m_result = std::move(m_job->result);
     }
     m_job.reset();
+    // #87 (D): cache an empty result so Toggle re-activates the empty
+    // state instead of re-running recognition. A canceled job never ran
+    // to completion on this image, so it must not set the flag; an error
+    // must not either, or the next Toggle would hide a retryable failure.
+    m_bRecognizedEmpty = !bCanceled && m_result.error.empty() && m_result.words.empty();
     m_active = !m_result.words.empty();
     m_selected.assign(m_result.words.size(), false);
     main.Invalidate(FALSE);
