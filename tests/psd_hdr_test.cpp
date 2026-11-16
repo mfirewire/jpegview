@@ -840,6 +840,71 @@ void TestPsdIccBuildColorSpace() {
         Check(IsIdentityMatrix(cs.matrix),
               "real sRGB IEC rejected: matrix identity");
     }
+    // Real Adobe RGB (1998) profile (D65 wtpt): the standard profile
+    // extracted from a real 16-bit Adobe RGB PSD (tests/samples/
+    // adobe_rgb_1998.icc). Its wtpt is D65 (0.9505, 1.0, 1.0891)
+    // while its colorants are the D50 Adobe primaries - using the
+    // wtpt directly in the M*S = W solve mixed D65 with D50 and
+    // built a diagonal matrix of 0.827/1.022/1.370 (blue shift;
+    // regression reported 2026-11-16 on 42ca46a, same numbers as
+    // the sRGB case). The solve must use the D50 white point when
+    // wtpt is D65, so this profile must give the same D50 matrix
+    // as the lcms2-built Adobe profile above. This test must fail
+    // on the unfixed code (red 0.5 comes out ~0.555 instead of
+    // 0.5877, gray 0.5 comes out [0.41, 0.51, 0.68]).
+    {
+        std::vector<uint8_t> bytes =
+            ReadWholeFile("tests/samples/adobe_rgb_1998.icc");
+        Check(!bytes.empty(), "real Adobe RGB profile fixture loads");
+        Check(bytes.size() == 560, "real Adobe RGB profile is 560 bytes");
+        PsdHdr::ColorSpace cs;
+        std::vector<float> storage;
+        Check(PsdIcc::BuildColorSpace(bytes.data(), bytes.size(), cs, storage),
+              "real Adobe RGB BuildColorSpace returns TRUE");
+        Check(cs.trc[0] != NULL && cs.trc[1] != NULL && cs.trc[2] != NULL,
+              "real Adobe RGB trc[0..2] set");
+        // Gamma 2.1992 at 32768/65535: (32768/65535)^2.1992 ~= 0.2176.
+        Check(Near((double)cs.trc[0][32768], 0.217645, 1e-3),
+              "real Adobe RGB trc[32768] ~= 0.2176 (gamma 2.1992 at 0.5)");
+        // D50 matrix (numpy): 1.398348. The wrong D65-wtpt route gives
+        // 1.2345 in matrix[0] - explicitly rejected, not just "close".
+        Check(Near((double)cs.matrix[0], 1.398348, 5e-3),
+              "real Adobe RGB matrix[0] ~= 1.398 (D50, not D65-wtpt)");
+        Check(std::fabs((double)cs.matrix[0] - 1.2345) > 0.05,
+              "real Adobe RGB matrix[0] is NOT 1.2345 (wrong D65-wtpt value)");
+        CheckMatrixNear(cs.matrix, kAdobeMatrix, "real Adobe RGB");
+        // White (1,1,1) maps to (1,1,1): the matrix preserves white.
+        for (int r = 0; r < 3; r++) {
+            double v = (double)cs.matrix[r * 3 + 0] + (double)cs.matrix[r * 3 + 1] +
+                       (double)cs.matrix[r * 3 + 2];
+            char buf[64];
+            std::snprintf(buf, sizeof(buf),
+                          "real Adobe RGB white row %d sums to 1", r);
+            Check(Near(v, 1.0, 5e-3), buf);
+        }
+        // Neutral gray (0.5,0.5,0.5) stays neutral: max channel
+        // spread < 0.01. (The wrong matrix gives [0.41, 0.51, 0.68].)
+        {
+            double g0 = 0.5 * ((double)cs.matrix[0] + (double)cs.matrix[1] + (double)cs.matrix[2]);
+            double g1 = 0.5 * ((double)cs.matrix[3] + (double)cs.matrix[4] + (double)cs.matrix[5]);
+            double g2 = 0.5 * ((double)cs.matrix[6] + (double)cs.matrix[7] + (double)cs.matrix[8]);
+            double mx = g0 > g1 ? (g0 > g2 ? g0 : g2) : (g1 > g2 ? g1 : g2);
+            double mn = g0 < g1 ? (g0 < g2 ? g0 : g2) : (g1 < g2 ? g1 : g2);
+            Check(mx - mn < 0.01, "real Adobe RGB gray 0.5 stays neutral");
+        }
+        // Adobe red 0.5 (encoded) -> sRGB-encoded ~0.5877 (lcms2
+        // ground truth): linear 0.2176 through matrix[0] = 0.3043,
+        // then the sRGB OETF. (The wrong matrix gives ~0.5551.)
+        {
+            double lin = (double)cs.trc[0][32768];
+            double srgbLin = (double)cs.matrix[0] * lin;
+            double srgbEnc = srgbLin <= 0.0031308
+                                 ? 12.92 * srgbLin
+                                 : 1.055 * std::pow(srgbLin, 1.0 / 2.4) - 0.055;
+            Check(Near(srgbEnc, 0.5877, 5e-3),
+                  "real Adobe RGB red 0.5 -> sRGB 0.5877");
+        }
+    }
     // sRGB gray: also FALSE (its TRC is the sRGB EOTF).
     {
         cmsHPROFILE h = MakeSrgbGrayProfile();

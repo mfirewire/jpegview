@@ -229,7 +229,18 @@ bool BuildColorSpaceImpl(const uint8_t* iccData, size_t iccSize,
                     { rXyz->Y, gXyz->Y, bXyz->Y },
                     { rXyz->Z, gXyz->Z, bXyz->Z },
                 };
-                const double w[3] = { wtpt->X, wtpt->Y, wtpt->Z };
+                // The white point in the solve must be in PCS (D50),
+                // like the colorants. sRGB and Adobe RGB profiles store
+                // their native D65 white point in wtpt instead, so using
+                // it here mixes D65 with D50 and produces a diagonal
+                // blue-shift error (R x0.83, B x1.37 on Adobe RGB).
+                // When wtpt is D65, substitute the D50 white point;
+                // spec-compliant D50 profiles and custom white points
+                // are used as-is.
+                const bool wtptIsD65 = Near3Xyz(wtpt, kSrgbWhiteD65);
+                const double w[3] = { wtptIsD65 ? kSrgbWhite[0] : wtpt->X,
+                                      wtptIsD65 ? kSrgbWhite[1] : wtpt->Y,
+                                      wtptIsD65 ? kSrgbWhite[2] : wtpt->Z };
                 double s[3] = { 0.0, 0.0, 0.0 };
                 if (Solve3x3(m, w, s)) {
                     double rgbToXyz[3][3];
