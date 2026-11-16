@@ -31,9 +31,16 @@
 // the sRGB EOTF value 0.2140 (within 1e-3) is treated as sRGB, and
 // BuildColorSpace returns false — the caller then passes NULL to
 // DecodeImageData and the sRGB path stays byte-identical to the
-// pre-H-02 code. The 1e-3 tolerance is loose enough to absorb the
-// float rounding of the stored colorant values (lcms2 returns the
-// sRGB colorants as e.g. R=(0.4360, 0.2225, 0.0139) vs the spec
+// pre-H-02 code. The white point may be either D50 (0.9642, 1.0,
+// 0.8249, as in lcms2's cmsCreate_sRGBProfile) or D65 (0.9505, 1.0,
+// 1.0890): the standard sRGB IEC 61966-2-1 profile stores D65 in
+// its wtpt tag even though its colorants are D50 values, and
+// accepting D50 only mis-detects every real sRGB file as non-sRGB
+// (regression fixed 2026-11-16: the D65 wtpt with D50 colorants
+// built a diagonal matrix of 0.827/1.022/1.370 — a massive blue
+// shift). The 1e-3 tolerance is loose enough to absorb the float
+// rounding of the stored colorant values (lcms2 returns the sRGB
+// colorants as e.g. R=(0.4360, 0.2225, 0.0139) vs the spec
 // (0.4360657, 0.2224884, 0.0139160)) yet tight enough to separate
 // real spaces: Adobe RGB's TRC at 0.5 is ~0.2176 (gamma 2.2) and its
 // colorants differ from sRGB by far more than 1e-3; ProPhoto differs

@@ -39,6 +39,15 @@ const double kSrgbGreen[3] = { 0.385147, 0.716873, 0.097076 };
 const double kSrgbBlue[3] = { 0.143048, 0.060606, 0.714096 };
 const double kSrgbWhite[3] = { 0.9642, 1.0, 0.8249 };
 
+// The standard sRGB IEC 61966-2-1 profile (HP/Microsoft) stores the
+// D65 white point (0.9505, 1.0, 1.0890) in its wtpt tag, NOT the D50
+// value above - even though its colorants are the D50 values. The
+// sRGB detection must therefore accept either white point; otherwise
+// a real sRGB file is mis-detected as non-sRGB and gets a wrong
+// primaries matrix (solving M*S=W with D50 colorants and a D65 white
+// point gives a diagonal of 0.827/1.022/1.370 - a massive blue shift).
+const double kSrgbWhiteD65[3] = { 0.9505, 1.0, 1.0890 };
+
 // sRGB EOTF at 0.5 (see PsdHdr::SrgbEotf16: 32768/65535 linearizes to
 // 0.2140482023; lcms2 evaluates an sRGB profile's TRC at 0.5 as
 // 0.214041). Compared with tolerance kMatchTolerance.
@@ -202,7 +211,8 @@ bool BuildColorSpaceImpl(const uint8_t* iccData, size_t iccSize,
             // (see the header for the numbers).
             const bool isSrgb =
                 Near3Xyz(rXyz, kSrgbRed) && Near3Xyz(gXyz, kSrgbGreen) &&
-                Near3Xyz(bXyz, kSrgbBlue) && Near3Xyz(wtpt, kSrgbWhite) &&
+                Near3Xyz(bXyz, kSrgbBlue) &&
+                (Near3Xyz(wtpt, kSrgbWhite) || Near3Xyz(wtpt, kSrgbWhiteD65)) &&
                 std::fabs((double)cmsEvalToneCurveFloat(rTrc, 0.5f) - kSrgbTrcAtHalf) <= kMatchTolerance;
             if (!isSrgb) {
                 // Primaries matrix: M = [R | G | B] (columns are the

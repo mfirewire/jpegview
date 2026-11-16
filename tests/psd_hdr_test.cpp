@@ -722,6 +722,29 @@ void CheckMatrixNear(const float got[9], const float want[9],
     }
 }
 
+// Read a whole file into a byte vector (for the raw .icc fixture).
+// Returns an empty vector when the file cannot be read.
+std::vector<uint8_t> ReadWholeFile(const char* path) {
+    FILE* f = std::fopen(path, "rb");
+    if (f == NULL) {
+        return std::vector<uint8_t>();
+    }
+    std::fseek(f, 0, SEEK_END);
+    long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (size <= 0) {
+        std::fclose(f);
+        return std::vector<uint8_t>();
+    }
+    std::vector<uint8_t> data((size_t)size);
+    if (std::fread(data.data(), 1, data.size(), f) != data.size()) {
+        std::fclose(f);
+        return std::vector<uint8_t>();
+    }
+    std::fclose(f);
+    return data;
+}
+
 void TestPsdIccBuildColorSpace() {
     // Adobe RGB (1998), gamma 2.2.
     {
@@ -795,6 +818,27 @@ void TestPsdIccBuildColorSpace() {
               "sRGB profile BuildColorSpace returns FALSE");
         Check(AllTrcNull(cs), "sRGB rejected: trc all NULL");
         Check(IsIdentityMatrix(cs.matrix), "sRGB rejected: matrix identity");
+    }
+    // Real sRGB IEC 61966-2-1 profile (D65 wtpt): the standard profile
+    // extracted from a real 16-bit sRGB PSD (tests/samples/
+    // srgb_iec61966-2-1.icc). Its wtpt is D65 (0.9505, 1.0, 1.0891)
+    // while its colorants are the D50 sRGB values - the D50-only
+    // white-point check mis-detected it as non-sRGB and built a
+    // diagonal matrix of 0.827/1.022/1.370 (blue shift; regression
+    // reported 2026-11-16 on e642229). This test must fail on the
+    // unfixed code (wtpt Z differs from D50 by 0.264 >> 1e-3).
+    {
+        std::vector<uint8_t> bytes =
+            ReadWholeFile("tests/samples/srgb_iec61966-2-1.icc");
+        Check(!bytes.empty(), "real sRGB IEC profile fixture loads");
+        Check(bytes.size() == 3144, "real sRGB IEC profile is 3144 bytes");
+        PsdHdr::ColorSpace cs;
+        std::vector<float> storage;
+        Check(!PsdIcc::BuildColorSpace(bytes.data(), bytes.size(), cs, storage),
+              "real sRGB IEC profile BuildColorSpace returns FALSE");
+        Check(AllTrcNull(cs), "real sRGB IEC rejected: trc all NULL");
+        Check(IsIdentityMatrix(cs.matrix),
+              "real sRGB IEC rejected: matrix identity");
     }
     // sRGB gray: also FALSE (its TRC is the sRGB EOTF).
     {
