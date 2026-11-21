@@ -85,8 +85,12 @@ float SampleToLinear32(uint32_t bits) {
 
 // Inflate src[0..srcSize) into dst[0..dstSize). Returns false unless
 // the stream ends cleanly (Z_STREAM_END) with exactly dstSize bytes
-// produced — a short stream, trailing garbage, or a size mismatch is
-// corrupt input, not a partial decode.
+// produced. Only the stream end and the produced count are checked:
+// bytes after a complete stream are ignored (inflate never reads
+// past srcSize, so trailing garbage cannot affect the output), and
+// a short stream fails because inflate returns Z_BUF_ERROR instead
+// of Z_STREAM_END. A size mismatch is corrupt input, not a partial
+// decode.
 bool InflateTo(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstSize) {
     if (src == NULL || dst == NULL) {
         return false;
