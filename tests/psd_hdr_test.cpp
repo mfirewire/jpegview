@@ -98,6 +98,13 @@ uint32_t ReadBe32(const uint8_t* p) {
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
+void WriteBe32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
 // Minimal PSD parser for the fixtures: returns the image-data section
 // (bytes after the 2-byte compression field) and the header fields the
 // core needs. Exits the test with a failure if the file is malformed.
@@ -404,7 +411,10 @@ const uint8_t kExpected32Gray[9 * 2 * 3] = {
 // either matrix, rows summing to ~1); the colour rows are where the
 // primaries conversion shows: Adobe B at (2,1) is 208, not 188, and
 // ProPhoto's wide gamut pushes several channels out of sRGB range
-// (clamped to 0/255 by the tone mapper).
+// (clamped to 0/255 by the tone mapper). Display P3's B at (2,1) is
+// 199, not 208 (Adobe) or 188 (sRGB): the P3 fixture discriminates
+// from the sRGB table by up to 12 levels, so the fixture test itself
+// proves the ICC path is active for P3 (no separate NULL control).
 const uint8_t kExpectedH02AdobeRgb[5 * 2 * 3] = {
     0, 0, 0,  118, 118, 118,  188, 188, 188,  225, 225, 225,  255, 255, 255,
     190, 118, 0,  190, 118, 118,  190, 118, 208,  190, 118, 252,  190, 118, 255,
@@ -416,6 +426,16 @@ const uint8_t kExpectedH02ProPhoto[5 * 2 * 3] = {
 const uint8_t kExpectedH02AdobeGray[5 * 2 * 3] = {
     0, 0, 0,  118, 118, 118,  188, 188, 188,  225, 225, 225,  255, 255, 255,
     0, 0, 0,  118, 118, 118,  188, 188, 188,  225, 225, 225,  255, 255, 255,
+};
+// Display P3 fixture (genuine profile, sRGB TRC + P3 matrix).
+// The grey row is (187,188,188) at (2,0), not (188,188,188): the
+// Python reference matrix's white row sums are 1.0001/1.0000/0.9996,
+// not exactly 1. The C++ matrix (built from the profile's colorants)
+// has white exactly 1; the difference is ~0.05 levels, inside the
+// +/-2 fixture tolerance either way.
+const uint8_t kExpectedH02DisplayP3[5 * 2 * 3] = {
+    0, 0, 0,  118, 118, 118,  187, 188, 188,  225, 225, 225,  255, 255, 255,
+    193, 120, 0,  193, 118, 118,  192, 113, 199,  191, 110, 241,  190, 106, 255,
 };
 
 void TestFixtures() {
@@ -687,6 +707,16 @@ const float kProPhotoMatrix[9] = {
     2.034294f, -0.727303f, -0.306703f,
     -0.228838f, 1.231677f, -0.002917f,
     -0.008571f, -0.153280f, 1.161708f,
+};
+// Display P3 (T1-1): linear P3 -> linear sRGB, numpy Bradford
+// D65->D50, same construction as kAdobeMatrix/kProPhotoMatrix (see
+// tests/samples/make_psd_hdr_samples.py). The direct route from the
+// genuine profile's D50 colorants gives 1.224801 / -0.224666 /
+// -0.000045 on row 0, within 1.3e-4 of this.
+const float kP3Matrix[9] = {
+    1.224853f, -0.224796f, 0.000033f,
+    -0.042064f, 1.042060f, 0.000014f,
+    -0.019646f, -0.078661f, 1.097870f,
 };
 
 // Build an RGB profile on the fly with lcms2 (same calls as
@@ -974,6 +1004,125 @@ void TestPsdIccBuildColorSpace() {
                                  : 1.055 * std::pow(srgbLin, 1.0 / 2.4) - 0.055;
             Check(Near(srgbEnc, 0.5877, 5e-3),
                   "real Adobe RGB red 0.5 -> sRGB 0.5877");
+        }
+    }
+    // Real Display P3 profile (T1-1): tests/samples/display_p3.icc,
+    // 536 bytes, extracted from a user media-library JPEG (APP2
+    // ICC_PROFILE segment; desc "Display P3", class mntr, RGB, v4.0,
+    // chad tag present). CORRECTION to the omission review's guess:
+    // its wtpt is D50 (0.9642, 1.0, 0.8249), NOT D65 - the
+    // "real P3 profiles store D65" pattern does not hold for this
+    // profile. Colorants rXYZ (0.5151, 0.2412, -0.0011), gXYZ
+    // (0.2920, 0.6922, 0.0419), bXYZ (0.1571, 0.0666, 0.7841); TRC
+    // parametric type 3 = the sRGB curve.
+    {
+        std::vector<uint8_t> bytes =
+            ReadWholeFile("tests/samples/display_p3.icc");
+        Check(!bytes.empty(), "real Display P3 profile fixture loads");
+        Check(bytes.size() == 536, "real Display P3 profile is 536 bytes");
+        PsdHdr::ColorSpace cs;
+        std::vector<float> storage;
+        Check(PsdIcc::BuildColorSpace(bytes.data(), bytes.size(), cs, storage),
+              "real Display P3 BuildColorSpace returns TRUE");
+        Check(cs.trc[0] != NULL && cs.trc[1] != NULL && cs.trc[2] != NULL,
+              "real Display P3 trc[0..2] set");
+        // sRGB EOTF at 32768/65535: 0.214041 (lcms2 evaluates the
+        // type-3 parametric TRC to 0.214045; a pure gamma 2.2 would
+        // give 0.2176 instead).
+        Check(Near((double)cs.trc[0][32768], 0.214041, 1e-3),
+              "real Display P3 trc[32768] ~= 0.2140 (sRGB EOTF at 0.5)");
+        // D50 matrix (numpy Bradford): 1.224853. The wrong route
+        // (solving M*S=W with a D65 wtpt, pre-1f8d31c behaviour)
+        // gives 1.0557 - explicitly rejected, not just "close".
+        Check(Near((double)cs.matrix[0], 1.224853, 5e-3),
+              "real Display P3 matrix[0] ~= 1.2249");
+        Check(std::fabs((double)cs.matrix[0] - 1.0557) > 0.05,
+              "real Display P3 matrix[0] is NOT 1.0557 (wrong D65-wtpt value)");
+        CheckMatrixNear(cs.matrix, kP3Matrix, "real Display P3");
+        // White (1,1,1) maps to (1,1,1): the matrix preserves white.
+        for (int r = 0; r < 3; r++) {
+            double v = (double)cs.matrix[r * 3 + 0] + (double)cs.matrix[r * 3 + 1] +
+                       (double)cs.matrix[r * 3 + 2];
+            char buf[64];
+            std::snprintf(buf, sizeof(buf),
+                          "real Display P3 white row %d sums to 1", r);
+            Check(Near(v, 1.0, 5e-3), buf);
+        }
+        // Neutral gray (0.5,0.5,0.5) stays neutral: max channel
+        // spread < 0.01.
+        {
+            double g0 = 0.5 * ((double)cs.matrix[0] + (double)cs.matrix[1] + (double)cs.matrix[2]);
+            double g1 = 0.5 * ((double)cs.matrix[3] + (double)cs.matrix[4] + (double)cs.matrix[5]);
+            double g2 = 0.5 * ((double)cs.matrix[6] + (double)cs.matrix[7] + (double)cs.matrix[8]);
+            double mx = g0 > g1 ? (g0 > g2 ? g0 : g2) : (g1 > g2 ? g1 : g2);
+            double mn = g0 < g1 ? (g0 < g2 ? g0 : g2) : (g1 < g2 ? g1 : g2);
+            Check(mx - mn < 0.01, "real Display P3 gray 0.5 stays neutral");
+        }
+        // P3 red 0.5 (encoded) -> sRGB-encoded ~0.5490 (numpy
+        // Bradford 0.548941; lcms2's own transform on this profile
+        // 0.548989). CORRECTION: the omission review's 0.5532 is
+        // wrong for this profile - it linearizes with a pure 2.2
+        // gamma instead of the profile's sRGB TRC. (The wrong
+        // D65-wtpt matrix gives ~0.5127.)
+        {
+            double lin = (double)cs.trc[0][32768];
+            double srgbLin = (double)cs.matrix[0] * lin;
+            double srgbEnc = srgbLin <= 0.0031308
+                                 ? 12.92 * srgbLin
+                                 : 1.055 * std::pow(srgbLin, 1.0 / 2.4) - 0.055;
+            Check(Near(srgbEnc, 0.5490, 5e-3),
+                  "real Display P3 red 0.5 -> sRGB 0.5490");
+        }
+    }
+    // Same profile with wtpt patched to D65 (in-memory copy only; no
+    // real D65-wtpt Display P3 profile has been found): the 1f8d31c
+    // fix must substitute the D50 white point for the solve, giving
+    // the same matrix as the D50 case above. This pins the D65 branch
+    // for P3 primaries; it is honestly a patched copy, not a real
+    // profile.
+    {
+        std::vector<uint8_t> bytes =
+            ReadWholeFile("tests/samples/display_p3.icc");
+        Check(!bytes.empty(), "Display P3 profile loads (D65 patch)");
+        // Tag table: count at offset 128, entries (sig, offset,
+        // size) at 132 + 12*i. The wtpt tag is an 8-byte header
+        // ('XYZ ' + reserved) + 3 s15Fixed16 values.
+        Check(bytes.size() > 132 + 12, "Display P3 profile has a tag table");
+        size_t wtptOff = 0;
+        if (bytes.size() > 132 + 12) {
+            uint32_t tagCount = ReadBe32(&bytes[128]);
+            for (uint32_t i = 0; i < tagCount; i++) {
+                size_t e = 132 + (size_t)i * 12;
+                if (e + 12 > bytes.size()) break;
+                if (std::memcmp(&bytes[e], "wtpt", 4) == 0) {
+                    wtptOff = ReadBe32(&bytes[e + 4]);
+                    break;
+                }
+            }
+        }
+        Check(wtptOff != 0 && wtptOff + 20 <= bytes.size(),
+              "Display P3 profile has a wtpt tag");
+        if (wtptOff != 0 && wtptOff + 20 <= bytes.size()) {
+            WriteBe32(&bytes[wtptOff + 8],
+                      (uint32_t)std::lround(0.9505 * 65536.0));
+            WriteBe32(&bytes[wtptOff + 12],
+                      (uint32_t)std::lround(1.0 * 65536.0));
+            WriteBe32(&bytes[wtptOff + 16],
+                      (uint32_t)std::lround(1.0890 * 65536.0));
+            PsdHdr::ColorSpace cs;
+            std::vector<float> storage;
+            Check(PsdIcc::BuildColorSpace(bytes.data(), bytes.size(), cs, storage),
+                  "D65-wtpt Display P3 BuildColorSpace returns TRUE");
+            CheckMatrixNear(cs.matrix, kP3Matrix, "D65-wtpt Display P3");
+            // Same red 0.5 -> sRGB 0.5490 as the D50 case: the
+            // D65-substitution branch must not change the matrix.
+            double lin = (double)cs.trc[0][32768];
+            double srgbLin = (double)cs.matrix[0] * lin;
+            double srgbEnc = srgbLin <= 0.0031308
+                                 ? 12.92 * srgbLin
+                                 : 1.055 * std::pow(srgbLin, 1.0 / 2.4) - 0.055;
+            Check(Near(srgbEnc, 0.5490, 5e-3),
+                  "D65-wtpt Display P3 red 0.5 -> sRGB 0.5490");
         }
     }
     // sRGB gray: also FALSE (its TRC is the sRGB EOTF).
@@ -1428,6 +1577,8 @@ void TestH02Fixtures() {
                         kExpectedH02ProPhoto, sizeof(kExpectedH02ProPhoto));
     CheckFixtureWithIcc("tests/samples/psd_hdr_16bit_adobe_gray_raw.psd",
                         kExpectedH02AdobeGray, sizeof(kExpectedH02AdobeGray));
+    CheckFixtureWithIcc("tests/samples/psd_hdr_16bit_display_p3_raw.psd",
+                        kExpectedH02DisplayP3, sizeof(kExpectedH02DisplayP3));
     // Negative control: the same Adobe fixture decoded as sRGB (NULL
     // ColorSpace) must NOT match the Adobe table — the ICC path has
     // to actually change the output. The colour row's B channel is

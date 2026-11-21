@@ -481,6 +481,14 @@ ADOBE_MATRIX = [1.398348, -0.398085, 0.000027,
 PROPHOTO_MATRIX = [2.034294, -0.727303, -0.306703,
                    -0.228838, 1.231677, -0.002917,
                    -0.008571, -0.153280, 1.161708]
+# Display P3 (T1-1): linear P3 -> linear sRGB, same construction as
+# ADOBE_MATRIX / PROPHOTO_MATRIX above (numpy, Bradford D65->D50,
+# D50 sRGB matrix). White (1,1,1) maps to (1,1,1) within 1e-4.
+# The direct route (from the genuine profile's D50 colorants) gives
+# 1.224801 / -0.224666 / -0.000045 on row 0, within 1.3e-4 of this.
+P3_MATRIX = [1.224853, -0.224796, 0.000033,
+             -0.042064, 1.042060, 0.000014,
+             -0.019646, -0.078661, 1.097870]
 
 def ensure_icc_profiles(here):
     """Make sure the three .icc files exist, rebuilding them with the
@@ -569,6 +577,43 @@ def expected_bgr_colorspace(levels, channels, color_mode, gamma, matrix):
             out.append((b, g, r))  # BGR, JPEGView order
     return out, peak
 
+def expected_bgr_p3(levels, channels, color_mode):
+    """Expected 8-bit BGR output for the Display P3 fixture, from the
+    stored codes: linearize with the sRGB EOTF (the genuine Display P3
+    profile's TRC is parametric type 3 = the sRGB curve, NOT a pure
+    gamma), apply the P3 primaries matrix, then the HdrToneMap
+    reference. NOTE: linearizing with a pure 2.2 gamma instead gives
+    P3 red 0.5 -> sRGB 0.5532, which is wrong for this profile; the
+    sRGB EOTF gives 0.5490 (lcms2's own transform on the profile
+    agrees: 0.548989; the Bradford matrix gives 0.548941)."""
+    stored, _linear = stored_planes(levels, channels, color_mode, 16)
+    width = len(levels)
+    lin = []
+    for y in range(HEIGHT):
+        row = []
+        for x in range(width):
+            src = tuple(srgb_eotf(stored[ch][y][x] / 65535.0)
+                        for ch in range(3))
+            row.append((P3_MATRIX[0] * src[0] + P3_MATRIX[1] * src[1]
+                        + P3_MATRIX[2] * src[2],
+                        P3_MATRIX[3] * src[0] + P3_MATRIX[4] * src[1]
+                        + P3_MATRIX[5] * src[2],
+                        P3_MATRIX[6] * src[0] + P3_MATRIX[7] * src[1]
+                        + P3_MATRIX[8] * src[2]))
+        lin.append(row)
+    peak = 0.0
+    for y in range(HEIGHT):
+        for x in range(width):
+            r, g, b = lin[y][x]
+            peak = max(peak, max(r, 0.0) * 0.2126 + max(g, 0.0) * 0.7152
+                       + max(b, 0.0) * 0.0722)
+    out = []
+    for y in range(HEIGHT):
+        for x in range(width):
+            r, g, b = convert_linear_pixel(*lin[y][x], peak)
+            out.append((b, g, r))  # BGR, JPEGView order
+    return out, peak
+
 # ---------------------------------------------------------------- main
 
 SPECS = [
@@ -637,6 +682,31 @@ def main():
             hashlib.sha256(path.read_bytes()).hexdigest()[:16]))
         print("  %s peak=%.4f Pillow: %s" % (info, peak, try_pillow(path)))
         print("  expected BGR (row-major): %s" % (bgr,))
+    # Display P3 (T1-1): the genuine profile
+    # tests/samples/display_p3.icc (extracted from a user media-library
+    # JPEG; D50 wtpt, sRGB TRC, P3 primaries), embedded as the 0x040F
+    # resource. Stored samples are sRGB-OETF encoded, matching the
+    # profile's TRC, so the stored planes are the same as the plain
+    # sRGB fixture's.
+    p3_icc = here / "display_p3.icc"
+    if not p3_icc.exists():
+        raise SystemExit("missing tests/samples/display_p3.icc "
+                         "(genuine Display P3 profile)")
+    levels = LEVELS_16
+    width = len(levels)
+    stored, _linear = stored_planes(levels, 3, 3, 16)
+    path = here / "psd_hdr_16bit_display_p3_raw.psd"
+    make_psd(path, 1, 3, HEIGHT, width, 16, 3, 0, stored,
+             icc_bytes=p3_icc.read_bytes())
+    info = check_psd(path)
+    assert info["icc_size"] == p3_icc.stat().st_size, \
+        "ICC resource size mismatch in display_p3 fixture"
+    bgr, peak = expected_bgr_p3(levels, 3, 3)
+    print("wrote %s (%d bytes, sha256 %s)" % (
+        path.name, path.stat().st_size,
+        hashlib.sha256(path.read_bytes()).hexdigest()[:16]))
+    print("  %s peak=%.4f Pillow: %s" % (info, peak, try_pillow(path)))
+    print("  expected BGR (row-major): %s" % (bgr,))
     print("Now run: g++ tests/psd_hdr_test.cpp (see tests/psd_hdr_test.cpp)")
     return 0
 
