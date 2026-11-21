@@ -1,0 +1,50 @@
+name: tmp negctl build
+
+# One-off negative control: build the tree with the H-03 and H-01 fixes
+# reverted (the 1f8d31c0 copies of PNGWrapper/PSDWrapper/HdrToneMap), then
+# publish the x64 payload on this throwaway branch so it can be fetched over
+# plain https. Used once to prove the device tests can fail; branch is deleted
+# afterwards.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/tmp-negctl.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/workflow-build-wtl-submodule.yml
+    with:
+      platform-arch: x64
+      build-config: Release
+
+  pack:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download this run's artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "${{ github.run_id }}" -D dl
+          find dl -type f | head -40
+          du -sh dl
+
+      - name: Commit the payload
+        run: |
+          set -euo pipefail
+          git config user.name  "ci-helper"
+          git config user.email "ci-helper@users.noreply.github.com"
+          mkdir -p _bin_negctl
+          cp -r dl/. _bin_negctl/
+          git add -f _bin_negctl
+          git commit -m "tmp: negctl payload [skip ci]"
+          git push origin HEAD:refs/heads/tmp/negctl
