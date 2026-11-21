@@ -99,7 +99,7 @@ bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out);
 // GainMapMax AND Gamma were all found (the essential fields).
 // Uses a simple robust string search (find the field name, then parse
 // the first number or "num/den" rational after it) — no XML parser.
-// Apple fallback: if NO hdrgm field is present at all but
+// Apple fallback: if NO hdrgm field parses (see GainMap.cpp) but
 // HDRGainMapHeadroom is, sets gainMapMax=log2(headroom),
 // gainMapMin=0, gamma=HDRGainMapGamma if present else 1.0, offsets 0,
 // and appleHeadroomFallback=true, and returns true. HDRGainMapHeadroom
@@ -139,6 +139,12 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
 bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
                          const uint8_t*& payload, size_t& payloadSize);
 
+// Follow-up (see docs/HDR-HEIC-exploration-2026-11-21.md §5): Apple's
+// own apply formula is linear in the gain — hdr = sdr*(1+(headroom-1)*g)
+// — while ApplyGainMap is exponential, gain = 2^(min+(max-min)*g^(1/gamma)).
+// The endpoints agree under gainMapMax = log2(headroom) (g=0 -> 1x, g=1 ->
+// headroom), but the mid-tones differ. No separate linear apply path is
+// implemented (no strong evidence it matches what Photos shows).
 // Reconstruct scene-linear HDR float RGB from an 8-bit sRGB base image
 // and a single-channel 8-bit gain map, using the ISO 21496-1 formula
 // above. `baseSrgb` is width*height*3 bytes, 8-bit sRGB, RGB order.
@@ -149,8 +155,12 @@ bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
 // width*height*3 floats, RGB order, scene-linear. Double math is used
 // internally; the output is float. Returns false on bad input (null
 // pointers, non-positive dimensions, !meta.valid, invalid gamma /
-// non-finite metadata values, NaN weightFactor). The gain pixel is
-// clamped to [0,1] before pow.
+// non-finite metadata values, NaN weightFactor). The per-pixel work is
+// two 256-entry lookup tables indexed by byte values (boostTable from
+// the gain byte, srgbTable from the sRGB byte), built once per call
+// from the fixed per-image parameters — exact, not approximate, with
+// no per-pixel pow. gainMapMin/gainMapMax are clamped to [-16, +16]
+// stops at the entry (GainMap.cpp) before the tables are built.
 bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
                   const uint8_t* gainMap, int gainW, int gainH,
                   const Metadata& meta, double weightFactor, float* outLinear);

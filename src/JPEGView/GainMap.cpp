@@ -301,14 +301,21 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
     // max boost (3.847906 stops = 14.40x instead of 3.85x). The
     // version-only XMP form (two iPhone 13 HEICs) carries no Headroom
     // and fails here, so those files show SDR — no deriving.
-    // Coexistence: this branch is only entered when NO hdrgm field is
-    // present (!anyHdrgm below). An XMP packet carrying both hdrgm
-    // fields and Apple fields therefore never uses the Apple Headroom
-    // here: if the hdrgm set is incomplete or invalid, this function
-    // returns false and the caller shows SDR — a packet with both
-    // hdrgm and a valid Apple Headroom yields no gain map at all. No
-    // such packet is known to exist (Apple files carry no hdrgm;
-    // UltraHDR files carry no Apple version).
+    // Coexistence: this branch is only entered when NO hdrgm field
+    // PARSED (!anyHdrgm below) — anyHdrgm is the OR of the seven
+    // FindXmpField results above, and FindXmpField returns false for
+    // an unparseable or self-closing field, so a malformed hdrgm
+    // field plus a valid Apple Headroom WOULD enter this branch. An
+    // XMP packet carrying both parseable hdrgm fields and Apple
+    // fields therefore never uses the Apple Headroom here: if the
+    // hdrgm set is incomplete or invalid, this function returns
+    // false and the caller shows SDR — a packet with both hdrgm and
+    // a valid Apple Headroom yields no gain map at all. No such
+    // packet is known to exist (Apple files carry no hdrgm;
+    // UltraHDR files carry no Apple version). Note the HEIF caller
+    // (TryApplyHeifGainMap) is currently disabled and returns NULL
+    // up front (SDR-for-now, user decision 2026-11-21), so this
+    // branch's result presently reaches only the JPEG/AVIF callers.
     if (!anyHdrgm) {
         double headroom = 0.0;
         if (FindXmpField(xmp, "HDRGainMapHeadroom", headroom)) {

@@ -19,9 +19,11 @@ namespace {
 // ICCProfileTransform::IsNoTransformNeeded, so the load side (which
 // decides whether to convert) and the save side (which decides whether
 // to keep the profile) agree on the PRIMARIES of "sRGB". The white
-// point does NOT agree: the load side only accepts D50 (see
-// ICCProfileTransform.cpp:280), while this classifier also accepts
-// D65. TRC is not part of the decision here either (F3 residual).
+// point does NOT agree: the load side compares wtpt against a single
+// D50-PCS value (0.9642, 1.0, 0.8249) — D65 expressed in that PCS
+// (see ICCProfileTransform.cpp:278-282) — while this classifier
+// additionally accepts the unadapted D65 triple (0.9505, 1.0, 1.0890).
+// TRC is not part of the decision here either (F3 residual).
 const double kSrgbRed[3] = { 0.4361, 0.2225, 0.0139 };
 const double kSrgbGreen[3] = { 0.3851, 0.7169, 0.0971 };
 const double kSrgbBlue[3] = { 0.1431, 0.0606, 0.7141 };
