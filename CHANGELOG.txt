@@ -9,6 +9,16 @@ New features:
 Bugs fixed:
 - 16/32-bit PSD with an alpha channel: the tone-mapped RGBA output came out garbled (and could contain uninitialized bytes), because the tone mapper wrote packed 3-byte BGR into a 4-byte BGRA buffer; the HDR path now writes BGRA directly, with the alpha plane carried through. A 3-channel HDR PSD is now stored as 4-channel BGRA with opaque alpha
 - HDR PNG: an 8-bit PNG declaring a PQ/HLG transfer (cICP) could write past the end of the image buffer, because the 8-bit rows were not expanded to 16-bit before the HDR tone-map copy; 8-bit rows are now expanded to 16-bit (16-bit sources are unaffected)
+- Extremely bright HDR pixels could come out wrong in the PQ tone map (an infinite value produced NaN, a huge value overshot white); such pixels now map to white, and the peak is capped at the 10000-nit maximum
+- An HLG image containing an infinitely bright pixel could compute an infinite peak and darken the whole image; the peak is now finite and such pixels render white
+- A .hdr file with an absurd GAMMA header value (for example 1e-300) could produce an infinite exposure factor; the gamma is now clamped to the range 0.25 to 4.0
+- HLG signal values above 1.0 (super-white) could produce a peak of hundreds of thousands of nits and render the image nearly black; super-white is now clamped to white, so the peak stays in a sane range
+- Gain-map metadata with absurd min/max values (for example 1e6) could overflow to infinity while computing the boost; the metadata range is now clamped to -16 to +16 stops
+- A truncated ISO 21496-1 gain-map segment (under 89 bytes) could shadow a later valid segment; such short segments are now skipped in the finder
+- An XMP gain-map packet with a blank Gamma field could borrow the gamma value from the following field; blank or malformed Gamma values now reject the packet instead of misreading it
+- If applying a gain map runs out of memory, the whole image used to fail to load; it now falls back to the SDR base image
+- An HEIF gain map claiming absurd dimensions is now rejected before decoding (from its declared size) instead of after, so it cannot force a huge allocation
+- An AVIF gain map claiming absurd dimensions is now dropped and the SDR base image shown, instead of decoding the oversized gain map
 - HDR images in DCI-P3 (CICP primaries 11, DCI white point) now use their own colour matrix instead of the D65 Display P3 matrix, so they no longer render with a green cast (white used to come out as RGB 242,255,238); Display P3 (D65) files are unaffected
 - Transparent HDR pixels (AVIF, HEIF, JXL, PNG) and gain-map files now keep their alpha channel instead of forcing it opaque, so a transparent HDR pixel no longer renders as a black block after the background blend; gain-map files with a transparent base now also keep the base alpha (SDR behaviour change, narrow and intentional)
 - A JXL file claiming a 65535x65535 canvas no longer throws an exception while allocating the pixel buffer; the oversized buffer is now reported as out-of-memory, so the free-and-retry path runs instead of an error dialog
