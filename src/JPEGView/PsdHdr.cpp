@@ -6,11 +6,11 @@
 // directly under a case label (braces around case bodies that declare
 // one), no GetTickCount64.
 //
-// zlib: "zlib.h" resolves to the vendored zlib 1.3.2 headers in
+// zlib: "zlib.h" resolves to the vendored zlib 1.4 headers in
 // libpng-apng/include on Windows (that dir is on the IncludePath for
 // all configs, next to png.h) and to the system zlib.h on Linux.
 // inflateInit_ only checks version[0] ('1'), so the system 1.3 lib
-// inflates identically; the vendored headers match the linked 1.3.2
+// inflates identically; the vendored headers match the linked 1.4
 // zlib.lib exactly.
 
 #include "PsdHdr.h"
@@ -80,12 +80,15 @@ float SampleToLinear32(uint32_t bits) {
 }
 
 // Explicit zlib allocators for InflateTo below. The vendored zlib.lib
-// (libpng-apng 1.3.2) ships no default allocator (no zcalloc/zcfree
-// or malloc in the .lib), so inflateInit_ returns Z_STREAM_ERROR (-2)
-// when zalloc/zfree are NULL in this build -- device-proven 2026-11-21
-// on flat_16bit_rgba_zip.psd (INFLATE init=-2, inflate never ran).
-// libpng works with the same .lib because it sets them explicitly.
-// Do NOT remove these or revert to relying on zlib defaults.
+// (libpng-apng 1.4, rebuilt in CI 2026-11-21) ships no default
+// allocator (no zcalloc/zcfree or malloc in the .lib, checked in the
+// archive symbol table and by raw byte search, both arches -- the
+// same property the 1.3.2 .lib had), so inflateInit_ returns
+// Z_STREAM_ERROR (-2) when zalloc/zfree are NULL in this build --
+// device-proven 2026-11-21 on flat_16bit_rgba_zip.psd (INFLATE
+// init=-2, inflate never ran). libpng works with the same .lib
+// because it sets them explicitly. Do NOT remove these or revert to
+// relying on zlib defaults.
 static void* PsdZAlloc(void* opaque, unsigned items, unsigned size) {
     (void)opaque;
     return std::malloc((size_t)items * (size_t)size);

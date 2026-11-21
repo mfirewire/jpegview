@@ -49,8 +49,8 @@
 //       -lz -llcms2 -o /tmp/psd_hdr_test
 //   /tmp/psd_hdr_test
 // The vendored include dir is passed so the test proves the vendored
-// zlib 1.3.2 headers compile; it links the system -lz (inflateInit_
-// only checks version[0], and the headers match the linked 1.3.2
+// zlib 1.4 headers compile; it links the system -lz (inflateInit_
+// only checks version[0], and the headers match the linked 1.4
 // zlib.lib on Windows exactly). lcms2 needs its dev package
 // (liblcms2-dev: /usr/include/lcms2.h and -llcms2); without it, add
 // -I src/JPEGView/lcms2/include and link the runtime library
