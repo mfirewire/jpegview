@@ -103,6 +103,17 @@ void TestHlg() {
     Check(Near(HdrToneMap::HlgSignalToSceneLinear(0.0), 0.0, 1e-12), "HLG 0 -> 0");
     // 2.4e-8: the log/exp round-trip is not exact in double precision.
     Check(Near(HdrToneMap::HlgSignalToSceneLinear(1.0), 1.0, 1e-6), "HLG 1 -> 1");
+    // P2-C10: the signal is clamped to [0,1] - assert the clamped VALUE
+    // (~1.0), not just finiteness. Before the clamp Hlg(2) was 261.88
+    // and Hlg(128) was Inf; Hlg(-0.5) was -0.0833 and Hlg(NaN) was NaN.
+    Check(Near(HdrToneMap::HlgSignalToSceneLinear(2.0), 1.0, 1e-6),
+          "HLG 2.0 clamps to ~1.0");
+    Check(Near(HdrToneMap::HlgSignalToSceneLinear(128.0), 1.0, 1e-6),
+          "HLG 128 clamps to ~1.0");
+    Check(Near(HdrToneMap::HlgSignalToSceneLinear(-0.5), 0.0, 1e-12),
+          "HLG -0.5 clamps to 0");
+    Check(Near(HdrToneMap::HlgSignalToSceneLinear(std::nan("")), 0.0, 1e-12),
+          "HLG NaN clamps to 0");
 }
 
 void TestSrgbOetf() {
@@ -188,6 +199,21 @@ void TestConvertPixel() {
     // toward white, so the result must be reddish (R high, G/B low).
     // Encode BT.2020 linear red (1,0,0) as PQ at 203 nits: the PQ
     // signal is per-channel, so R = PQ(203), G = B = PQ(0) = 0.
+    // P2-C10: an HLG super-white red (2.0) is clamped to 1.0 and renders
+    // pure red (Bt709 has an identity gamut, so no gamut mapping).
+    ConvertPixel(2.0, 0.0, 0.0, Transfer::kHlg, Primaries::kBt709, 203.0, outR, outG, outB);
+    Check(outR == 255 && outG == 0 && outB == 0,
+          "HLG super-white red (2,0,0) -> sRGB (255,0,0)");
+    // P2-C10: a mid-grey HLG pixel next to a super-white pixel must not
+    // be darkened. Before the clamp the super-white pixel raised the
+    // peak to ~586k nits and the grey came out nearly black; with the
+    // clamp the peak is ~734 nits and the grey stays mid-grey (~137).
+    float hlgImg[6] = { 0.5f, 0.5f, 0.5f, 2.0f, 0.0f, 0.0f };
+    double hlgPeak = ComputePeakNits(hlgImg, 2, Transfer::kHlg, Primaries::kBt709);
+    Check(Near(hlgPeak, 733.69, 0.5), "HLG peak with super-white pixel is ~734");
+    ConvertPixel(0.5, 0.5, 0.5, Transfer::kHlg, Primaries::kBt709, hlgPeak, outR, outG, outB);
+    Check(outR >= 130 && outR <= 145 && outG >= 130 && outG <= 145 && outB >= 130 && outB <= 145,
+          "HLG grey next to super-white stays mid-grey");
     ConvertPixel(sigWhite, 0.0, 0.0, Transfer::kPq, Primaries::kBt2020, 203.0, outR, outG, outB);
     Check(outR > 200 && outG < 120 && outB < 120,
           "PQ BT.2020 red stays red after gamut mapping");
@@ -231,11 +257,16 @@ void TestComputePeakNits() {
     float black[3] = { 0.0f, 0.0f, 0.0f };
     Check(Near(ComputePeakNits(black, 1, Transfer::kPq, Primaries::kBt2020), 203.0, 1e-9),
           "ComputePeakNits black image falls back to 203");
-    // P2-C2: a non-finite peak (single HLG super-white pixel, Hlg(128)
-    // is Inf) falls back to SDR white instead of returning Inf.
+    // P2-C2 + P2-C10: a single HLG super-white pixel (128,0,0) no
+    // longer produces a non-finite peak - the C10 clamp makes
+    // Hlg(128) ~1.0, so the peak is a finite ~734 nits (the OOTF
+    // boosts a full-brightness red on a 1000-nit display), not the
+    // 203-nit fallback. (Before C10, Hlg(128) was Inf and the C2
+    // fallback returned 203; the fallback itself is still in place
+    // as defense, and the linear-path Inf test still exercises it.)
     float hlgInf[3] = { 128.0f, 0.0f, 0.0f };
-    Check(Near(ComputePeakNits(hlgInf, 1, Transfer::kHlg, Primaries::kBt709), 203.0, 1e-9),
-          "ComputePeakNits HLG Inf peak falls back to 203");
+    Check(Near(ComputePeakNits(hlgInf, 1, Transfer::kHlg, Primaries::kBt709), 733.69, 0.5),
+          "ComputePeakNits HLG super-white peak is finite ~734");
 }
 
 void TestConvertLinearPixel() {

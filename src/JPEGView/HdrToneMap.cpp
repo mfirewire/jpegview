@@ -187,7 +187,18 @@ double PqNitsToSignal(double nits) {
 }
 
 double HlgSignalToSceneLinear(double signal) {
-    double s = signal;
+    // P2-C10: clamp the signal to [0,1] first. This is pipeline
+    // saturation, not "HLG is only defined in [0,1]" - BT.2100 Note 5h
+    // allows production signals above 1 (super-white is real). But the
+    // inverse OETF's exp diverges there (Hlg(2) is 262, Hlg(128) is
+    // Inf), and the EETF saturates to white anyway, so an unclamped
+    // super-white pixel only raises the content peak and darkens the
+    // whole image (a single Hlg(2) pixel gave a ~800k-nit peak).
+    // Both callers (ComputePeakNits, ConvertPixel) pass the signal
+    // only through this function, so this one clamp covers them.
+    // (The sign ternaries below are now dead - s is never negative -
+    // but are left as-is.)
+    double s = Clamp01(signal);
     double as = std::fabs(s);
     if (as <= 0.5) {
         return (s < 0.0 ? -1.0 : 1.0) * (as * as) / 3.0;

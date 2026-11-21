@@ -86,7 +86,9 @@ double PqSignalToNits(double signal);
 double PqNitsToSignal(double nits);
 
 // HLG (ARIB STD-B67 / BT.2100) OETF inverse: HLG signal [0,1] ->
-// scene-linear [0,1].
+// scene-linear [0,1]. Out-of-range signals are clamped to [0,1]
+// (P2-C10): super-white is real (BT.2100 Note 5h), but the inverse
+// OETF's exp diverges there and the EETF saturates to white anyway.
 double HlgSignalToSceneLinear(double signal);
 
 // BT.2390 EETF in the PQ signal domain (content-adaptive source peak).
