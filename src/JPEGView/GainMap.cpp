@@ -417,6 +417,16 @@ bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
     while (NextJpegSegment(jpeg, size, pos, marker, seg, segSize)) {
         if (marker == 0xE2 && segSize >= kUrnLen + 1 &&
             std::memcmp(seg, kUrn, kUrnLen) == 0 && seg[kUrnLen] == 0) {
+            // P3-A5: skip payloads shorter than the minimum legal
+            // ISO 21496-1 payload (89 bytes: 28 URN+NUL + 5 version
+            // and flags + 7x8 rational pairs) — a version-only
+            // segment (32 bytes) carries no gain-map data and the
+            // parser would reject it anyway. The guard lives here,
+            // NOT in the MPF finder: the minimal legal MPF segment
+            // is 74 bytes, so an 89-byte floor there would break it.
+            if (segSize < 89) {
+                continue;
+            }
             payload = seg;
             payloadSize = segSize;
             return true;

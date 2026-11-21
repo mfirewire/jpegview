@@ -677,8 +677,10 @@ void TestFindIso21496Payload() {
     Check(!FindIso21496Payload(gm, 20, payload, payloadSize),
           "FindIso21496Payload truncated ISO APP2 -> false");
     // Version-only ISO segment (URN + 4 version bytes, 32-byte
-    // payload, as in some primary JPEGs): the finder matches the URN
-    // but the parser rejects it for being short.
+    // payload, as in some primary JPEGs): the payload is shorter than
+    // the minimum legal ISO 21496-1 payload (89 bytes: 28 URN+NUL +
+    // 5 version and flags + 7x8 rational pairs), so the finder skips
+    // it (P3-A5) and the parser never sees it.
     uint8_t verOnly[2 + 2 + 2 + 32 + 2];
     verOnly[0] = 0xFF;
     verOnly[1] = 0xD8;
@@ -693,12 +695,13 @@ void TestFindIso21496Payload() {
     verOnly[37] = 0x00;  // writer_ver 0
     verOnly[38] = 0xFF;
     verOnly[39] = 0xD9;
-    Check(FindIso21496Payload(verOnly, sizeof(verOnly), payload,
-                              payloadSize) &&
-              payloadSize == 32,
-          "FindIso21496Payload version-only ISO segment found (URN match)");
-    Check(!ParseIso21496Metadata(payload, payloadSize, m) && !m.valid,
-          "FindIso21496Payload version-only payload rejected by parser");
+    Check(!FindIso21496Payload(verOnly, sizeof(verOnly), payload,
+                               payloadSize),
+          "FindIso21496Payload version-only ISO segment skipped (< 89 bytes)");
+    // The parser still rejects the 32-byte payload directly
+    // (size < 33+56), if it ever saw one.
+    Check(!ParseIso21496Metadata(verOnly + 6, 32, m) && !m.valid,
+          "ParseIso21496Metadata version-only payload rejected (size < 33+56)");
     // Null / empty -> false.
     Check(!FindIso21496Payload(nullptr, sizeof(gm), payload, payloadSize),
           "FindIso21496Payload null data rejected");
