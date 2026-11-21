@@ -325,6 +325,47 @@ void* AvifReader::ReadImage(int& width,
 			DeleteCache();
 			return NULL;
 		}
+		// P2-B6 (D6): gate the gain-map dimensions BEFORE decoding any
+		// frame. avifDecoderParse already populated
+		// decoder->image->gainMap->image from the gain-map item's ispe
+		// box, so an absurd gain map can be rejected here; otherwise
+		// avifDecoderNthImage below would decode its full planes
+		// before DecodeAvifGainMapGray's 4x check ever ran. When the
+		// gain map is absurd, drop it and re-parse as SDR: the gain
+		// map is optional, so the file still loads (as SDR). The F-06
+		// gate below runs once, on the final parse. cache.data stays
+		// valid across the re-parse (the IO only points at it).
+		if (cache.decoder->image != NULL && cache.decoder->image->gainMap != NULL &&
+			cache.decoder->image->gainMap->image != NULL) {
+			uint32_t baseW = cache.decoder->image->width;
+			uint32_t baseH = cache.decoder->image->height;
+			uint32_t gmW = cache.decoder->image->gainMap->image->width;
+			uint32_t gmH = cache.decoder->image->gainMap->image->height;
+			if (gmW < 1 || gmH < 1 || (uint64_t)gmW > (uint64_t)baseW * 4 ||
+				(uint64_t)gmH > (uint64_t)baseH * 4) {
+				avifDecoderDestroy(cache.decoder);
+				cache.decoder = avifDecoderCreate();
+				if (cache.decoder == NULL) {
+					outOfMemory = true;
+					DeleteCache();
+					return NULL;
+				}
+				cache.decoder->maxThreads = nthreads;
+				cache.decoder->strictFlags = AVIF_STRICT_DISABLED;
+				cache.decoder->imageContentToDecode =
+					(avifImageContentTypeFlags)(AVIF_IMAGE_CONTENT_ALL & ~AVIF_IMAGE_CONTENT_GAIN_MAP);
+				result = avifDecoderSetIOMemory(cache.decoder, cache.data, sizebytes);
+				if (result != AVIF_RESULT_OK) {
+					DeleteCache();
+					return NULL;
+				}
+				result = avifDecoderParse(cache.decoder);
+				if (result != AVIF_RESULT_OK) {
+					DeleteCache();
+					return NULL;
+				}
+			}
+		}
 		// F-06: gate on the parsed header dimensions BEFORE decoding the
 		// frame. avifDecoderNthImage below decodes the full YUV planes; a
 		// 65535x65535 header would force GB-scale decoder-internal allocation
