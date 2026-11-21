@@ -87,6 +87,16 @@ bool Near(double a, double b, double tol) {
     return std::fabs(a - b) <= tol;
 }
 
+// Safe TRC sample read: 0.0 when the table is NULL. BuildColorSpace
+// leaves trc[] NULL when it fails (e.g. the fixture file was not found
+// because the test was run from a directory other than the repo root);
+// the NULL Check above already records that failure, but a direct
+// deref would segfault instead (F6). Returning 0.0 makes the value
+// Check fail cleanly instead of crashing.
+double TrcAt(const float* trc, int index) {
+    return trc != NULL ? (double)trc[index] : 0.0;
+}
+
 // ---------------------------------------------------------------- helpers
 
 uint16_t ReadBe16(const uint8_t* p) {
@@ -828,6 +838,9 @@ void CheckMatrixNear(const float got[9], const float want[9],
 std::vector<uint8_t> ReadWholeFile(const char* path) {
     FILE* f = std::fopen(path, "rb");
     if (f == NULL) {
+        // stderr, not stdout: stdout is block-buffered when redirected,
+        // so a crash later in the run would otherwise leave zero output.
+        std::fprintf(stderr, "ReadWholeFile: cannot open %s (run the test from the repo root)\n", path);
         return std::vector<uint8_t>();
     }
     std::fseek(f, 0, SEEK_END);
@@ -862,14 +875,14 @@ void TestPsdIccBuildColorSpace() {
         Check(cs.trc[1] != NULL, "Adobe trc[1] set");
         Check(cs.trc[2] != NULL, "Adobe trc[2] set");
         // Gamma 2.2 evaluated at 32768/65535: (32768/65535)^2.2.
-        Check(Near((double)cs.trc[0][0], 0.0, 1e-6), "Adobe trc[0] == 0");
-        Check(Near((double)cs.trc[0][32768], 0.217645, 1e-3),
+        Check(Near(TrcAt(cs.trc[0], 0), 0.0, 1e-6), "Adobe trc[0] == 0");
+        Check(Near(TrcAt(cs.trc[0], 32768), 0.217645, 1e-3),
               "Adobe trc[32768] ~= 0.2176 (gamma 2.2 at 0.5)");
-        Check(Near((double)cs.trc[1][32768], 0.217645, 1e-3),
+        Check(Near(TrcAt(cs.trc[1], 32768), 0.217645, 1e-3),
               "Adobe trc[1][32768] ~= 0.2176");
-        Check(Near((double)cs.trc[2][32768], 0.217645, 1e-3),
+        Check(Near(TrcAt(cs.trc[2], 32768), 0.217645, 1e-3),
               "Adobe trc[2][32768] ~= 0.2176");
-        Check(Near((double)cs.trc[0][65535], 1.0, 1e-4), "Adobe trc[65535] == 1");
+        Check(Near(TrcAt(cs.trc[0], 65535), 1.0, 1e-4), "Adobe trc[65535] == 1");
         // D50 matrix (numpy): 1.398348. The wrong D65 route gives
         // 1.488 — explicitly rejected, not just "close to 1.398".
         Check(Near((double)cs.matrix[0], 1.398348, 5e-3),
@@ -901,7 +914,7 @@ void TestPsdIccBuildColorSpace() {
         Check(cs.trc[0] != NULL && cs.trc[1] != NULL && cs.trc[2] != NULL,
               "ProPhoto trc[0..2] set");
         // Gamma 1.8 at 32768/65535: (32768/65535)^1.8.
-        Check(Near((double)cs.trc[0][32768], 0.287182, 1e-3),
+        Check(Near(TrcAt(cs.trc[0], 32768), 0.287182, 1e-3),
               "ProPhoto trc[32768] ~= 0.2872 (gamma 1.8 at 0.5)");
         CheckMatrixNear(cs.matrix, kProPhotoMatrix, "ProPhoto");
         double wsum = (double)cs.matrix[0] + (double)cs.matrix[1] + (double)cs.matrix[2];
@@ -965,7 +978,7 @@ void TestPsdIccBuildColorSpace() {
         Check(cs.trc[0] != NULL && cs.trc[1] != NULL && cs.trc[2] != NULL,
               "real Adobe RGB trc[0..2] set");
         // Gamma 2.1992 at 32768/65535: (32768/65535)^2.1992 ~= 0.2176.
-        Check(Near((double)cs.trc[0][32768], 0.217645, 1e-3),
+        Check(Near(TrcAt(cs.trc[0], 32768), 0.217645, 1e-3),
               "real Adobe RGB trc[32768] ~= 0.2176 (gamma 2.1992 at 0.5)");
         // D50 matrix (numpy): 1.398348. The wrong D65-wtpt route gives
         // 1.2345 in matrix[0] - explicitly rejected, not just "close".
@@ -997,7 +1010,7 @@ void TestPsdIccBuildColorSpace() {
         // ground truth): linear 0.2176 through matrix[0] = 0.3043,
         // then the sRGB OETF. (The wrong matrix gives ~0.5551.)
         {
-            double lin = (double)cs.trc[0][32768];
+            double lin = TrcAt(cs.trc[0], 32768);
             double srgbLin = (double)cs.matrix[0] * lin;
             double srgbEnc = srgbLin <= 0.0031308
                                  ? 12.92 * srgbLin
@@ -1029,7 +1042,7 @@ void TestPsdIccBuildColorSpace() {
         // sRGB EOTF at 32768/65535: 0.214041 (lcms2 evaluates the
         // type-3 parametric TRC to 0.214045; a pure gamma 2.2 would
         // give 0.2176 instead).
-        Check(Near((double)cs.trc[0][32768], 0.214041, 1e-3),
+        Check(Near(TrcAt(cs.trc[0], 32768), 0.214041, 1e-3),
               "real Display P3 trc[32768] ~= 0.2140 (sRGB EOTF at 0.5)");
         // D50 matrix (numpy Bradford): 1.224853. The wrong route
         // (solving M*S=W with a D65 wtpt, pre-1f8d31c behaviour)
@@ -1065,7 +1078,7 @@ void TestPsdIccBuildColorSpace() {
         // gamma instead of the profile's sRGB TRC. (The wrong
         // D65-wtpt matrix gives ~0.5127.)
         {
-            double lin = (double)cs.trc[0][32768];
+            double lin = TrcAt(cs.trc[0], 32768);
             double srgbLin = (double)cs.matrix[0] * lin;
             double srgbEnc = srgbLin <= 0.0031308
                                  ? 12.92 * srgbLin
@@ -1116,7 +1129,7 @@ void TestPsdIccBuildColorSpace() {
             CheckMatrixNear(cs.matrix, kP3Matrix, "D65-wtpt Display P3");
             // Same red 0.5 -> sRGB 0.5490 as the D50 case: the
             // D65-substitution branch must not change the matrix.
-            double lin = (double)cs.trc[0][32768];
+            double lin = TrcAt(cs.trc[0], 32768);
             double srgbLin = (double)cs.matrix[0] * lin;
             double srgbEnc = srgbLin <= 0.0031308
                                  ? 12.92 * srgbLin
@@ -1152,7 +1165,7 @@ void TestPsdIccBuildColorSpace() {
         Check(cs.trc[1] == NULL && cs.trc[2] == NULL,
               "gray trc[1]/trc[2] NULL");
         Check(IsIdentityMatrix(cs.matrix), "gray matrix identity");
-        Check(Near((double)cs.trc[0][32768], 0.217645, 1e-3),
+        Check(Near(TrcAt(cs.trc[0], 32768), 0.217645, 1e-3),
               "gray trc[32768] ~= 0.2176 (gamma 2.2 at 0.5)");
     }
     // Invalid inputs: NULL, zeros, truncated, garbage, tiny.
@@ -1532,13 +1545,29 @@ bool LoadIccResource(const char* path, std::vector<uint8_t>* out) {
 void CheckFixtureWithIcc(const char* path, const uint8_t* expected,
                          int expectedBytes) {
     PsdFile psd;
-    Check(LoadPsd(path, &psd), "parse H-02 fixture");
+    // Same early-return pattern as CheckFixture: on a failed load the
+    // PsdFile stays zeroed, so bgr would be empty and the comparison
+    // loop below would read past it (F6: ASan pinned the segfault to
+    // the bgr[i] read here, not to the cs.trc derefs). Each gate is
+    // still counted via Check() so the check count is unchanged.
+    bool parsed = LoadPsd(path, &psd);
+    Check(parsed, "parse H-02 fixture");
+    if (!parsed) {
+        return;
+    }
     std::vector<uint8_t> icc;
-    Check(LoadIccResource(path, &icc), "H-02 fixture has 0x040F resource");
+    bool hasIcc = LoadIccResource(path, &icc);
+    Check(hasIcc, "H-02 fixture has 0x040F resource");
+    if (!hasIcc) {
+        return;
+    }
     PsdHdr::ColorSpace cs;
     std::vector<float> storage;
-    Check(PsdIcc::BuildColorSpace(icc.data(), icc.size(), cs, storage),
-          "H-02 fixture profile builds a ColorSpace");
+    bool built = PsdIcc::BuildColorSpace(icc.data(), icc.size(), cs, storage);
+    Check(built, "H-02 fixture profile builds a ColorSpace");
+    if (!built) {
+        return;
+    }
     size_t pixels = (size_t)psd.width * (size_t)psd.height;
     std::vector<float> linear(pixels * 3);
     std::vector<uint8_t> bgr(pixels * 3);
@@ -1548,6 +1577,9 @@ void CheckFixtureWithIcc(const char* path, const uint8_t* expected,
                                        psd.compression, psd.version,
                                        linear.data(), NULL, 0, &cs);
     Check(ok, "H-02 fixture decodes with ColorSpace");
+    if (!ok) {
+        return;
+    }
     HdrToneMap::ConvertLinearImage(linear.data(), psd.width, psd.height,
                                     (size_t)psd.width * 3, bgr.data(),
                                     (size_t)psd.width * 3);
