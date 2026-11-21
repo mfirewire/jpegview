@@ -280,6 +280,18 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			if (buffer_size != (size_t)cache.info.xsize * cache.info.ysize * bytesPerPixel) {
 				return false;
 			}
+			// P2-B5: BASIC_INFO only caps the dimensions (65535) and the
+			// pixel cap (off by default), so a 65535x65535 header reaches
+			// here and resize(34 GB) throws bad_alloc, which the outer
+			// catch reports as ExceptionError. Guard it first so the
+			// failure is classified as out-of-memory instead (the
+			// provider's free-and-retry path). buffer_size was just
+			// proven equal to xsize*ysize*bytesPerPixel above, so the
+			// two forms are equivalent.
+			if (!IsImageBufferSizeOk((size_t)cache.info.xsize * bytesPerPixel, (size_t)cache.info.ysize)) {
+				outOfMemory = true;
+				return false;
+			}
 			pixels->resize((size_t)cache.info.xsize * cache.info.ysize * bytesPerPixel);
 			void* pixels_buffer = (void*)pixels->data();
 			size_t pixels_buffer_size = pixels->size() * sizeof(uint8_t);
