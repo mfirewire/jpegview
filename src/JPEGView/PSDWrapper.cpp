@@ -484,31 +484,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				nWidth, nHeight, nHdrChannels, (unsigned)nColorMode, (unsigned)nBitDepth,
 				(unsigned)nCompressionMethod, (unsigned)nVersion, nImageDataSize,
 				bHdrAlpha ? 1 : 0, (pHdrColorSpace != NULL) ? 1 : 0, bDiagDecodeOk ? 1 : 0);
-			// TEMPORARY DIAGNOSTIC (2026-11-21): log the first 8 input
-			// bytes as hex. A zlib stream must start with the 0x78
-			// magic; anything else means the file read itself is
-			// wrong on Windows. REVERT AFTER DIAGNOSIS.
-			{
-				static const char kHexDigits[] = "0123456789abcdef";
-				char szDiagSrc[8 * 3 + 1];
-				unsigned nDiagSrcBytes = (nImageDataSize < 8) ? nImageDataSize : 8;
-				for (unsigned i = 0; i < nDiagSrcBytes; i++) {
-					unsigned char b = ((const unsigned char*)pBuffer)[i];
-					szDiagSrc[i * 3] = kHexDigits[b >> 4];
-					szDiagSrc[i * 3 + 1] = kHexDigits[b & 0x0F];
-					szDiagSrc[i * 3 + 2] = ' ';
-				}
-				szDiagSrc[nDiagSrcBytes * 3] = '\0';
-				DiagLogPsdHdr("SRC %s", szDiagSrc);
-			}
 			if (!bDiagDecodeOk) {
-				// TEMPORARY DIAGNOSTIC (2026-11-21): log the inflate
-				// return codes (see PsdHdr::LastInflateDiag).
-				// REVERT AFTER DIAGNOSIS.
-				int nDiagInitRet = 0, nDiagInflateRet = 0;
-				unsigned long nDiagTotalOut = 0;
-				PsdHdr::LastInflateDiag(&nDiagInitRet, &nDiagInflateRet, &nDiagTotalOut);
-				DiagLogPsdHdr("INFLATE init=%d ret=%d out=%lu", nDiagInitRet, nDiagInflateRet, nDiagTotalOut);
 				ThrowIf(true);
 			}
 		}

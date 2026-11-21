@@ -177,13 +177,4 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
                      uint8_t* outAlphaOrNull, size_t outAlphaStride,
                      const ColorSpace* colorSpaceOrNull);
 
-// TEMPORARY DIAGNOSTIC (2026-11-21): returns the last InflateTo call's
-// zlib return codes for the most recent DecodeImageData call: the
-// inflateInit return code (0 = Z_OK, -100 = rejected before zlib,
-// other = the actual inflateInit failure code), the inflate return
-// code (1 = Z_STREAM_END), and the bytes inflate produced. All three
-// are zero when inflate was never attempted. REVERT AFTER DIAGNOSIS.
-// Single-threaded decode only (plain file-local static in PsdHdr.cpp).
-void LastInflateDiag(int* initRet, int* inflateRet, unsigned long* totalOut);
-
 }  // namespace PsdHdr
