@@ -55,8 +55,49 @@
 #include "HdrToneMap.h"
 
 #include <vector>
+#include <cstdio>
+#include <cstring>
+#include <cstdarg>
 
 #define PSD_HEADER_SIZE 26
+
+// TEMPORARY DIAGNOSTIC (2026-11-21): log PSD HDR load attempts to
+// psd_hdr_debug.txt next to the exe, to find why ZIP PSDs fail to open
+// in the GUI while the pure decoder succeeds on Linux. REVERT AFTER
+// DIAGNOSIS. Logging only: never throws, never changes control flow,
+// and a failure to locate or open the log file is silently skipped.
+static void DiagLogPsdHdr(const char* fmt, ...)
+{
+	try {
+		CHAR path[MAX_PATH + 16];
+		DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
+		if (length == 0 || length >= MAX_PATH) {
+			return;
+		}
+		char* slash = strrchr(path, '\\');
+		if (slash == NULL) {
+			return;
+		}
+		slash[1] = '\0';
+		if (strlen(path) + sizeof("psd_hdr_debug.txt") > sizeof(path)) {
+			return;
+		}
+		strcat(path, "psd_hdr_debug.txt");
+		FILE* f = fopen(path, "a");
+		if (f == NULL) {
+			return;
+		}
+		char line[2048];
+		va_list args;
+		va_start(args, fmt);
+		vsnprintf(line, sizeof(line), fmt, args);
+		va_end(args);
+		line[sizeof(line) - 1] = '\0';
+		fprintf(f, "%s\n", line);
+		fclose(f);
+	} catch (...) {
+	}
+}
 
 // Throw exception if bShouldThrow is true. Setting a breakpoint in here is useful for debugging
 static inline void ThrowIf(bool bShouldThrow) {
@@ -331,6 +372,18 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 		// Compression. 0 = Raw Data, 1 = RLE compressed, 2 = ZIP without prediction, 3 = ZIP with prediction.
 		unsigned short nCompressionMethod = ReadUShortFromFile(hFile);
+		// TEMPORARY DIAGNOSTIC (2026-11-21): see DiagLogPsdHdr above.
+		// REVERT AFTER DIAGNOSIS.
+		try {
+			CHAR fileA[1024];
+			if (WideCharToMultiByte(CP_UTF8, 0, strFileName, -1, fileA, 1024, NULL, NULL) <= 0) {
+				fileA[0] = '\0';
+			}
+			DiagLogPsdHdr("GATE depth=%u mode=%u realCh=%u comp=%u isHdr=%d file=%s",
+				(unsigned)nBitDepth, (unsigned)nColorMode, (unsigned)nRealChannels,
+				(unsigned)nCompressionMethod, bIsHdr ? 1 : 0, fileA);
+		} catch (...) {
+		}
 		// F-03 (known limitation, narrowed): ZIP without/with prediction
 		// (2/3) is supported only on the PSD HDR path (16/32-bit, where
 		// PsdHdr inflates it); an 8-bit ZIP PSD is still rejected here -
@@ -423,7 +476,15 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 				if (PsdIcc::BuildColorSpace((const uint8_t*)pICCProfile, nICCProfileSize, hdrColorSpace, hdrTrcStorage))
 					pHdrColorSpace = &hdrColorSpace;
 			}
-			if (!PsdHdr::DecodeImageData((const unsigned char*)pBuffer, (size_t)nImageDataSize, (int)nWidth, (int)nHeight, nHdrChannels, (int)nColorMode, (int)nBitDepth, (int)nCompressionMethod, (int)nVersion, pLinearRgb, bHdrAlpha ? pAlphaBuf : NULL, (size_t)nWidth, pHdrColorSpace)) {
+			// TEMPORARY DIAGNOSTIC (2026-11-21): see DiagLogPsdHdr above.
+			// REVERT AFTER DIAGNOSIS. The result is captured in a bool
+			// so it can be logged; the ThrowIf below is unchanged.
+			const bool bDiagDecodeOk = PsdHdr::DecodeImageData((const unsigned char*)pBuffer, (size_t)nImageDataSize, (int)nWidth, (int)nHeight, nHdrChannels, (int)nColorMode, (int)nBitDepth, (int)nCompressionMethod, (int)nVersion, pLinearRgb, bHdrAlpha ? pAlphaBuf : NULL, (size_t)nWidth, pHdrColorSpace);
+			DiagLogPsdHdr("DECODE w=%u h=%u hdrCh=%d mode=%u depth=%u comp=%u ver=%u dataSize=%u hdrAlpha=%d icc=%d result=%d",
+				nWidth, nHeight, nHdrChannels, (unsigned)nColorMode, (unsigned)nBitDepth,
+				(unsigned)nCompressionMethod, (unsigned)nVersion, nImageDataSize,
+				bHdrAlpha ? 1 : 0, (pHdrColorSpace != NULL) ? 1 : 0, bDiagDecodeOk ? 1 : 0);
+			if (!bDiagDecodeOk) {
 				ThrowIf(true);
 			}
 		}
