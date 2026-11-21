@@ -226,6 +226,11 @@ void TestComputePeakNits() {
     float black[3] = { 0.0f, 0.0f, 0.0f };
     Check(Near(ComputePeakNits(black, 1, Transfer::kPq, Primaries::kBt2020), 203.0, 1e-9),
           "ComputePeakNits black image falls back to 203");
+    // P2-C2: a non-finite peak (single HLG super-white pixel, Hlg(128)
+    // is Inf) falls back to SDR white instead of returning Inf.
+    float hlgInf[3] = { 128.0f, 0.0f, 0.0f };
+    Check(Near(ComputePeakNits(hlgInf, 1, Transfer::kHlg, Primaries::kBt709), 203.0, 1e-9),
+          "ComputePeakNits HLG Inf peak falls back to 203");
 }
 
 void TestConvertLinearPixel() {
@@ -266,6 +271,13 @@ void TestConvertLinearPixel() {
     // Negative and NaN inputs map to 0 (the !(v >= 0) guard).
     ConvertLinearPixel(-1.0, -1.0, -1.0, 1.0, outR, outG, outB);
     Check(outR == 0 && outG == 0 && outB == 0, "linear negative -> 0");
+    // P2-C2: an Inf pixel renders white (needs C1+C2 together: C1
+    // stops PqNitsToSignal(Inf) from returning NaN, C2 stops the Inf
+    // peak from poisoning the EETF). Before the fixes it came out black.
+    double inf = HUGE_VAL;
+    ConvertLinearPixel(inf, inf, inf, 1.0, outR, outG, outB);
+    Check(outR == 255 && outG == 255 && outB == 255,
+          "linear Inf pixel (peak 1.0) -> sRGB 255");
     double nan = std::nan("");
     ConvertLinearPixel(nan, nan, nan, 1.0, outR, outG, outB);
     Check(outR == 0 && outG == 0 && outB == 0, "linear NaN -> 0");
@@ -285,6 +297,11 @@ void TestComputePeakLinear() {
     float withNan[6] = { 0.25f, 0.25f, 0.25f, (float)std::nan(""), 0.0f, 0.0f };
     Check(Near(ComputePeakLinear(withNan, 2, 1, 6), 0.25, 1e-9),
           "ComputePeakLinear ignores NaN channel");
+    // P2-C2: a single +Inf channel falls back to linear 1.0 (SDR
+    // white); the black-image 0.0 return above is preserved.
+    float withInf[3] = { (float)HUGE_VAL, 0.0f, 0.0f };
+    Check(Near(ComputePeakLinear(withInf, 1, 1, 3), 1.0, 1e-12),
+          "ComputePeakLinear Inf channel falls back to 1.0");
 }
 
 void TestConvertLinearImage() {

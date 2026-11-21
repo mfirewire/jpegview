@@ -26,6 +26,8 @@
 #define TINYEXR_IMPLEMENTATION
 #include "tinyexr/tinyexr.h"
 #include <math.h>
+#include <cfloat>
+#include <limits>
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "Helpers.h"
@@ -191,11 +193,20 @@ void* EXRReader::ReadImage(int& width,
 			// alpha would otherwise poison the composite below.
 			if (!(a >= 0.0f)) a = 0.0f;
 			if (a > 1.0f) a = 1.0f;
-			// Composite over white in linear space. Negative/NaN
-			// channels are clamped to 0 here (the !(x >= 0) test is
-			// true for NaN as well as negatives); ConvertLinearImage
-			// would clamp them too, but the composite must not see
-			// a NaN input.
+			// P2-C2: clamp only +Inf channels to FLT_MAX before
+			// compositing. Inf*0 is NaN, which the post-composite
+			// clamp below would turn black; FLT_MAX*0 + 1 = 1, so an
+			// Inf pixel with a = 0 renders white, as intended.
+			// Negative/NaN channels are deliberately NOT clamped here:
+			// their post-composite clamp behavior is preserved
+			// (e.g. r=-2, a=0.5 stays 0; r=NaN, a=0 stays black).
+			if (r == std::numeric_limits<float>::infinity()) r = FLT_MAX;
+			if (g == std::numeric_limits<float>::infinity()) g = FLT_MAX;
+			if (b == std::numeric_limits<float>::infinity()) b = FLT_MAX;
+			// Composite over white in linear space. The result is
+			// clamped to >= 0 below (the !(x >= 0) test is true for
+			// NaN as well as negatives); ConvertLinearImage would
+			// clamp negative/NaN inputs too.
 			float rw = r * a + (1.0f - a);
 			float gw = g * a + (1.0f - a);
 			float bw = b * a + (1.0f - a);

@@ -283,7 +283,9 @@ double ComputePeakNits(const float* srcRgb, size_t pixelCount, Transfer transfer
     } else {
         return kSdrWhiteNits;
     }
-    if (!(peak > 0.0)) return kSdrWhiteNits;
+    // P2-C2: a non-finite peak (Inf from a single HLG super-white pixel)
+    // falls back to SDR white instead of poisoning the EETF.
+    if (!(peak > 0.0) || !std::isfinite(peak)) return kSdrWhiteNits;
     return peak;
 }
 
@@ -378,6 +380,9 @@ double ComputePeakLinear(const float* srcRgb, int width, int height, size_t srcS
             if (yLum > peak) peak = yLum;
         }
     }
+    // P2-C2: a non-finite peak (a single +Inf channel) falls back to
+    // linear 1.0 (SDR white). The 0.0 return for black images is kept.
+    if (!std::isfinite(peak)) return 1.0;
     return peak;
 }
 
