@@ -14,6 +14,7 @@
 // zlib.lib exactly.
 
 #include "PsdHdr.h"
+#include "MaxImageDef.h"
 
 #include <cmath>
 #include <cstring>
@@ -271,6 +272,14 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
         !CheckedMul(rowBytes, (size_t)height, &planeBytes) ||
         !CheckedMul(planeBytes, (size_t)channels, &totalBytes) ||
         !CheckedMul((size_t)width, (size_t)height, &pixelCount)) {
+        return false;
+    }
+
+    // P2-D2: bound the plane-buffer allocation by the hard byte cap
+    // before resizing. totalBytes is overflow-checked above, so this
+    // comparison cannot wrap; without it a header claiming e.g.
+    // 30000x30000x3x2 (5.4 GB) would attempt the allocation first.
+    if (totalBytes > MAX_IMAGE_BYTES) {
         return false;
     }
 

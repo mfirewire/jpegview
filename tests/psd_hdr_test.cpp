@@ -379,6 +379,26 @@ void TestRejections() {
           "garbage ZIP rejected");
 }
 
+// P2-D2: the plane-buffer byte cap. 30000x30000 RGB 16-bit claims
+// 30000*2*30000*3 = 5.4 GB, over MAX_IMAGE_BYTES on both Win32
+// (1.5 GB) and x64 (4 GB - 1); the guard must reject before any
+// allocation (no src bytes are needed: the guard runs before the
+// raw branch reads src). The dimensions themselves pass the
+// <=300000 check, so only the byte cap rejects these.
+void TestPsdHdrByteCap() {
+    using namespace PsdHdr;
+    const uint8_t dummy[1] = { 0 };
+    float out[3] = { -1.0f, -1.0f, -1.0f };
+    Check(!DecodeImageData(dummy, sizeof(dummy), 30000, 30000, 3,
+                           kColorModeRgb, 16, kCompressionRaw, 1, out,
+                           NULL, 0, NULL),
+          "5.4 GB totalBytes rejected by byte cap (16-bit RGB)");
+    Check(!DecodeImageData(dummy, sizeof(dummy), 30000, 30000, 4,
+                           kColorModeRgb, 32, kCompressionRaw, 1, out,
+                           NULL, 0, NULL),
+          "14.4 GB totalBytes rejected by byte cap (32-bit RGBA)");
+}
+
 // ---------------------------------------------------------------- fixtures
 
 // Expected BGR (JPEGView order), row-major, from
@@ -1381,6 +1401,7 @@ int main() {
     TestReverseDelta();
     TestAlphaBytes();
     TestRejections();
+    TestPsdHdrByteCap();
     TestFixtures();
     TestFixtureAlpha();
     TestWrapperOrderSimulation();
