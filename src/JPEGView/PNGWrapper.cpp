@@ -170,6 +170,9 @@ bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cache.cicp.transfer);
 	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cache.cicp.primaries);
 	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)w * h, transfer, primaries);
+	// P2-C3: precompute the EETF parameters once per image (the
+	// per-pixel ConvertPixel call recomputed them every pixel).
+	HdrToneMap::Bt2390Params eetfParams = HdrToneMap::Bt2390MakeParams(peakNits);
 	// Pass 2: tone-map each pixel to 8-bit BGRA.
 	for (unsigned int y = 0; y < h; y++)
 	{
@@ -178,8 +181,8 @@ bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 			const float* src = rgb + ((size_t)y * w + x) * 3;
 			unsigned char* dst = pixels + ((size_t)y * w + x) * 4;
 			uint8_t r = 0, g = 0, b = 0;
-			HdrToneMap::ConvertPixel((double)src[0], (double)src[1], (double)src[2],
-				transfer, primaries, peakNits, r, g, b);
+			HdrToneMap::ConvertPixelWithParams((double)src[0], (double)src[1], (double)src[2],
+				transfer, primaries, eetfParams, r, g, b);
 			dst[0] = b;
 			dst[1] = g;
 			dst[2] = r;

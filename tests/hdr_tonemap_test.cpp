@@ -376,6 +376,58 @@ void TestConvertLinearImageToBgra() {
 
 }  // namespace
 
+// P2-C3 hoisting: the WithParams variants must be byte-identical to the
+// public functions (they share the same code, with the EETF preamble
+// precomputed once). Sweeps edge values, including peakNits 1 ulp either
+// side of 203 (where maxLum/ks round to exactly 1.0) and Inf/NaN peaks.
+void TestHoistingEquivalence() {
+    using namespace HdrToneMap;
+    double sigs[] = { 0.0, 1e-6, 0.01, 0.3, 0.58068888, 0.6, 0.9, 1.0, 1.2, 2.0,
+                      HUGE_VAL, std::nan(""), -0.5 };
+    double pnits[] = { 0.0, 100.0, 202.999, 203.0,
+                       std::nextafter(203.0, 0.0), std::nextafter(203.0, 10000.0),
+                       203.001, 500.0, 1000.0, 10000.0, HUGE_VAL, std::nan(""), -1.0 };
+    bool ok = true;
+    for (int t = 0; t < 3; t++) {
+        Transfer tr = (t == 0) ? Transfer::kPq : (t == 1) ? Transfer::kHlg : Transfer::kSrgb;
+        for (double pn : pnits) {
+            Bt2390Params params = Bt2390MakeParams(pn);
+            for (double s : sigs) {
+                uint8_t aR, aG, aB, bR, bG, bB;
+                ConvertPixel(s, s * 0.5, 0.0, tr, Primaries::kBt2020, pn, aR, aG, aB);
+                ConvertPixelWithParams(s, s * 0.5, 0.0, tr, Primaries::kBt2020, params, bR, bG, bB);
+                if (aR != bR || aG != bG || aB != bB) { ok = false; break; }
+            }
+            if (!ok) break;
+        }
+        if (!ok) break;
+    }
+    Check(ok, "ConvertPixelWithParams == ConvertPixel (all transfers/peaks)");
+    // Linear path: peaks around 1.0 (the fast-path boundary) and HDR peaks.
+    double peaks[] = { 0.0, 0.2126, 0.5, 1.0,
+                       std::nextafter(1.0, 0.0), std::nextafter(1.0, 2.0),
+                       2.0, 16.0, HUGE_VAL, std::nan(""), -1.0 };
+    double vals[] = { 0.0, 1e-9, 0.001, 0.18, 0.5, 0.999, 1.0, 1.0001, 2.0, 16.0,
+                      HUGE_VAL, std::nan(""), -1.0 };
+    ok = true;
+    for (double pk : peaks) {
+        double pn = pk * 203.0;
+        if (!(pn > 0.0)) pn = 203.0;
+        Bt2390Params params = Bt2390MakeParams(pn);
+        for (double r : vals) {
+            for (double g : vals) {
+                uint8_t aR, aG, aB, bR, bG, bB;
+                ConvertLinearPixel(r, g, 0.0, pk, aR, aG, aB);
+                ConvertLinearPixelWithParams(r, g, 0.0, pk, params, bR, bG, bB);
+                if (aR != bR || aG != bG || aB != bB) { ok = false; break; }
+            }
+            if (!ok) break;
+        }
+        if (!ok) break;
+    }
+    Check(ok, "ConvertLinearPixelWithParams == ConvertLinearPixel (all peaks)");
+}
+
 int main() {
     TestPqConstants();
     TestHlg();
@@ -388,6 +440,7 @@ int main() {
     TestComputePeakLinear();
     TestConvertLinearImage();
     TestConvertLinearImageToBgra();
+    TestHoistingEquivalence();
     std::printf("hdr_tonemap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

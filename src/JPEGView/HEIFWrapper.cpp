@@ -41,6 +41,9 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cicp.transfer);
 	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cicp.primaries);
 	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)width * height, transfer, primaries);
+	// P2-C3: precompute the EETF parameters once per image (the
+	// per-pixel ConvertPixel call recomputed them every pixel).
+	HdrToneMap::Bt2390Params eetfParams = HdrToneMap::Bt2390MakeParams(peakNits);
 	// Pass 2: tone-map each pixel to 8-bit BGRA.
 	size_t outSize = 0;
 	if (!IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &outSize)) {
@@ -59,8 +62,8 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 			const float* src = rgb + ((size_t)y * width + x) * 3;
 			unsigned char* dst = out + ((size_t)y * width + x) * 4;
 			uint8_t r = 0, g = 0, b = 0;
-			HdrToneMap::ConvertPixel((double)src[0], (double)src[1], (double)src[2],
-				transfer, primaries, peakNits, r, g, b);
+			HdrToneMap::ConvertPixelWithParams((double)src[0], (double)src[1], (double)src[2],
+				transfer, primaries, eetfParams, r, g, b);
 			dst[0] = b;
 			dst[1] = g;
 			dst[2] = r;

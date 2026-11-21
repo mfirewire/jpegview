@@ -98,6 +98,22 @@ double HlgSignalToSceneLinear(double signal);
 // maxLum as KS = 1.5*maxLum - 0.5.
 double Bt2390EetfPq(double signal, double peakNits);
 
+// BT.2390 EETF parameters, precomputed once per image (P2-C3 hoisting).
+// `pqLw` is the PQ signal of the source peak LW (clamped to >= SDR
+// white); `denom` is pqLw - pqLb, and pqLb is 0 (black level), so
+// denom == pqLw; `maxLum` is pqLmax / denom (PQ signal of SDR white
+// over denom); `ks` is 1.5 * maxLum - 0.5 (the spline knee).
+struct Bt2390Params {
+    double pqLw = 0.0;
+    double denom = 0.0;
+    double maxLum = 0.0;
+    double ks = 0.0;
+};
+
+// Precompute the BT.2390 parameters for a content peak (nits). This is
+// the preamble of Bt2390EetfPq, hoisted out of the per-pixel loop.
+Bt2390Params Bt2390MakeParams(double peakNits);
+
 // sRGB OETF: linear [0,1] -> sRGB code [0,1] (piecewise).
 double SrgbOetf(double linear);
 
@@ -108,6 +124,13 @@ double SrgbOetf(double linear);
 // Output is sRGB bytes (R, G, B).
 void ConvertPixel(double r, double g, double b, Transfer transfer, Primaries primaries,
                   double peakNits, uint8_t& outR, uint8_t& outG, uint8_t& outB);
+
+// ConvertPixel with precomputed EETF parameters (no peakNits param).
+// Bit-identical to ConvertPixel(..., peakNits, ...) when
+// params == Bt2390MakeParams(peakNits). The wrappers use this in their
+// per-pixel loops so the EETF preamble runs once per image.
+void ConvertPixelWithParams(double r, double g, double b, Transfer transfer, Primaries primaries,
+                            const Bt2390Params& params, uint8_t& outR, uint8_t& outG, uint8_t& outB);
 
 // Compute the content peak in nits from an interleaved float RGB signal
 // buffer (pixelCount pixels, 3 floats each, values in [0,1], source
@@ -157,6 +180,14 @@ double ComputePeakLinear(const float* srcRgb, int width, int height, size_t srcS
 // Negative/NaN inputs map to 0. Output is sRGB bytes (R, G, B).
 void ConvertLinearPixel(double r, double g, double b, double peakLinear,
                         uint8_t& outR, uint8_t& outG, uint8_t& outB);
+
+// ConvertLinearPixel with precomputed EETF parameters. Bit-identical to
+// ConvertLinearPixel(..., peakLinear, ...) when params ==
+// Bt2390MakeParams(peakLinear * kSdrWhiteNits, clamped to >= SDR
+// white). ConvertLinearImage/ToBgra use this so the EETF preamble runs
+// once per image.
+void ConvertLinearPixelWithParams(double r, double g, double b, double peakLinear,
+                                  const Bt2390Params& params, uint8_t& outR, uint8_t& outG, uint8_t& outB);
 
 // Convert a whole image of interleaved float RGB (width x height x 3
 // floats, scene-linear, sRGB primaries) to 8-bit sRGB BGR (width x

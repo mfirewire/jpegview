@@ -195,49 +195,61 @@ double HlgSignalToSceneLinear(double signal) {
     return (s < 0.0 ? -1.0 : 1.0) * (std::exp((as - kHlgC) / kHlgA) + kHlgB) / 12.0;
 }
 
-double Bt2390EetfPq(double signal, double peakNits) {
+// Precompute the BT.2390 EETF parameters for a content peak (nits).
+// This is the preamble of Bt2390EetfPq, hoisted out of the per-pixel
+// loop (P2-C3). denom is provably > 0 here: lw >= 203 nits, so
+// PqNitsToSignal(lw) > 0 (the old `denom > 0` early return was dead).
+Bt2390Params Bt2390MakeParams(double peakNits) {
     double lw = peakNits;
     if (!(lw > kSdrWhiteNits)) lw = kSdrWhiteNits;
-    // P2-C3: when the peak is at or below SDR white, the EETF is the
-    // identity up to the PQ(203) cap (maxLum == 1, ks == 1, so e2 == e1
-    // and the return is min(Clamp01(signal), PQ(203))) - skip the
-    // spline and the four PQ conversions. (Hoisting will make this
-    // pow-free via the precomputed pqLw; until then it costs one
-    // PqNitsToSignal call.)
-    if (lw <= kSdrWhiteNits) {
-        double c = Clamp01(signal);
-        double pqLw = PqNitsToSignal(kSdrWhiteNits);
-        return c < pqLw ? c : pqLw;
-    }
-    const double lmax = kSdrWhiteNits;
     double pqLw = PqNitsToSignal(lw);
-    double pqLmax = PqNitsToSignal(lmax);
-    // P3-C2: pqLb is 0 (black level), so denom == pqLw; the black-level
-    // lines (lb/lmin/pqLb/pqLmin/minLum) were dead code and are deleted.
+    double pqLmax = PqNitsToSignal(kSdrWhiteNits);
+    // pqLb is 0 (black level), so denom == pqLw (P3-C2).
     double denom = pqLw;
-    if (!(denom > 0.0)) return Clamp01(signal);
     double maxLum = pqLmax / denom;
     double ks = 1.5 * maxLum - 0.5;
-    // Normalised PQ signal (source white = 1). (The peak <= SDR white
-    // case is handled by the fast path above; here maxLum < 1, ks < 1.)
-    double e1 = Clamp01(signal) / pqLw;
+    Bt2390Params params;
+    params.pqLw = pqLw;
+    params.denom = denom;
+    params.maxLum = maxLum;
+    params.ks = ks;
+    return params;
+}
+
+// Inner BT.2390 EETF with precomputed parameters (P2-C3 hoisting).
+// Bit-identical to Bt2390EetfPq(signal, peakNits) when
+// params == Bt2390MakeParams(peakNits). Internal to this file; the
+// public Bt2390EetfPq is a thin wrapper over it.
+static double Bt2390EetfPqWithParams(double signal, const Bt2390Params& params) {
+    // Identity fast path: ks == 1 (peak <= SDR white, so maxLum == 1)
+    // means the EETF is min(Clamp01(signal), pqLw). This is the same
+    // fast path Bt2390EetfPq had, now pow-free (pqLw is precomputed).
+    if (params.ks >= 1.0) {
+        double c = Clamp01(signal);
+        return c < params.pqLw ? c : params.pqLw;
+    }
+    // Normalised PQ signal (source white = 1).
+    double e1 = Clamp01(signal) / params.pqLw;
     if (!(e1 < 1.0)) e1 = 1.0;
     double e2;
-    if (e1 < ks || !(ks < 1.0)) {
+    if (e1 < params.ks || !(params.ks < 1.0)) {
         e2 = e1;
     } else {
-        double t = (e1 - ks) / (1.0 - ks);
+        double t = (e1 - params.ks) / (1.0 - params.ks);
         if (t < 0.0) t = 0.0;
         if (t > 1.0) t = 1.0;
         double t2 = t * t;
         double t3 = t2 * t;
-        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks
-           + (t3 - 2.0 * t2 + t) * (1.0 - ks)
-           + (-2.0 * t3 + 3.0 * t2) * maxLum;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * params.ks
+           + (t3 - 2.0 * t2 + t) * (1.0 - params.ks)
+           + (-2.0 * t3 + 3.0 * t2) * params.maxLum;
     }
     // Denormalise back to a PQ signal for the target display.
-    // (P3-C2: e3 was e2 + minLum*pow(1-e2,4) with minLum == 0, so e3 == e2.)
-    return PqNitsToSignal(PqSignalToNits(e2 * denom));
+    return PqNitsToSignal(PqSignalToNits(e2 * params.denom));
+}
+
+double Bt2390EetfPq(double signal, double peakNits) {
+    return Bt2390EetfPqWithParams(signal, Bt2390MakeParams(peakNits));
 }
 
 double SrgbOetf(double linear) {
@@ -287,17 +299,17 @@ double ComputePeakNits(const float* srcRgb, size_t pixelCount, Transfer transfer
     return peak;
 }
 
-void ConvertPixel(double r, double g, double b, Transfer transfer, Primaries primaries,
-                  double peakNits, uint8_t& outR, uint8_t& outG, uint8_t& outB) {
+void ConvertPixelWithParams(double r, double g, double b, Transfer transfer, Primaries primaries,
+                            const Bt2390Params& params, uint8_t& outR, uint8_t& outG, uint8_t& outB) {
     const double* luma = GamutLuma(primaries);
     double linR = 0.0, linG = 0.0, linB = 0.0;  // display-linear, source gamut, SDR white = 1
     if (transfer == Transfer::kPq) {
         // Tone-map in the PQ signal domain first (BT.2390 EETF), then
         // convert to display-linear. This is where the highlight
         // roll-off lives; for content at/below SDR white it is identity.
-        double sr = Bt2390EetfPq(Clamp01(r), peakNits);
-        double sg = Bt2390EetfPq(Clamp01(g), peakNits);
-        double sb = Bt2390EetfPq(Clamp01(b), peakNits);
+        double sr = Bt2390EetfPqWithParams(Clamp01(r), params);
+        double sg = Bt2390EetfPqWithParams(Clamp01(g), params);
+        double sb = Bt2390EetfPqWithParams(Clamp01(b), params);
         linR = PqSignalToNits(sr) / kSdrWhiteNits;
         linG = PqSignalToNits(sg) / kSdrWhiteNits;
         linB = PqSignalToNits(sb) / kSdrWhiteNits;
@@ -311,9 +323,9 @@ void ConvertPixel(double r, double g, double b, Transfer transfer, Primaries pri
         double sb = HlgSignalToSceneLinear(b);
         double dr = 0.0, dg = 0.0, db = 0.0;
         HlgOotfForward(sr, sg, sb, luma, &dr, &dg, &db);
-        double pr = Bt2390EetfPq(PqNitsToSignal(dr * kSdrWhiteNits), peakNits);
-        double pg = Bt2390EetfPq(PqNitsToSignal(dg * kSdrWhiteNits), peakNits);
-        double pb = Bt2390EetfPq(PqNitsToSignal(db * kSdrWhiteNits), peakNits);
+        double pr = Bt2390EetfPqWithParams(PqNitsToSignal(dr * kSdrWhiteNits), params);
+        double pg = Bt2390EetfPqWithParams(PqNitsToSignal(dg * kSdrWhiteNits), params);
+        double pb = Bt2390EetfPqWithParams(PqNitsToSignal(db * kSdrWhiteNits), params);
         linR = PqSignalToNits(pr) / kSdrWhiteNits;
         linG = PqSignalToNits(pg) / kSdrWhiteNits;
         linB = PqSignalToNits(pb) / kSdrWhiteNits;
@@ -336,6 +348,11 @@ void ConvertPixel(double r, double g, double b, Transfer transfer, Primaries pri
     outR = ToByte(SrgbOetf(srgbR));
     outG = ToByte(SrgbOetf(srgbG));
     outB = ToByte(SrgbOetf(srgbB));
+}
+
+void ConvertPixel(double r, double g, double b, Transfer transfer, Primaries primaries,
+                  double peakNits, uint8_t& outR, uint8_t& outG, uint8_t& outB) {
+    ConvertPixelWithParams(r, g, b, transfer, primaries, Bt2390MakeParams(peakNits), outR, outG, outB);
 }
 
 void ConvertImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
@@ -384,15 +401,21 @@ double ComputePeakLinear(const float* srcRgb, int width, int height, size_t srcS
     return peak;
 }
 
-void ConvertLinearPixel(double r, double g, double b, double peakLinear,
-                        uint8_t& outR, uint8_t& outG, uint8_t& outB) {
-    // Linear 1.0 is SDR white. The content peak in nits is peakLinear *
-    // kSdrWhiteNits; Bt2390EetfPq is the identity when that peak is at
-    // or below SDR white, so SDR-range content passes through the sRGB
-    // OETF unchanged. Negative/NaN inputs clamp to 0 (the !(v >= 0)
-    // test is true for NaN as well as negatives).
+// Content peak in nits from a linear peak (SDR white = 1.0), clamped to
+// >= SDR white (a non-positive peak means black content).
+static double PeakNitsFromLinear(double peakLinear) {
     double peakNits = peakLinear * kSdrWhiteNits;
     if (!(peakNits > 0.0)) peakNits = kSdrWhiteNits;
+    return peakNits;
+}
+
+// ConvertLinearPixel with precomputed EETF parameters (P2-C3 hoisting).
+// Bit-identical to ConvertLinearPixel(..., peakLinear, ...) when
+// params == Bt2390MakeParams(PeakNitsFromLinear(peakLinear)).
+void ConvertLinearPixelWithParams(double r, double g, double b, double peakLinear,
+                                  const Bt2390Params& params, uint8_t& outR, uint8_t& outG, uint8_t& outB) {
+    // Negative/NaN inputs clamp to 0 (the !(v >= 0) test is true for
+    // NaN as well as negatives).
     double cr = r, cg = g, cb = b;
     if (!(cr >= 0.0)) cr = 0.0;
     if (!(cg >= 0.0)) cg = 0.0;
@@ -417,9 +440,9 @@ void ConvertLinearPixel(double r, double g, double b, double peakLinear,
         double sigR = PqNitsToSignal(cr * kSdrWhiteNits);
         double sigG = PqNitsToSignal(cg * kSdrWhiteNits);
         double sigB = PqNitsToSignal(cb * kSdrWhiteNits);
-        double eR = Bt2390EetfPq(sigR, peakNits);
-        double eG = Bt2390EetfPq(sigG, peakNits);
-        double eB = Bt2390EetfPq(sigB, peakNits);
+        double eR = Bt2390EetfPqWithParams(sigR, params);
+        double eG = Bt2390EetfPqWithParams(sigG, params);
+        double eB = Bt2390EetfPqWithParams(sigB, params);
         linR = PqSignalToNits(eR) / kSdrWhiteNits;
         linG = PqSignalToNits(eG) / kSdrWhiteNits;
         linB = PqSignalToNits(eB) / kSdrWhiteNits;
@@ -432,10 +455,24 @@ void ConvertLinearPixel(double r, double g, double b, double peakLinear,
     outB = ToByte(SrgbOetf(linB));
 }
 
+void ConvertLinearPixel(double r, double g, double b, double peakLinear,
+                        uint8_t& outR, uint8_t& outG, uint8_t& outB) {
+    // Linear 1.0 is SDR white. The content peak in nits is peakLinear *
+    // kSdrWhiteNits; Bt2390EetfPq is the identity when that peak is at
+    // or below SDR white, so SDR-range content passes through the sRGB
+    // OETF unchanged.
+    ConvertLinearPixelWithParams(r, g, b, peakLinear,
+                                 Bt2390MakeParams(PeakNitsFromLinear(peakLinear)),
+                                 outR, outG, outB);
+}
+
 void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
                         uint8_t* dstBgr, size_t dstStrideBytes) {
     if (srcRgb == NULL || dstBgr == NULL || width <= 0 || height <= 0) return;
     double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
+    // P2-C3: precompute the EETF parameters once per image (the
+    // per-pixel ConvertLinearPixel call recomputed them every pixel).
+    Bt2390Params params = Bt2390MakeParams(PeakNitsFromLinear(peakLinear));
     for (int y = 0; y < height; y++) {
         const float* srcRow = srcRgb + (size_t)y * srcStrideFloats;
         uint8_t* dstRow = dstBgr + (size_t)y * dstStrideBytes;
@@ -444,7 +481,7 @@ void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcSt
             double g = (double)srcRow[(size_t)x * 3 + 1];
             double b = (double)srcRow[(size_t)x * 3 + 2];
             uint8_t outR = 0, outG = 0, outB = 0;
-            ConvertLinearPixel(r, g, b, peakLinear, outR, outG, outB);
+            ConvertLinearPixelWithParams(r, g, b, peakLinear, params, outR, outG, outB);
             // JPEGView pixels are BGR.
             dstRow[(size_t)x * 3 + 0] = outB;
             dstRow[(size_t)x * 3 + 1] = outG;
@@ -458,6 +495,8 @@ void ConvertLinearImageToBgra(const float* srcRgb, int width, int height, size_t
                               const uint8_t* planarAlphaOrNull, size_t alphaStride) {
     if (srcRgb == NULL || dstBgra == NULL || width <= 0 || height <= 0) return;
     double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
+    // P2-C3: precompute the EETF parameters once per image (see above).
+    Bt2390Params params = Bt2390MakeParams(PeakNitsFromLinear(peakLinear));
     for (int y = 0; y < height; y++) {
         const float* srcRow = srcRgb + (size_t)y * srcStrideFloats;
         uint8_t* dstRow = dstBgra + (size_t)y * dstStrideBytes;
@@ -468,7 +507,7 @@ void ConvertLinearImageToBgra(const float* srcRgb, int width, int height, size_t
             double g = (double)srcRow[(size_t)x * 3 + 1];
             double b = (double)srcRow[(size_t)x * 3 + 2];
             uint8_t outR = 0, outG = 0, outB = 0;
-            ConvertLinearPixel(r, g, b, peakLinear, outR, outG, outB);
+            ConvertLinearPixelWithParams(r, g, b, peakLinear, params, outR, outG, outB);
             // JPEGView pixels are BGR, with alpha last. Every
             // byte of the quad is written (H-01/N-3).
             dstRow[(size_t)x * 4 + 0] = outB;
