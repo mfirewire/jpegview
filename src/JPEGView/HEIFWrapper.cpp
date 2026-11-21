@@ -143,6 +143,21 @@ static bool DecodeGainMapGray(heif::ImageHandle auxHandle, int baseWidth, int ba
                               std::vector<uint8_t>& gainGray, int& gainW, int& gainH)
 {
 	gainW = gainH = 0;
+	// P2-B6: pre-check the NOMINAL gain-map dimensions BEFORE decoding.
+	// decode_image allocates the full planes, so the post-decode 4x
+	// checks below cannot bound that allocation. The nominal dims come
+	// from the aux item's ispe box (libheif: "not guaranteed to match
+	// the decoded plane", hence the post-decode checks are retained as
+	// well). Rejects non-positive dims too (a missing ispe reads 0).
+	// Real files: gain 2016x1512 vs base 4032x3024 = 0.5x (two iPhone
+	// HEICs, verified with probe_gain; nominal == decoded there).
+	int nominalW = auxHandle.get_width();
+	int nominalH = auxHandle.get_height();
+	if (nominalW <= 0 || nominalH <= 0 ||
+		nominalW > baseWidth * 4 || nominalH > baseHeight * 4 ||
+		!IsImageBufferSizeOk((size_t)nominalW, (size_t)nominalH)) {
+		return false;
+	}
 	// Preferred: YCbCr monochrome — the Y plane is the gain map.
 	try {
 		heif::Image gainImage = auxHandle.decode_image(heif_colorspace_YCbCr, heif_chroma_monochrome);
@@ -153,6 +168,14 @@ static bool DecodeGainMapGray(heif::ImageHandle auxHandle, int baseWidth, int ba
 			int stride = 0;
 			const uint8_t* plane = gainImage.get_plane(heif_channel_Y, &stride);
 			if (plane != nullptr && stride >= gw) {
+				// P2-B6: bound the gainGray allocation itself (the
+				// decoded dims need not match the nominal ones).
+				// Returns false rather than falling through to the RGB
+				// fallback, which would decode the same huge image
+				// at 3 bytes/pixel.
+				if (!IsImageBufferSizeOk((size_t)gw, (size_t)gh)) {
+					return false;
+				}
 				gainGray.assign((size_t)gw * gh, 0);
 				for (int y = 0; y < gh; y++)
 					memcpy(&gainGray[(size_t)y * gw], plane + (size_t)y * stride, (size_t)gw);
@@ -173,6 +196,10 @@ static bool DecodeGainMapGray(heif::ImageHandle auxHandle, int baseWidth, int ba
 			int stride = 0;
 			const uint8_t* plane = gainImage.get_plane(heif_channel_interleaved, &stride);
 			if (plane != nullptr && stride >= gw * 3) {
+				// P2-B6: bound the gainGray allocation itself.
+				if (!IsImageBufferSizeOk((size_t)gw, (size_t)gh)) {
+					return false;
+				}
 				gainGray.assign((size_t)gw * gh, 0);
 				for (int y = 0; y < gh; y++) {
 					const uint8_t* srcRow = plane + (size_t)y * stride;
