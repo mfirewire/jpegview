@@ -5,9 +5,10 @@ class HDRReader
 public:
 	// Decodes a Radiance HDR file (.hdr/.rgbe, "#?" magic) from memory.
 	// Returns 3-byte BGR pixels padded to a 4-byte boundary, like QOIWrapper,
-	// or NULL on failure. HDR is floating-point; stb_image's 8-bit load
-	// path converts it to 8-bit with its default gamma-2.2 tone mapping,
-	// so bright highlights are compressed (documented, not worked around).
+	// or NULL on failure. HDR is floating-point: floats are loaded with
+	// stbi_loadf_from_memory, linearized with the file's GAMMA header,
+	// and tone-mapped by HdrToneMap::ConvertLinearImage (BT.2390 roll-off,
+	// linear 1.0 = SDR white), so highlights roll off instead of clipping.
 	// The dimensions are read with stbi_info_from_memory and checked
 	// before any decode, so a header claiming absurd dimensions fails
 	// before stb_image allocates for it (F-06/F-07 lesson).

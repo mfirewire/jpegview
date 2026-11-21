@@ -147,8 +147,10 @@ double ComputePeakNits(const float* srcRgb, size_t pixelCount, Transfer transfer
 // the BT.2390 EETF is the identity when the content peak is at or below
 // linear 1.0, so SDR-range content passes through the sRGB OETF
 // unchanged (up to the sRGB-OETF-vs-2.2-gamma difference from the old
-// pow(v, 1/2.2) path, which is a few levels in the deep shadows and
-// +/-2 in the mid-tones, and is the standards-correct curve). Linear
+// pow(v, 1/2.2) path, which is at most -9 levels in the deep shadows
+// and -3..+2 in the mid-tones, and is the standards-correct curve;
+// that is the only deviation while the content peak is at or below
+// linear 1.0 (above 1.0 the EETF roll-off adds its own). Linear
 // values above 1.0 are HDR: the content peak (in nits, peakLinear *
 // kSdrWhiteNits) drives the same BT.2390 EETF as the PQ/HLG path, so
 // highlights roll off smoothly to SDR white instead of hard-clipping.

@@ -30,12 +30,17 @@ const double kPqPeakNits = 10000.0;
 const double kHlgA = 0.17883277;
 const double kHlgB = 0.28466892;
 const double kHlgC = 0.55991073;
-// HLG OOTF system gamma for a kHdrPeakNits display (BT.2100).
+// HLG OOTF system gamma for a kHdrPeakNits display (BT.2100):
+// gamma = 1.2 + 0.42*log10(Lw/1000), so gamma is 1.2 exactly when
+// Lw is 1000 nits. If kHdrPeakNits changes, this must change with it.
 const double kHlgSystemGamma = 1.2;
 
 // Inverses (BT.2020/P3 -> sRGB), computed from the standard forward
 // matrices (numpy, float64). Values match GTK gdkcolordefs and the
-// kennylevinsen test generator. Verified by round-trip: max error 2.2e-16.
+// kennylevinsen test generator. Verified by round-trip: max error
+// ~4.6e-7 (worst product I*M, 4.617e-07). The old 2.2e-16 was float64
+// machine epsilon, unreachable with 6-digit printed literals (they
+// differ from the true inverses by up to 4.9e-7).
 // (P3-C2: the forward matrices were deleted here; only the inverses
 // have readers, via GamutInverse.)
 const double kRec2020ToSrgb[3][3] = {
@@ -67,7 +72,7 @@ const double* GamutLuma(Primaries primaries) {
     switch (primaries) {
         case Primaries::kBt2020: return kRec2020Luma;
         case Primaries::kP3: return kP3Luma;
-        default: return kSrgbLuma;
+        default: return kSrgbLuma;  // BT.709 / sRGB: sRGB luma coefficients.
     }
 }
 
