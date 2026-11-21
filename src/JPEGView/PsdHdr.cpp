@@ -78,6 +78,27 @@ float SampleToLinear32(uint32_t bits) {
     return SanitizeFloat32(BitsToFloat(bits));
 }
 
+// TEMPORARY DIAGNOSTIC (2026-11-21): last InflateTo zlib return codes.
+// REVERT AFTER DIAGNOSIS. Plain file-local static: the decode is
+// single-threaded, so no synchronisation is needed. initRet meanings:
+//   0    = inflate was never attempted for this DecodeImageData call
+//   -100 = InflateTo rejected the call before touching zlib (NULL
+//          pointers or a size over the 32-bit uLong limit)
+//   other = the actual inflateInit_ return code (Z_OK is 0, so any
+//          other value here means inflateInit failed).
+struct InflateDiag {
+    int initRet;
+    int inflateRet;
+    unsigned long totalOut;
+};
+static InflateDiag g_lastInflateDiag = { 0, 0, 0 };
+
+static void SetInflateDiag(int initRet, int inflateRet, unsigned long totalOut) {
+    g_lastInflateDiag.initRet = initRet;
+    g_lastInflateDiag.inflateRet = inflateRet;
+    g_lastInflateDiag.totalOut = totalOut;
+}
+
 // Inflate src[0..srcSize) into dst[0..dstSize). Returns false unless
 // the stream ends cleanly (Z_STREAM_END) with exactly dstSize bytes
 // produced. Only the stream end and the produced count are checked:
@@ -88,11 +109,17 @@ float SampleToLinear32(uint32_t bits) {
 // decode.
 bool InflateTo(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstSize) {
     if (src == NULL || dst == NULL) {
+        // TEMPORARY DIAGNOSTIC (2026-11-21): rejected before zlib.
+        // REVERT AFTER DIAGNOSIS (see SetInflateDiag above).
+        SetInflateDiag(-100, 0, 0);
         return false;
     }
     // uLong is zlib's 32-bit length type; a stream larger than that
     // cannot be inflated in one call.
     if (srcSize > (size_t)0xFFFFFFFFUL || dstSize > (size_t)0xFFFFFFFFUL) {
+        // TEMPORARY DIAGNOSTIC (2026-11-21): rejected before zlib.
+        // REVERT AFTER DIAGNOSIS (see SetInflateDiag above).
+        SetInflateDiag(-100, 0, 0);
         return false;
     }
     z_stream strm;
@@ -101,12 +128,19 @@ bool InflateTo(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstSize)
     strm.avail_in = (uInt)srcSize;
     strm.next_out = dst;
     strm.avail_out = (uInt)dstSize;
-    if (inflateInit(&strm) != Z_OK) {
+    int initRet = inflateInit(&strm);
+    if (initRet != Z_OK) {
+        // TEMPORARY DIAGNOSTIC (2026-11-21): record the inflateInit
+        // failure. REVERT AFTER DIAGNOSIS (see SetInflateDiag above).
+        SetInflateDiag(initRet, 0, 0);
         return false;
     }
     int ret = inflate(&strm, Z_FINISH);
     uLong produced = strm.total_out;
     inflateEnd(&strm);
+    // TEMPORARY DIAGNOSTIC (2026-11-21): record the inflate outcome.
+    // REVERT AFTER DIAGNOSIS (see SetInflateDiag above).
+    SetInflateDiag(Z_OK, ret, (unsigned long)produced);
     return ret == Z_STREAM_END && produced == (uLong)dstSize;
 }
 
@@ -201,12 +235,31 @@ uint8_t U16AlphaToByte(uint16_t a) {
     return (uint8_t)(int)v;
 }
 
+// TEMPORARY DIAGNOSTIC (2026-11-21): returns the last InflateTo call's
+// zlib return codes for this DecodeImageData call (zeros when inflate
+// was never attempted). REVERT AFTER DIAGNOSIS. Declared in PsdHdr.h.
+void LastInflateDiag(int* initRet, int* inflateRet, unsigned long* totalOut) {
+    if (initRet != NULL) {
+        *initRet = g_lastInflateDiag.initRet;
+    }
+    if (inflateRet != NULL) {
+        *inflateRet = g_lastInflateDiag.inflateRet;
+    }
+    if (totalOut != NULL) {
+        *totalOut = g_lastInflateDiag.totalOut;
+    }
+}
+
 bool DecodeImageData(const uint8_t* src, size_t srcSize,
                      int width, int height, int channels, int colorMode,
                      int bitDepth, int compression, int version,
                      float* outLinearRgb,
                      uint8_t* outAlphaOrNull, size_t outAlphaStride,
                      const ColorSpace* colorSpaceOrNull) {
+    // TEMPORARY DIAGNOSTIC (2026-11-21): clear the record so a stale
+    // value from a previous call cannot leak into this one.
+    // REVERT AFTER DIAGNOSIS (see SetInflateDiag above).
+    SetInflateDiag(0, 0, 0);
     if (src == NULL || outLinearRgb == NULL) {
         return false;
     }
