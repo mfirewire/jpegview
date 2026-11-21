@@ -61,6 +61,11 @@ void TestPqConstants() {
     Check(Near(HdrToneMap::PqNitsToSignal(203.0), 0.580689, 1e-6), "PQ 203 nits (SDR white) -> 0.580689");
     Check(Near(HdrToneMap::PqNitsToSignal(1000.0), 0.751827, 1e-6), "PQ 1000 nits -> 0.751827");
     Check(Near(HdrToneMap::PqNitsToSignal(10000.0), 1.0, 1e-9), "PQ 10000 nits -> 1");
+    // P2-C1: Inf and huge values saturate to 1.0; NaN maps to 0
+    // (pre-existing behavior, asserted here, not as a new-guard case).
+    Check(Near(HdrToneMap::PqNitsToSignal(HUGE_VAL), 1.0, 1e-12), "PQ Inf -> 1");
+    Check(Near(HdrToneMap::PqNitsToSignal(1e308), 1.0, 1e-12), "PQ 1e308 -> 1");
+    Check(Near(HdrToneMap::PqNitsToSignal(std::nan("")), 0.0, 1e-12), "PQ NaN -> 0 (pre-existing)");
     // Round-trip: signal -> nits -> signal must be identity.
     for (double s = 0.0; s <= 1.0; s += 0.05) {
         double n = HdrToneMap::PqSignalToNits(s);

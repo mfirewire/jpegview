@@ -188,6 +188,9 @@ double PqSignalToNits(double signal) {
 double PqNitsToSignal(double nits) {
     double lm = nits / kPqPeakNits;
     if (!(lm > 0.0)) return 0.0;
+    // P2-C1: Inf and huge values saturate to 1.0 (PQ peak). NaN is
+    // already handled by the line above (NaN > 0.0 is false).
+    if (lm >= 1.0) return 1.0;
     double lmM1 = std::pow(lm, kPqM1);
     return std::pow((kPqC1 + kPqC2 * lmM1) / (1.0 + kPqC3 * lmM1), kPqM2);
 }
