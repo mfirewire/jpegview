@@ -28,6 +28,7 @@
 //       -o /tmp/gainmap_test
 //   /tmp/gainmap_test
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -917,6 +918,103 @@ void TestApplyGainMapRealMeta() {
 }
 
 
+void TestApplyGainMapLutExact() {
+    using namespace gainmap;
+    // N1-A: ApplyGainMap serves the per-pixel pow calls from 256-entry
+    // tables (boost table + sRGB->linear table). The tables are EXACT,
+    // not approximate — every input is a byte plus per-image constants —
+    // so the output must be bit-identical to a direct-pow evaluation
+    // of the ISO formula. This pins that: a from-the-formula reference
+    // (direct std::pow, same expression order) over ALL 256 gain bytes
+    // x ALL 256 base bytes per channel, for several parameter sets
+    // (iPhone-derived headroom, real HLG metadata, non-1 gamma,
+    // negative gainMapMin, non-zero offsets, partial weight). The
+    // comparison is float-exact (==), not a tolerance band: any table
+    // error, however small, fails.
+    struct Params {
+        double gainMapMin, gainMapMax, gamma, baseOffset, alternateOffset;
+        double weightFactor;
+    };
+    const Params kSets[] = {
+        {0.0, 3.0, 1.0, 0.0, 0.0, 1.0},        // derived iPhone headroom
+        {0.0, 0.09999992698431015, 1.0, 1.0000000116883119e-07,
+         1.0000000116883119e-07, 1.0},          // real HLG metadata
+        {0.0, 1.329, 2.2, 0.0, 0.0, 1.0},       // gamma 2.2, mid headroom
+        {-1.5, 2.5, 0.45, 0.01, -0.02, 0.5},    // negative min, partial weight
+        {0.0, 0.0, 1.0, 0.0, 0.0, 1.0},         // zero gain range
+        {0.0, 3.0, 1.0, 0.0, 0.0, 0.0},         // weight 0 -> SDR unchanged
+        {0.0, 2.0, 1.8, 0.001, 0.002, 2.0},     // weight 2.0 clamps to 1.0
+    };
+    // 256x256 image: gain byte = x (all 256), base R = y, G = (x+y)&255,
+    // B = (7x+13y)&255 — every (gain, base) pair per channel is covered.
+    const int kW = 256, kH = 256;
+    std::vector<uint8_t> base((size_t)kW * kH * 3);
+    std::vector<uint8_t> gain((size_t)kW * kH);
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            size_t i = (size_t)y * kW + x;
+            gain[i] = (uint8_t)x;
+            base[i * 3 + 0] = (uint8_t)y;
+            base[i * 3 + 1] = (uint8_t)((x + y) & 0xff);
+            base[i * 3 + 2] = (uint8_t)((7 * x + 13 * y) & 0xff);
+        }
+    }
+    std::vector<float> out((size_t)kW * kH * 3);
+    for (size_t s = 0; s < sizeof(kSets) / sizeof(kSets[0]); ++s) {
+        const Params& p = kSets[s];
+        Metadata m;
+        m.gainMapMin = p.gainMapMin;
+        m.gainMapMax = p.gainMapMax;
+        m.gamma = p.gamma;
+        m.baseOffset = p.baseOffset;
+        m.alternateOffset = p.alternateOffset;
+        m.valid = true;
+        bool ran = ApplyGainMap(base.data(), kW, kH, gain.data(), kW, kH, m,
+                              p.weightFactor, out.data());
+        Check(ran, "ApplyGainMap LUT param set succeeds");
+        // Reference: direct-pow ISO formula, same expression order as
+        // GainMap.h documents (gainMapMin/Max clamped to +/-16 and
+        // weightFactor to [0,1], mirroring ApplyGainMap's contract).
+        // Skipped when the call above failed (no output to compare);
+        // `exact` stays false so the check below still records it.
+        double gmin = std::min(16.0, std::max(-16.0, p.gainMapMin));
+        double gmax = std::min(16.0, std::max(-16.0, p.gainMapMax));
+        double w = p.weightFactor;
+        if (w < 0.0) w = 0.0;
+        if (w > 1.0) w = 1.0;
+        double invGamma = 1.0 / p.gamma;
+        bool exact = false;
+        if (ran) {
+            exact = true;
+            for (size_t i = 0; i < (size_t)kW * kH; ++i) {
+                double g = static_cast<double>(gain[i]) / 255.0;
+                double logRecovery = std::pow(g, invGamma);
+                double logBoost = gmin * (1.0 - logRecovery) + gmax * logRecovery;
+                double boost = std::pow(2.0, logBoost * w);
+                for (int c = 0; c < 3; ++c) {
+                    // sRGB EOTF inverse in double (same formula as
+                    // SrgbToLinearDouble in GainMap.cpp).
+                    double c01 = static_cast<double>(base[i * 3 + (size_t)c]) / 255.0;
+                    double sdrD = (c01 <= 0.04045)
+                                      ? c01 / 12.92
+                                      : std::pow((c01 + 0.055) / 1.055, 2.4);
+                    float expected = (float)((sdrD + p.baseOffset) * boost -
+                                             p.alternateOffset);
+                    if (out[i * 3 + (size_t)c] != expected) {
+                        exact = false;
+                    }
+                }
+                if (!exact) break;
+            }
+        }
+        char what[128];
+        std::snprintf(what, sizeof(what),
+                      "ApplyGainMap LUT bit-identical to direct pow, param set %u",
+                      (unsigned)s);
+        Check(exact, what);
+    }
+}
+
 void TestFindGainMapJpeg() {
     using namespace gainmap;
     size_t off = 0, sz = 0;
@@ -1106,6 +1204,7 @@ int main() {
     TestBilinearUpsample();
     TestApplyGainMap();
     TestApplyGainMapRealMeta();
+    TestApplyGainMapLutExact();
     std::printf("gainmap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

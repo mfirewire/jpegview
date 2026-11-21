@@ -606,23 +606,41 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
     }
 
     const double invGamma = 1.0 / meta.gamma;
-    const size_t pixelCount =
-        static_cast<size_t>(width) * static_cast<size_t>(height);
-    for (size_t i = 0; i < pixelCount; ++i) {
-        double g = static_cast<double>(gain[i]) / 255.0;
-        if (g < 0.0) {
-            g = 0.0;
-        }
-        if (g > 1.0) {
-            g = 1.0;
-        }
+
+    // N1-A (perf): the per-pixel pow calls are replaced by two 256-entry
+    // tables, built once per call from the fixed per-image parameters.
+    // This is EXACT, not approximate: every input to both functions is
+    // a byte (gain byte, sRGB byte) plus parameters that are constant
+    // for the whole image, so each table entry is the bit-identical
+    // double the direct computation would produce for that byte.
+    //   boostTable[g]  = 2^(logBoost(g) * weightFactor),
+    //     logBoost(g)  = gainMapMin*(1-g^(1/gamma)) + gainMapMax*g^(1/gamma)
+    //   srgbTable[v]   = SrgbToLinearDouble(v / 255)
+    // Cost: 757 pow calls per image instead of up to 5 per pixel
+    // (~61M at 4032x3024): 512 for the boost table (2 per entry) plus
+    // 245 for the sRGB table (the 11 darkest bytes take the linear
+    // branch of SrgbToLinearDouble, which calls no pow).
+    double boostTable[256];
+    for (int b = 0; b < 256; ++b) {
+        double g = static_cast<double>(b) / 255.0;
         double logRecovery = std::pow(g, invGamma);
         double logBoost =
             gainMapMin * (1.0 - logRecovery) + gainMapMax * logRecovery;
-        double boost = std::pow(2.0, logBoost * weightFactor);
+        boostTable[b] = std::pow(2.0, logBoost * weightFactor);
+    }
+    double srgbTable[256];
+    for (int v = 0; v < 256; ++v) {
+        srgbTable[v] = SrgbToLinearDouble(static_cast<double>(v) / 255.0);
+    }
+
+    const size_t pixelCount =
+        static_cast<size_t>(width) * static_cast<size_t>(height);
+    for (size_t i = 0; i < pixelCount; ++i) {
+        // gain[i] is a byte, so it is already in [0,1] after /255;
+        // the old clamp was a no-op and the table index is the byte.
+        double boost = boostTable[gain[i]];
         for (int c = 0; c < 3; ++c) {
-            double sdr = SrgbToLinearDouble(
-                static_cast<double>(baseSrgb[i * 3 + static_cast<size_t>(c)]) / 255.0);
+            double sdr = srgbTable[baseSrgb[i * 3 + static_cast<size_t>(c)]];
             double hdr = (sdr + meta.baseOffset) * boost - meta.alternateOffset;
             outLinear[i * 3 + static_cast<size_t>(c)] = static_cast<float>(hdr);
         }
