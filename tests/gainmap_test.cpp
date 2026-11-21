@@ -413,6 +413,9 @@ const char* kXmpAppleVersionOnly =
 //   kXmpRealAppleJpegNew: Apple gain-map JPEG (libultrahdr sample,
 //     ~/workspace/.scratch-headroom-heic/apple_gainmap_new.jpg),
 //     726 bytes, Headroom 4.532783, Version 131072.
+//   kXmpRealIphone15ProIos18: iPhone 15 Pro HEIC, iOS 18.0 (user
+//     sample, ~/workspace/.scratch-b7-1-heic/iphone_15_pro_ios18.heic),
+//     444 bytes, Headroom 2.769181, Version 131072.
 const char* kXmpRealIphone15Pro =
     "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"XMP Core 6.0.0\">\n"
     "   <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
@@ -435,6 +438,17 @@ const char* kXmpRealAppleJpegNew =
     "         <apdi:StoredFormat>1278226488</apdi:StoredFormat>\n"
     "         <HDRGainMap:HDRGainMapVersion>131072</HDRGainMap:HDRGainMapVersion>\n"
     "         <HDRGainMap:HDRGainMapHeadroom>4.532783</HDRGainMap:HDRGainMapHeadroom>\n"
+    "      </rdf:Description>\n"
+    "   </rdf:RDF>\n"
+    "</x:xmpmeta>";
+
+const char* kXmpRealIphone15ProIos18 =
+    "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"XMP Core 6.0.0\">\n"
+    "   <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+    "      <rdf:Description rdf:about=\"\"\n"
+    "            xmlns:HDRGainMap=\"http://ns.apple.com/HDRGainMap/1.0/\">\n"
+    "         <HDRGainMap:HDRGainMapVersion>131072</HDRGainMap:HDRGainMapVersion>\n"
+    "         <HDRGainMap:HDRGainMapHeadroom>2.769181</HDRGainMap:HDRGainMapHeadroom>\n"
     "      </rdf:Description>\n"
     "   </rdf:RDF>\n"
     "</x:xmpmeta>";
@@ -629,6 +643,15 @@ void TestAppleHeadroomRatioRealXmp() {
     Check(Near(m.gainMapMin, 0.0, 1e-12), "real Apple JPEG gainMapMin 0.0");
     Check(Near(m.gamma, 1.0, 1e-12), "real Apple JPEG gamma defaults 1.0");
     Check(m.appleHeadroomFallback, "real Apple JPEG sets appleHeadroomFallback");
+    // Real iPhone 15 Pro HEIC, iOS 18.0 (user sample): Headroom
+    // 2.769181 -> log2 = 1.4694593546 stops.
+    Check(ParseXmpMetadata(std::string(kXmpRealIphone15ProIos18), m) && m.valid,
+          "real iPhone 15 Pro iOS 18 XMP parses");
+    Check(Near(m.gainMapMax, 1.469459354632348, 1e-9),
+          "real iPhone 15 Pro iOS 18 gainMapMax=log2(2.769181)=1.4695");
+    Check(Near(m.gainMapMin, 0.0, 1e-12), "real iPhone 15 Pro iOS 18 gainMapMin 0.0");
+    Check(Near(m.gamma, 1.0, 1e-12), "real iPhone 15 Pro iOS 18 gamma defaults 1.0");
+    Check(m.appleHeadroomFallback, "real iPhone 15 Pro iOS 18 sets appleHeadroomFallback");
 }
 
 void TestSrgbToLinear() {

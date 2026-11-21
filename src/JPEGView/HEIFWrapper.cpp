@@ -264,6 +264,17 @@ static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
                                           const unsigned char* baseBgra,
                                           int width, int height)
 {
+	// TEMPORARILY DISABLED by user decision 2026-11-21: all HEICs
+	// show SDR for now (see docs/HDR-HEIC-exploration-2026-11-21.md).
+	// Two reasons: (a) the highlights stayed too bright on one real
+	// sample (iPhone 15 Pro, iOS 18.0) even with the correct headroom
+	// (1.47 stops) - the cause is the bright base content, not the
+	// headroom value, and the investigation is parked; (b) gain-map
+	// opens are slow (about 7-9s against under 1s for SDR). The
+	// gain-map code below is kept intact - to re-enable, remove this
+	// early return. JPEG/AVIF gain maps are unaffected (their paths
+	// do not call this function).
+	return NULL;
 	unsigned char* outBgra = NULL;
 	try {
 		if (baseBgra == nullptr || width <= 0 || height <= 0)
