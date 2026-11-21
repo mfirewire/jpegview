@@ -6,57 +6,10 @@
 #include "SettingsProvider.h"
 #include "GainMap.h"
 #include "HdrToneMap.h"
+#include <climits>
 #include <cstring>
 
 namespace {
-
-// Find the XMP packet in a JPEG's APP1 segment (identifier
-// "http://ns.adobe.com/xap/1.0/\0"). Returns a pointer into `jpeg`
-// (no copy) and the packet size, or false when there is no XMP APP1
-// or the markers are malformed/truncated. The packet itself may
-// contain trailing padding; the XMP parser only searches it.
-bool FindXmpPacket(const unsigned char* jpeg, int sizebytes, const unsigned char*& xmp, size_t& xmpSize) {
-	xmp = NULL;
-	xmpSize = 0;
-	if (jpeg == NULL || sizebytes < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) {
-		return false;
-	}
-	static const char kXmpPrefix[] = "http://ns.adobe.com/xap/1.0/";
-	const size_t kPrefixLen = 28;  // + NUL = 29 bytes before the packet
-	const size_t size = (size_t)sizebytes;
-	size_t pos = 2;
-	while (pos + 1 < size) {
-		if (jpeg[pos] != 0xFF) {
-			return false;
-		}
-		const unsigned char marker = jpeg[pos + 1];
-		if (marker == 0xFF) {
-			++pos;  // fill byte before the marker code
-			continue;
-		}
-		pos += 2;
-		if (marker == 0xD8 || marker == 0xD9 || marker == 0x01 ||
-			(marker >= 0xD0 && marker <= 0xD7) || marker == 0xDA) {
-			return false;  // standalone marker or SOS: no more segments
-		}
-		if (pos + 2 > size) {
-			return false;
-		}
-		const size_t len = (size_t)(((size_t)jpeg[pos] << 8) | (size_t)jpeg[pos + 1]);
-		if (len < 2 || pos + len > size) {
-			return false;  // truncated segment
-		}
-		if (marker == 0xE1 && len - 2 >= kPrefixLen + 1 &&
-			std::memcmp(jpeg + pos + 2, kXmpPrefix, kPrefixLen) == 0 &&
-			jpeg[pos + 2 + kPrefixLen] == 0) {
-			xmp = jpeg + pos + 2 + kPrefixLen + 1;
-			xmpSize = len - 2 - (kPrefixLen + 1);
-			return true;
-		}
-		pos += len;
-	}
-	return false;
-}
 
 // UltraHDR gain-map reconstruction (ISO 21496-1, Option D Phase 2).
 // `pBaseBgr` is the already-decoded 3-channel base image (TJPAD
@@ -116,7 +69,22 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 	if (!bHaveMeta) {
 		const unsigned char* pXmp = NULL;
 		size_t xmpSize = 0;
-		if (FindXmpPacket(jpegBuf, sizebytes, pXmp, xmpSize)) {
+		if (gainmap::FindXmpPacket(jpegBuf, sizebytes, pXmp, xmpSize)) {
+			bHaveMeta = gainmap::ParseXmpMetadata(
+				std::string((const char*)pXmp, xmpSize), meta);
+		}
+	}
+	// Apple gain-map JPEGs carry their XMP (HDRGainMapHeadroom) in
+	// the AUX image, not the primary: the primary has no XMP APP1,
+	// and FindXmpPacket stops at SOS, so it can never reach the aux
+	// packet. Try the gain image's own XMP as a second fallback.
+	// gainSize is size_t and FindXmpPacket takes int, so only call
+	// it when the size fits (no silent truncation); the gain image
+	// was already decoded above, so the buffer is valid.
+	if (!bHaveMeta && gainSize <= (size_t)INT_MAX) {
+		const unsigned char* pXmp = NULL;
+		size_t xmpSize = 0;
+		if (gainmap::FindXmpPacket(pGainJpeg, (int)gainSize, pXmp, xmpSize)) {
 			bHaveMeta = gainmap::ParseXmpMetadata(
 				std::string((const char*)pXmp, xmpSize), meta);
 		}

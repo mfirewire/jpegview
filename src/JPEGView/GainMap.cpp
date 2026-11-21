@@ -486,6 +486,49 @@ bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
     return false;
 }
 
+bool FindXmpPacket(const unsigned char* jpeg, int sizebytes, const unsigned char*& xmp, size_t& xmpSize) {
+	xmp = NULL;
+	xmpSize = 0;
+	if (jpeg == NULL || sizebytes < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) {
+		return false;
+	}
+	static const char kXmpPrefix[] = "http://ns.adobe.com/xap/1.0/";
+	const size_t kPrefixLen = 28;  // + NUL = 29 bytes before the packet
+	const size_t size = (size_t)sizebytes;
+	size_t pos = 2;
+	while (pos + 1 < size) {
+		if (jpeg[pos] != 0xFF) {
+			return false;
+		}
+		const unsigned char marker = jpeg[pos + 1];
+		if (marker == 0xFF) {
+			++pos;  // fill byte before the marker code
+			continue;
+		}
+		pos += 2;
+		if (marker == 0xD8 || marker == 0xD9 || marker == 0x01 ||
+			(marker >= 0xD0 && marker <= 0xD7) || marker == 0xDA) {
+			return false;  // standalone marker or SOS: no more segments
+		}
+		if (pos + 2 > size) {
+			return false;
+		}
+		const size_t len = (size_t)(((size_t)jpeg[pos] << 8) | (size_t)jpeg[pos + 1]);
+		if (len < 2 || pos + len > size) {
+			return false;  // truncated segment
+		}
+		if (marker == 0xE1 && len - 2 >= kPrefixLen + 1 &&
+			std::memcmp(jpeg + pos + 2, kXmpPrefix, kPrefixLen) == 0 &&
+			jpeg[pos + 2 + kPrefixLen] == 0) {
+			xmp = jpeg + pos + 2 + kPrefixLen + 1;
+			xmpSize = len - 2 - (kPrefixLen + 1);
+			return true;
+		}
+		pos += len;
+	}
+	return false;
+}
+
 bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
                   const uint8_t* gainMap, int gainW, int gainH,
                   const Metadata& meta, double weightFactor, float* outLinear) {

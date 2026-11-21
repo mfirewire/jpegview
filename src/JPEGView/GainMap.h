@@ -139,6 +139,20 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
 bool FindIso21496Payload(const uint8_t* jpeg, size_t size,
                          const uint8_t*& payload, size_t& payloadSize);
 
+// Find the XMP packet in a JPEG's APP1 segment (identifier
+// "http://ns.adobe.com/xap/1.0/\0"). Returns a pointer into `jpeg`
+// (no copy) and the packet size, or false when there is no XMP APP1
+// or the markers are malformed/truncated. The packet itself may
+// contain trailing padding; the XMP parser only searches it. Stops
+// at SOS (scan data follows): it can only find XMP in the header of
+// the single JPEG buffer it is given, so a multi-image (MPF) file
+// needs one call per image — Apple gain-map JPEGs carry their
+// HDRGainMapHeadroom XMP in the AUX (gain) image, not the primary
+// (F8). `sizebytes` is int (the original wrapper helper's type);
+// callers must pass a value that fits in int.
+bool FindXmpPacket(const unsigned char* jpeg, int sizebytes,
+                   const unsigned char*& xmp, size_t& xmpSize);
+
 // Follow-up (see docs/HDR-HEIC-exploration-2026-11-21.md §5): Apple's
 // own apply formula is linear in the gain — hdr = sdr*(1+(headroom-1)*g)
 // — while ApplyGainMap is exponential, gain = 2^(min+(max-min)*g^(1/gamma)).
