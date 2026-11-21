@@ -147,6 +147,7 @@ bool TestAvifGainMapToMetadata(const avifGainMap* gainMap, gainmap::Metadata& me
 }
 
 // --- The exact apply sequence TryApplyAvifGainMap runs ------------------
+// Output is width*height*4 BGRA with the base alpha copied through (P2-B4).
 
 bool RunAvifGainMapSequence(const uint8_t* baseBgra, int width, int height,
                             const uint8_t* gainGray, int gainW, int gainH,
@@ -168,7 +169,8 @@ bool RunAvifGainMapSequence(const uint8_t* baseBgra, int width, int height,
         outBgra[i * 4 + 0] = bgr[i * 3 + 0];
         outBgra[i * 4 + 1] = bgr[i * 3 + 1];
         outBgra[i * 4 + 2] = bgr[i * 3 + 2];
-        outBgra[i * 4 + 3] = 0xff;
+        // P2-B4: copy the base alpha, not opaque.
+        outBgra[i * 4 + 3] = baseBgra[i * 4 + 3];
     }
     return true;
 }
@@ -203,6 +205,10 @@ void MakeBaseBgra(uint8_t* bgra) {
         bgra[i * 4 + 2] = kBaseRgb[i * 3 + 0];
         bgra[i * 4 + 3] = 0xff;
     }
+    // P3-A7: one non-opaque base pixel (index 5, alpha 128) so the
+    // P2-B4 alpha copy is pinned by the expected arrays below; with
+    // an all-opaque base the copy would be invisible to the tests.
+    bgra[5 * 4 + 3] = 128;
 }
 
 void TestFractionConversion() {
@@ -334,7 +340,7 @@ gainmap::Metadata MakeMeta(double gainMin, double gainMax, double gamma,
 // upsampled to 4x4; gamma 2.0, baseOffset 0.01, alternateOffset 0.005.
 const uint8_t kExpectedGamma2Offsets[4 * 4 * 4] = {
     38, 67, 129, 255, 62, 115, 224, 255, 114, 240, 37, 255, 255, 255, 255, 255,
-    23, 23, 23, 255, 47, 180, 96, 255, 226, 51, 255, 255, 120, 120, 120, 255,
+    23, 23, 23, 255, 47, 180, 96, 128, 226, 51, 255, 255, 120, 120, 120, 255,
     165, 88, 53, 255, 53, 43, 36, 255, 237, 237, 237, 255, 32, 175, 255, 255,
     171, 30, 255, 255, 93, 255, 93, 255, 139, 98, 59, 255, 178, 178, 178, 255,
 };
@@ -361,7 +367,7 @@ void TestUpsampledGamma2Offsets() {
 // Case B: 4x4 12-bit gain map, same size; min -1.0, max 2.0, gamma 1.0.
 const uint8_t kExpectedMinMax12bit[4 * 4 * 4] = {
     68, 125, 236, 255, 34, 71, 146, 255, 106, 232, 21, 255, 235, 235, 235, 255,
-    0, 0, 0, 255, 32, 156, 80, 255, 234, 43, 255, 255, 152, 152, 152, 255,
+    0, 0, 0, 255, 32, 156, 80, 128, 234, 43, 255, 255, 152, 152, 152, 255,
     236, 125, 68, 255, 64, 47, 29, 255, 255, 255, 255, 255, 0, 236, 255, 255,
     92, 0, 188, 255, 44, 188, 44, 255, 71, 46, 21, 255, 92, 92, 92, 255,
 };
@@ -399,7 +405,7 @@ void TestSameSizeMinMax12bit() {
 // values must match that test byte for byte.
 const uint8_t kExpectedUpsampled8bit[4 * 4 * 4] = {
     32, 64, 128, 255,  52, 104, 208, 255,  102, 225, 19, 255,  255, 255, 255, 255,
-    0, 0, 0, 255,      34, 165, 85, 255,   211, 37, 255, 255,  111, 111, 111, 255,
+    0, 0, 0, 255,      34, 165, 85, 128,   211, 37, 255, 255,  111, 111, 111, 255,
     153, 78, 40, 255,  39, 27, 15, 255,    230, 230, 230, 255,  0, 169, 255, 255,
     162, 0, 255, 255,  85, 255, 85, 255,    134, 91, 48, 255,   176, 176, 176, 255,
 };

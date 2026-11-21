@@ -42,8 +42,10 @@ bool JxlReader::ExifReserve(size_t new_size) {
 // Two passes: build a float RGB buffer and compute the content peak
 // (for the content-adaptive EETF), then tone-map each pixel. Returns a
 // new 8-bit BGRA buffer (caller owns it), or NULL on allocation failure.
-// The alpha channel is ignored (the tone mapper works on RGB); the output
-// alpha is opaque.
+// The alpha channel is copied from the 16-bit source (scaled /257);
+// the tone mapper itself works on RGB only. (P2-B4: previously the
+// output alpha was forced opaque, so a transparent HDR pixel rendered
+// as a black block after the background blend.)
 static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp)
 {
 	size_t rgbSize = 0;
@@ -94,7 +96,10 @@ static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int
 			dst[0] = b;
 			dst[1] = g;
 			dst[2] = r;
-			dst[3] = 0xff;
+			// P2-B4: copy the source alpha (16-bit -> 8-bit, /257 maps
+			// 65535 -> 255 exactly), not opaque.
+			const uint16_t* px = p16 + ((size_t)y * width + x) * 4;
+			dst[3] = (uint8_t)(px[3] / 257);
 		}
 	}
 	delete[] rgb;

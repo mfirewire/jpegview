@@ -15,7 +15,10 @@
 // content-adaptive EETF), then tone-map each pixel. `stride` is the byte
 // stride of the 16-bit RGBA plane. Returns a new 8-bit BGRA buffer
 // (caller owns it), or NULL on allocation failure. The alpha channel is
-// ignored (the tone mapper works on RGB); the output alpha is opaque.
+// copied from the source (scaled by the native maxVal); the tone mapper
+// itself works on RGB only. (P2-B4: previously the output alpha was
+// forced opaque, so a transparent HDR pixel rendered as a black block
+// after the background blend.)
 static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int width, int height, int bpp, const HdrToneMap::Cicp& cicp)
 {
 	size_t rgbSize = 0;
@@ -57,6 +60,7 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 	}
 	for (int y = 0; y < height; y++)
 	{
+		const uint16_t* row = (const uint16_t*)(data + (size_t)y * stride);
 		for (int x = 0; x < width; x++)
 		{
 			const float* src = rgb + ((size_t)y * width + x) * 3;
@@ -67,7 +71,11 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 			dst[0] = b;
 			dst[1] = g;
 			dst[2] = r;
-			dst[3] = 0xff;
+			// P2-B4: copy the source alpha, scaled by the native
+			// maxVal (bpp 8..16, so (1<<bpp)-1 fits in uint32_t).
+			const uint16_t* px = row + x * 4;
+			const uint32_t maxValInt = (uint32_t)((1 << bpp) - 1);
+			dst[3] = (uint8_t)(((uint32_t)px[3] * 255 + maxValInt / 2) / maxValInt);
 		}
 	}
 	delete[] rgb;
@@ -272,9 +280,11 @@ static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
 		if (!TryParseGainMapXmp(handle, meta) && !TryParseGainMapXmp(auxHandle, meta))
 			return NULL;
 		// Base BGRA -> RGB temp buffer (drop alpha), then reconstruct
-		// linear HDR floats, tone-map to BGR, and repack to BGRA
-		// (alpha opaque). ConvertLinearImage outputs BGR; the HEIF
-		// path needs BGRA, so the repack is explicit.
+		// linear HDR floats and tone-map straight to BGRA with
+		// ConvertLinearImageToBgra, which copies the base alpha
+		// (interleaved: baseBgra+3, stride 4). P2-B4: the old repack
+		// forced alpha opaque, so a transparent gain-map pixel rendered
+		// as a black block after the background blend.
 		size_t rgbSize = 0, floatSize = 0, bgraSize = 0;
 		if (!IsImageBufferSizeOk((size_t)width * 3, (size_t)height, &rgbSize)
 			|| !IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &floatSize)
@@ -282,7 +292,6 @@ static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
 			return NULL;
 		std::vector<uint8_t> rgb(rgbSize);
 		std::vector<float> linear(floatSize / sizeof(float));
-		std::vector<uint8_t> bgr(rgbSize);
 		for (size_t i = 0; i < (size_t)width * height; i++) {
 			rgb[i * 3 + 0] = baseBgra[i * 4 + 2];
 			rgb[i * 3 + 1] = baseBgra[i * 4 + 1];
@@ -290,16 +299,12 @@ static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
 		}
 		if (!gainmap::ApplyGainMap(rgb.data(), width, height, gainGray.data(), gainW, gainH, meta, 1.0, linear.data()))
 			return NULL;
-		HdrToneMap::ConvertLinearImage(linear.data(), width, height, (size_t)width * 3, bgr.data(), (size_t)width * 3);
 		outBgra = new(std::nothrow) unsigned char[bgraSize];
 		if (outBgra == NULL)
 			return NULL;
-		for (size_t i = 0; i < (size_t)width * height; i++) {
-			outBgra[i * 4 + 0] = bgr[i * 3 + 0];
-			outBgra[i * 4 + 1] = bgr[i * 3 + 1];
-			outBgra[i * 4 + 2] = bgr[i * 3 + 2];
-			outBgra[i * 4 + 3] = 0xff;
-		}
+		// P2-B4: tone-map to BGRA in place, copying the base alpha.
+		HdrToneMap::ConvertLinearImageToBgra(linear.data(), width, height, (size_t)width * 3,
+			outBgra, (size_t)width * 4, baseBgra + 3, 4);
 		return outBgra;
 	} catch (...) {
 		delete[] outBgra;

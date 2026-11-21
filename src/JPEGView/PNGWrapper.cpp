@@ -140,9 +140,11 @@ bool PngReader::ReadFrameData()
 // content-adaptive EETF), then tone-map each pixel. The 16-bit values
 // are native-endian here because BeginReading called png_set_swap for
 // HDR, so they read directly as png_uint_16. The alpha channel is
-// ignored (the tone mapper works on RGB); the output alpha is opaque,
-// matching the SDR path, which fills alpha with 0xff via
-// png_set_add_alpha.
+// copied from the 16-bit source (scaled /257); the tone mapper itself
+// works on RGB only. (P2-B4: previously the output alpha was forced
+// opaque, so a transparent HDR pixel rendered as a black block after
+// the background blend. Unlike the SDR path, which fills alpha with
+// 0xff via png_set_add_alpha, HDR rows carry the file's real alpha.)
 bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 {
 	const unsigned int w = cache.width;
@@ -186,7 +188,13 @@ bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 			dst[0] = b;
 			dst[1] = g;
 			dst[2] = r;
-			dst[3] = 0xff;
+			// P2-B4: copy the source alpha (16-bit -> 8-bit, /257 maps
+			// 65535 -> 255 exactly), not opaque. Rows are BGRA with
+			// channels forced to 4 (png_set_add_alpha), so px[3] is
+			// always the file's alpha (0xffff filler when absent).
+			const png_uint_16* row = (const png_uint_16*)cache.rows_image[y];
+			const png_uint_16* px = row + x * 4;
+			dst[3] = (uint8_t)(px[3] / 257);
 		}
 	}
 	delete[] rgb;

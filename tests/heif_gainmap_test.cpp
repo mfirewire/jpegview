@@ -65,7 +65,8 @@ bool Near(double a, double b, double tol) {
 
 // Run the exact sequence TryApplyHeifGainMap runs, on synthetic buffers:
 // `baseBgra` is width*height*4 (B,G,R,A), `gainGray` is gainW*gainH.
-// Output is width*height*4 BGRA with alpha 0xff. Returns false when
+// Output is width*height*4 BGRA with the base alpha copied through
+// (P2-B4). Returns false when
 // ApplyGainMap refuses the input (mirrors the HEIF path's "keep the
 // base" outcome).
 bool RunHeifGainMapSequence(const uint8_t* baseBgra, int width, int height,
@@ -88,7 +89,8 @@ bool RunHeifGainMapSequence(const uint8_t* baseBgra, int width, int height,
         outBgra[i * 4 + 0] = bgr[i * 3 + 0];
         outBgra[i * 4 + 1] = bgr[i * 3 + 1];
         outBgra[i * 4 + 2] = bgr[i * 3 + 2];
-        outBgra[i * 4 + 3] = 0xff;
+        // P2-B4: copy the base alpha, not opaque.
+        outBgra[i * 4 + 3] = baseBgra[i * 4 + 3];
     }
     return true;
 }
@@ -122,6 +124,10 @@ void MakeBaseBgra(uint8_t* bgra) {
         bgra[i * 4 + 2] = kBaseRgb[i * 3 + 0];
         bgra[i * 4 + 3] = 0xff;
     }
+    // P3-A7: one non-opaque base pixel (index 5, alpha 128) so the
+    // P2-B4 alpha copy is pinned by the expected arrays below; with
+    // an all-opaque base the copy would be invisible to the tests.
+    bgra[5 * 4 + 3] = 128;
 }
 
 gainmap::Metadata MakeMeta() {
@@ -140,7 +146,7 @@ void TestUpsampledGainMap() {
     const uint8_t gain[2 * 2] = {0, 128, 192, 255};
     const uint8_t expected[4 * 4 * 4] = {
         32, 64, 128, 255,  52, 104, 208, 255,  102, 225, 19, 255,  255, 255, 255, 255,
-        0, 0, 0, 255,      34, 165, 85, 255,   211, 37, 255, 255,  111, 111, 111, 255,
+        0, 0, 0, 255,      34, 165, 85, 128,   211, 37, 255, 255,  111, 111, 111, 255,
         153, 78, 40, 255,  39, 27, 15, 255,    230, 230, 230, 255,  0, 169, 255, 255,
         162, 0, 255, 255,  85, 255, 85, 255,    134, 91, 48, 255,   176, 176, 176, 255,
     };
@@ -170,7 +176,7 @@ void TestSameSizeGainMap() {
     };
     const uint8_t expected[4 * 4 * 4] = {
         47, 90, 176, 255,   50, 100, 200, 255,  106, 233, 21, 255,  255, 255, 255, 255,
-        0, 0, 0, 255,       35, 169, 87, 255,   219, 39, 255, 255,  120, 120, 120, 255,
+        0, 0, 0, 255,       35, 169, 87, 128,   219, 39, 255, 255,  120, 120, 120, 255,
         176, 90, 47, 255,   45, 31, 18, 255,    245, 245, 245, 255,  0, 176, 255, 255,
         128, 0, 252, 255,   64, 252, 64, 255,   99, 66, 33, 255,    128, 128, 128, 255,
     };

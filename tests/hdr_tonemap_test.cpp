@@ -454,6 +454,19 @@ void TestConvertLinearImageToBgra() {
           out[5] >= 116 && out[5] <= 120 &&
           out[6] >= 116 && out[6] <= 120 && out[7] == 0xff,
           "ConvertLinearImageToBgra NULL alpha -> grey pixel alpha 0xff");
+    // P2-B4: interleaved alpha (the AVIF/HEIF gain-map repack): the
+    // alpha source is a BGRA buffer's own byte 3, stride 4 - the row
+    // stride is width * alphaStride, so each pixel reads its own
+    // alpha byte, not the next pixel's.
+    uint8_t bgraSrc[8] = { 0, 0, 0, 128, 0, 0, 0, 64 };
+    std::memset(out, 0xCD, sizeof(out));
+    ConvertLinearImageToBgra(img, 2, 1, 6, out, 8, bgraSrc + 3, 4);
+    Check(out[0] == 255 && out[1] == 255 && out[2] == 255 && out[3] == 128,
+          "ConvertLinearImageToBgra interleaved alpha -> white pixel alpha 128");
+    Check(out[4] >= 116 && out[4] <= 120 &&
+          out[5] >= 116 && out[5] <= 120 &&
+          out[6] >= 116 && out[6] <= 120 && out[7] == 64,
+          "ConvertLinearImageToBgra interleaved alpha -> grey pixel alpha 64");
     // P2-C5: a dst stride narrower than a BGRA row (width*4) is rejected.
     uint8_t outB[8];
     std::memset(outB, 0xCD, sizeof(outB));
