@@ -305,6 +305,11 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		} else {
 			nLayerSize = ReadUIntFromFile(hFile);
 		}
+		// P2-D3: the layer-section length comes from the file; a value
+		// larger than the file itself can only be corrupt, and the seeks
+		// below take it as a LONG (truncating a 64-bit PSB value, e.g.
+		// 0x100000002 seeks to 2). Reject here instead of seeking.
+		ThrowIf(nLayerSize > nFileSize);
 		unsigned char nLayerSizeBytes = 4 * nVersion;
 		// The layer count lives inside the section, after its length
 		// field, so it only exists when the section is long enough to
