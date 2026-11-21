@@ -497,6 +497,80 @@ void TestFixtureAlpha() {
     }
 }
 
+// P3-D3: wrapper-order simulation test (NOT a wrapper test: the
+// wrapper is MFC-coupled and cannot compile in this harness, and
+// the header disclaimer above stands). It simulates the PSDWrapper
+// HDR order - DecodeImageData -> ConvertLinearImageToBgra - and
+// asserts the final BGRA bytes, including a half-transparent
+// pixel. The output is pre-filled with a sentinel so a byte the
+// variant fails to write (H-01/N-3) fails the test instead of
+// passing silently.
+void TestWrapperOrderSimulation() {
+    const uint8_t kAlphaRamp[10] = { 255, 191, 128, 64, 0,
+                                     255, 191, 128, 64, 0 };
+    // 4-channel: 16-bit RGBA fixture, planar alpha (stride 1).
+    {
+        PsdFile psd;
+        Check(LoadPsd("tests/samples/psd_hdr_16bit_rgba_raw.psd", &psd),
+              "simulation: parse 16-bit RGBA fixture");
+        std::vector<float> linear(5 * 2 * 3);
+        uint8_t alpha[5 * 2] = { 0 };
+        bool ok = PsdHdr::DecodeImageData(psd.imageData.data(), psd.imageData.size(),
+                                           psd.width, psd.height, psd.channels,
+                                           psd.colorMode, psd.bitDepth,
+                                           psd.compression, psd.version,
+                                           linear.data(), alpha, 5, NULL);
+        Check(ok, "simulation: decode 16-bit RGBA fixture with alpha");
+        uint8_t bgra[5 * 2 * 4];
+        std::memset(bgra, 0xCD, sizeof(bgra));
+        HdrToneMap::ConvertLinearImageToBgra(linear.data(), 5, 2, 15,
+                                             bgra, 20, alpha, 1);
+        bool match = true;
+        for (int i = 0; i < 10; i++) {
+            for (int c = 0; c < 3; c++) {
+                int diff = (int)bgra[(size_t)i * 4 + c] - (int)kExpected16Rgb[(size_t)i * 3 + c];
+                if (diff < -2 || diff > 2) match = false;
+            }
+            if (bgra[(size_t)i * 4 + 3] != kAlphaRamp[i]) match = false;
+        }
+        Check(match, "simulation: RGBA fixture -> BGRA (BGR +/-2, alpha ramp exact)");
+        // Half-transparent pixel (index 2, alpha 128): pin its
+        // BGRA explicitly, not just through the loop above.
+        Check(bgra[2 * 4 + 3] == 128 &&
+              std::abs((int)bgra[2 * 4 + 0] - (int)kExpected16Rgb[2 * 3 + 0]) <= 2 &&
+              std::abs((int)bgra[2 * 4 + 1] - (int)kExpected16Rgb[2 * 3 + 1]) <= 2 &&
+              std::abs((int)bgra[2 * 4 + 2] - (int)kExpected16Rgb[2 * 3 + 2]) <= 2,
+              "simulation: half-transparent pixel -> BGRA with alpha 128");
+    }
+    // 3-channel: 16-bit RGB fixture, NULL alpha -> every alpha byte
+    // is 0xff (opaque), the wrapper stores it as 4-channel BGRA.
+    {
+        PsdFile psd;
+        Check(LoadPsd("tests/samples/psd_hdr_16bit_rgb_raw.psd", &psd),
+              "simulation: parse 16-bit RGB fixture");
+        std::vector<float> linear(5 * 2 * 3);
+        bool ok = PsdHdr::DecodeImageData(psd.imageData.data(), psd.imageData.size(),
+                                           psd.width, psd.height, psd.channels,
+                                           psd.colorMode, psd.bitDepth,
+                                           psd.compression, psd.version,
+                                           linear.data(), NULL, 0, NULL);
+        Check(ok, "simulation: decode 16-bit RGB fixture");
+        uint8_t bgra[5 * 2 * 4];
+        std::memset(bgra, 0xCD, sizeof(bgra));
+        HdrToneMap::ConvertLinearImageToBgra(linear.data(), 5, 2, 15,
+                                             bgra, 20, NULL, 0);
+        bool match = true;
+        for (int i = 0; i < 10; i++) {
+            for (int c = 0; c < 3; c++) {
+                int diff = (int)bgra[(size_t)i * 4 + c] - (int)kExpected16Rgb[(size_t)i * 3 + c];
+                if (diff < -2 || diff > 2) match = false;
+            }
+            if (bgra[(size_t)i * 4 + 3] != 0xff) match = false;
+        }
+        Check(match, "simulation: RGB fixture, NULL alpha -> BGRA with alpha 0xff");
+    }
+}
+
 // The decoded linear floats themselves (not just the tone-mapped
 // bytes): 32-bit samples must come back bit-exact as float32, 16-bit
 // samples within 1e-4 of the intended linear level.
@@ -1309,6 +1383,7 @@ int main() {
     TestRejections();
     TestFixtures();
     TestFixtureAlpha();
+    TestWrapperOrderSimulation();
     TestLinearValues();
     TestRollOff();
     TestPsdIccBuildColorSpace();
