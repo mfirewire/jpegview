@@ -153,8 +153,11 @@ bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 	if (!IsImageBufferSizeOk((size_t)w * 3 * sizeof(float), (size_t)h, &rgbSize))
 		return false;
 	float* rgb = new(std::nothrow) float[(size_t)w * h * 3];
-	if (rgb == NULL)
+	if (rgb == NULL) {
+		// P3-B1: a true allocation failure (not the size-cap path above).
+		hdrOutOfMemory = true;
 		return false;
+	}
 	// Pass 1: 16-bit BGRA rows -> float RGB (0..1). The rows are in BGRA
 	// order (png_set_bgr), so B is first, R third, A last.
 	for (unsigned int y = 0; y < h; y++)
@@ -305,6 +308,8 @@ void* PngReader::ReadOneLogicalFrame(void** exif_chunk, png_uint_32* exif_size)
 
 bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, bool& isSizeLimitExceeded)
 {
+	// P3-B1: a fresh decode attempt starts with the HDR OOM flag cleared.
+	hdrOutOfMemory = false;
 	unsigned int    width, height, channels, rowbytes, j;
 	size_t          size;
 	png_bytepp      rows_image;
@@ -596,6 +601,15 @@ void* PngReader::ReadImage(int& width,
 	unsigned int exif_size = 0;
 	void* pixels = ReadOneLogicalFrame(&exif, &exif_size);
 	if (pixels == NULL) {
+		// P3-B1: the HDR tone-map step reports a true allocation failure
+		// through the sticky member flag (it returns false for the size
+		// cap too, which must stay a plain failure). Read it before
+		// DeleteCache() below; the flag itself would survive it, but the
+		// verdict must be set on this return path. The seek loop above
+		// cannot hit this: HDR PNGs are non-animated by construction
+		// (cache.hdr requires !bHasAcTL), so it runs zero times here.
+		if (hdrOutOfMemory)
+			outOfMemory = true;
 		// P1-22: ReadFrameData() longjmp'd and DeleteCacheInternal(false)
 		// already destroyed info_ptr, so `exif` (owned by info_ptr) dangles.
 		// The copy below must not read it. The remaining frame-index

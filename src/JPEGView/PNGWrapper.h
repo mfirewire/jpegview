@@ -93,6 +93,14 @@ private:
 
 	png_cache cache = {};
 
+	// P3-B1: sticky out-of-memory flag for the HDR path. ConvertHdrRowsToPixels
+	// returns false for BOTH the size cap and a true allocation failure, and
+	// a cache-resident flag would be zeroed by DeleteCacheInternal's
+	// `cache = { 0 }` before ReadImage could read it, so the flag lives here,
+	// outside the cache. Cleared at BeginReading entry; set only on a true
+	// allocation failure (new returns NULL), never on the size-cap path.
+	bool hdrOutOfMemory = false;
+
 	bool BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, bool& isSizeLimitExceeded);
 	// HDR (Option A): convert the 16-bit BGRA rows in cache.rows_image to
 	// 8-bit BGRA in `pixels` via the HdrToneMap helper. Only called when

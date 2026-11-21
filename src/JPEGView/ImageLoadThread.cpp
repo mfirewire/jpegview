@@ -1456,7 +1456,8 @@ void CImageLoadThread::ProcessReadPNGRequest(CRequest* request) {
 				DeleteCachedPngDecoder();
 				
 				// R-04/P2-5: libpng already proved the file exceeds the pixel cap; GDI+ would reject it the same way after decoding the whole bitmap, so skip the fallback and keep the verdict.
-				if (!request->SizeLimitExceeded) {
+				// P3-B1: likewise, a genuine out-of-memory from the libpng read must not fall through to GDI+: GDI+ would succeed on the PQ file (a dark image) and reset OutOfMemory to false, losing the verdict and the free-and-retry path. The JPEG handler already skips its GDI+ fallback on out-of-memory the same way.
+				if (!request->SizeLimitExceeded && !request->OutOfMemory) {
 					// E8: the stream needs a moveable global, so the GDI+
 					// fallback works on a temporary copy of the reuse buffer,
 					// freed below after the stream is released and the bitmap
