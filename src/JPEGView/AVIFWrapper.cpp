@@ -490,7 +490,15 @@ void* AvifReader::ReadImage(int& width,
 		// or anything fails; the SDR base is kept unchanged then.
 		// It runs after the ICC transform (the base it reconstructs
 		// from is sRGB, like the HEIF path).
-		unsigned char* gainMapped = TryApplyAvifGainMap(cache.decoder->image, cache.rgb.pixels, width, height);
+		// P2-A1: gain-map work allocates (gainGray.assign, three
+		// vectors, ApplyGainMap's upsampled resize). A bad_alloc here
+		// must not fail the whole load -- fall back to SDR.
+		unsigned char* gainMapped = NULL;
+		try {
+			gainMapped = TryApplyAvifGainMap(cache.decoder->image, cache.rgb.pixels, width, height);
+		} catch (...) {
+			// Keep the SDR base image; the gain map is optional.
+		}
 		if (gainMapped != NULL) {
 			delete[] cache.rgb.pixels;
 			cache.rgb.pixels = gainMapped;

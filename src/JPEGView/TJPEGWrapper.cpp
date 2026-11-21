@@ -241,8 +241,16 @@ void * TurboJpeg::ReadImage(int &width,
 	// failure the SDR base is returned unchanged. CMYK/YCCK
 	// (4-channel) images never take this path.
 	if (pPixelData != NULL && !bCMYK) {
-		unsigned char* pGainMapped = TryApplyUltraHdrGainMap(
-			(const unsigned char*)buffer, sizebytes, pPixelData, width, height);
+		// P2-A1: gain-map work allocates (ApplyGainMap resizes the
+		// upsampled gain map; the XMP string is copied). A bad_alloc
+		// here must not fail the whole load -- fall back to SDR.
+		unsigned char* pGainMapped = NULL;
+		try {
+			pGainMapped = TryApplyUltraHdrGainMap(
+				(const unsigned char*)buffer, sizebytes, pPixelData, width, height);
+		} catch (...) {
+			// Keep the SDR base image; the gain map is optional.
+		}
 		if (pGainMapped != NULL) {
 			pPixelData = pGainMapped;
 		}
