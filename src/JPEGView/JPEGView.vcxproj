@@ -356,6 +356,9 @@
     <ClCompile Include="PsdIcc.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="SaveIccFilter.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="PBMWrapper.cpp" />
     <ClCompile Include="PAMWrapper.cpp" />
     <ClCompile Include="JP2Wrapper.cpp" />
@@ -476,6 +479,7 @@
     <ClInclude Include="HdrToneMap.h" />
     <ClInclude Include="PsdHdr.h" />
     <ClInclude Include="PsdIcc.h" />
+    <ClInclude Include="SaveIccFilter.h" />
     <ClInclude Include="FindCicpChunk.h" />
     <ClInclude Include="PBMWrapper.h" />
     <ClInclude Include="PAMWrapper.h" />
