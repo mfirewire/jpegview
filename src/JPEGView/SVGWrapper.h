@@ -3,7 +3,7 @@
 class SVGReader
 {
 public:
-	// Renders an SVG file (.svg) from memory using ThorVG 1.1.3
+	// Renders an SVG file (.svg) from memory using ThorVG 1.1.4
 	// (libthorvg-1.dll, delay-loaded: no cost when SVG is never opened).
 	// Returns 3-byte BGR pixels padded to a 4-byte boundary, like QOIWrapper,
 	// or NULL on failure. The intrinsic size is parsed from the <svg> tag

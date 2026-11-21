@@ -1,6 +1,6 @@
 ; libthorvg-1.dll export definition for MSVC LIB.EXE (R-06 option a)
-; Generated 2026-11-06 from the vendored ThorVG 1.1.3 DLL export table
-; (objdump -p bin64/libthorvg-1.dll): 410 exports, 191 tvg_*;
+; Generated 2026-11-21 from the vendored ThorVG 1.1.4 DLL export table
+; (objdump -p bin64/libthorvg-1.dll): 414 exports, 193 tvg_*;
 ; DLL: src/JPEGView/libthorvg/bin64/libthorvg-1.dll
 ; Use: lib /def:JPEGView-thorvg-x64.def /out:libthorvg-1.lib /machine:x64
 LIBRARY libthorvg-1.dll
@@ -119,11 +119,12 @@ EXPORTS
   _ZN3tvg7Picture4loadEPKc
   _ZN3tvg7Picture4loadEPKcjS2_S2_b
   _ZN3tvg7Picture4loadEPKjjjNS_10ColorSpaceEb
+  _ZN3tvg7Picture4loadEPKjjjjNS_10ColorSpaceEb
   _ZN3tvg7Picture4sizeEff
   _ZN3tvg7Picture5paintEj
   _ZN3tvg7Picture6filterENS_12FilterMethodE
   _ZN3tvg7Picture6originEff
-  _ZN3tvg7Picture8resolverESt8functionIFbPNS_5PaintEPKcPvEES6_
+  _ZN3tvg7Picture8resolverESt8functionIFbPNS_5PaintEPKcPvEES6_b
   _ZN3tvg7PictureC1Ev
   _ZN3tvg7PictureC2Ev
   _ZN3tvg8Accessor2idEPKc
@@ -175,6 +176,7 @@ EXPORTS
   _ZNK3tvg4Fill9transformEv
   _ZNK3tvg4Text4textEv
   _ZNK3tvg4Text4typeEv
+  _ZNK3tvg4Text6lengthEv
   _ZNK3tvg4Text7metricsEPKcRNS_12GlyphMetricsEPS2_
   _ZNK3tvg4Text7metricsERNS_11TextMetricsE
   _ZNK3tvg5Paint4clipEv
@@ -321,6 +323,7 @@ EXPORTS
   tvg_picture_get_size
   tvg_picture_load
   tvg_picture_load_data
+  tvg_picture_load_pixels
   tvg_picture_load_raw
   tvg_picture_new
   tvg_picture_set_accessible
@@ -383,6 +386,7 @@ EXPORTS
   tvg_swcanvas_set_target
   tvg_text_align
   tvg_text_get_glyph_metrics
+  tvg_text_get_length
   tvg_text_get_text
   tvg_text_get_text_metrics
   tvg_text_layout

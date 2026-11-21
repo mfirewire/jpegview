@@ -57,13 +57,13 @@ runs:
         Write-Output "regen-thorvg-lib: regenerated $outLib ($($libFile.Length) bytes)"
         # Sanity check, warning-only (the link step is the real gate, and
         # dumpbin's listing format must not spuriously fail the build):
-        # the .def lists 410 exports, 191 of them tvg_* C API symbols.
+        # the .def lists 414 exports, 193 of them tvg_* C API symbols.
         $dumpbin = Join-Path (Split-Path $libExe -Parent) "dumpbin.exe"
         $exports = & $dumpbin /exports $outLib
         if ($LASTEXITCODE -ne 0) { throw "regen-thorvg-lib: dumpbin /exports failed on $outLib (exit $LASTEXITCODE)" }
         $tvgCount = @($exports | Select-String -Pattern "tvg_" -SimpleMatch).Count
-        Write-Output "regen-thorvg-lib: dumpbin /exports lists $tvgCount tvg_* symbols (expect 191)"
-        if ($tvgCount -ne 191) { Write-Output "::warning::regen-thorvg-lib: tvg_* count $tvgCount != 191 - .def/DLL drift? Investigate before trusting this .lib; the link step below is the deciding check." }
+        Write-Output "regen-thorvg-lib: dumpbin /exports lists $tvgCount tvg_* symbols (expect 193)"
+        if ($tvgCount -ne 193) { Write-Output "::warning::regen-thorvg-lib: tvg_* count $tvgCount != 193 - .def/DLL drift? Investigate before trusting this .lib; the link step below is the deciding check." }
 
     - name: Upload regenerated Win32 ThorVG import library
       if: ${{ inputs.platform-arch == 'Win32' }}

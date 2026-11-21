@@ -1,15 +1,15 @@
-ThorVG 1.1.3 — vendored for JPEGView SVG support (Format C-3)
+ThorVG 1.1.4 — vendored for JPEGView SVG support (Format C-3)
 ================================================================
 
 WHAT IS HERE
   include/thorvg.h, include/thorvg_capi.h
-      Headers from the official 1.1.3 release tarball
-      (thorvg-1.1.3.tar.xz, sha256
-       ef97785ed6d0f25ab84d6b4a0eed4325c68c4d80b1c2a61ea0b4029192fea746).
+      Headers from the official 1.1.4 release tarball
+      (thorvg-1.1.4.tar.xz, sha256
+       b448d88a005173e56d668d7baa08925b65569589226f73f2146775b0f796ce6c).
       Only the C API (thorvg_capi.h) is used by SVGWrapper.cpp; see its
       header comment for why the C++ API is not used.
-  bin/libthorvg-1.dll        Win32 (x86) build, 1,118,948 bytes
-  bin64/libthorvg-1.dll      x64 build, 1,116,757 bytes
+  bin/libthorvg-1.dll        Win32 (x86) build, 1,119,611 bytes
+  bin64/libthorvg-1.dll      x64 build, 1,117,081 bytes
   lib/libthorvg-1.lib        Win32 import library (LIB.EXE-regenerated, see below)
   lib64/libthorvg-1.lib      x64 import library (LIB.EXE-regenerated, see below)
 
@@ -21,9 +21,9 @@ WHY THE DLL IS NAMED libthorvg-1.dll
 
 HOW THE DLLS WERE BUILT (reproducible)
   ThorVG is meson-only; there is no prebuilt MSVC DLL. The vendored DLLs
-  were cross-compiled on Linux (2026-11-06) with MinGW-w64 GCC 13
-  (x86_64-w64-mingw32 / i686-w64-mingw32), meson 1.12.1, ninja 1.13.2:
-    meson setup build-tvg-<arch> thorvg-1.1.3 \
+  were cross-compiled on Linux (2026-11-21) with MinGW-w64 GCC 13.2.0
+  (x86_64-w64-mingw32 / i686-w64-mingw32), meson 1.3.2, ninja 1.11.1:
+    meson setup build-tvg-<arch> thorvg-1.1.4 \
       --cross-file cross-<arch>.txt --buildtype=release \
       --default-library=shared \
       -Dloaders=svg,ttf -Dbindings=capi -Dengines=cpu \
@@ -42,11 +42,11 @@ HOW THE DLLS WERE BUILT (reproducible)
     libstdc++-6.dll (x86), which would have to be shipped alongside.
     With them the DLL imports only KERNEL32.dll and msvcrt.dll, both
     present on every Windows system. Verified by PE inspection of both
-    DLLs: machine 0x8664 (x64) / 0x014c (x86), 410 exports, 191 tvg_*
+    DLLs: machine 0x8664 (x64) / 0x014c (x86), 414 exports, 193 tvg_*
     exports, all 14 C API functions used by SVGWrapper.cpp present.
   - The import libraries were regenerated from the DLL exports with
     MSVC LIB.EXE (CI, 2026-11-07; .def files checked in alongside as
-    JPEGView-thorvg-x86.def / JPEGView-thorvg-x64.def, 410 exports each,
+    JPEGView-thorvg-x86.def / JPEGView-thorvg-x64.def, 414 exports each,
     "LIBRARY libthorvg-1.dll"):
       lib /def:JPEGView-thorvg-x86.def /out:lib\libthorvg-1.lib /machine:x86
       lib /def:JPEGView-thorvg-x64.def /out:lib64\libthorvg-1.lib /machine:x64
@@ -59,10 +59,25 @@ HOW THE DLLS WERE BUILT (reproducible)
     (.github/actions/verify-safeseh).
 
 SHA256 (as vendored)
-  bin64/libthorvg-1.dll  f28dc3c1bc8dedbeff0079a6fe6e855616b35278bd4875a4210452289e486386
-  bin/libthorvg-1.dll    7392171a7b0b555e1b7a2f6b886717fae7ad1d44fcc67b8f38485db04f3ec00e
+  bin64/libthorvg-1.dll  68c57c4bfe63726a9d9331a80bbb04f4184bb22d235a19a7da943f00bfaf3aed
+  bin/libthorvg-1.dll    5b560e178377145fa8ee4be4752d12a648124dd71e68525cf51c61ef29c929fa
   lib64/libthorvg-1.lib  6a09db13ed240535fcecdb95395d6960bed0c71d1eafd4c35525dc3cb94e2927
   lib/libthorvg-1.lib    0769e14b1b94d1f52286abe2f5c9f7b8cefaf4934ac006c98b250f19db1c5f60
+  NOTE: the .lib hashes above are still the 1.1.3-era LIB.EXE-generated
+  files; CI regenerates the .lib from the new .def before every msbuild,
+  and the refreshed .lib files are committed back from the CI artifact
+  (R-06 step-2 pattern) after this upgrade lands.
+
+1.1.4 API NOTE — tvg_picture_set_asset_resolver() gains a "bool fallback"
+parameter. SVGWrapper.cpp does NOT call it, so no call-site change was
+needed. For any future caller: pass fallback=false to keep the 1.1.3
+behaviour (callback invoked first; internal resolution only if the
+callback returns false). The new C++ default (fallback=true) runs
+internal resolution first and only calls the callback on failure —
+that is a behaviour change, not a preservation (1.1.4 release notes:
+"Pass false to keep callback-first behavior"). 1.1.4 also adds
+tvg_picture_load_pixels() and tvg_text_get_length(); neither is used
+by JPEGView.
 
 DELAY-LOAD
   libthorvg-1.dll is delay-loaded (vcxproj DelayLoadDLLs): opening JPEGView
