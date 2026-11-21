@@ -259,11 +259,14 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
     size_t rowBytes = 0;
     size_t planeBytes = 0;
     size_t totalBytes = 0;
-    size_t pixelCount = 0;
+    // P3-D2: no separate pixelCount overflow check: rowBytes is
+    // width * sampleBytes (>= width, sampleBytes is 2 or 4), so the
+    // totalBytes chain above already overflows first if width*height
+    // would. (consumed, the other dead value in this file, stays: it
+    // is the dummy sink UnpackBitsRow unconditionally writes to.)
     if (!CheckedMul((size_t)width, sampleBytes, &rowBytes) ||
         !CheckedMul(rowBytes, (size_t)height, &planeBytes) ||
-        !CheckedMul(planeBytes, (size_t)channels, &totalBytes) ||
-        !CheckedMul((size_t)width, (size_t)height, &pixelCount)) {
+        !CheckedMul(planeBytes, (size_t)channels, &totalBytes)) {
         return false;
     }
 
