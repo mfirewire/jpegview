@@ -1252,47 +1252,44 @@ void TestZipPredictionInPlace() {
           "zippred16 G2 accumulation after wrap");
     Check(out16[2] == 0.0f && out16[5] == 0.0f && out16[8] == 0.0f,
           "zippred16 B row stays zero");
-    // 32-bit, 2x1 RGB, ZIP-with-prediction. Deltas are float bit
-    // patterns, added as uint32 (wraparound mod 2^32):
-    //   R deltas {bits(1.0f), bits(2.0f)} -> {1.0f, +Inf -> 1e6}
-    //   G deltas {bits(1.0f), bits(1.0f)} -> {1.0f, bits 0x7F000000}
-    //   B deltas {bits(2^23), bits(2^23)} -> {8388608.0f, 0.0f}
-    //     (wraparound: 0x4B000000 + 0x4B000000 = 0x96000000, a
-    //     negative float, sanitized to 0; without the reversal the
-    //     second sample would stay 8388608.0f)
-    const uint32_t deltas32[6] = { 0x3F800000u, 0x40000000u,
-                                   0x3F800000u, 0x3F800000u,
-                                   0x4B000000u, 0x4B000000u };
-    uint8_t plain32[24];
-    for (int i = 0; i < 6; i++) {
-        plain32[(size_t)i * 4 + 0] = (uint8_t)(deltas32[i] >> 24);
-        plain32[(size_t)i * 4 + 1] = (uint8_t)((deltas32[i] >> 16) & 0xFF);
-        plain32[(size_t)i * 4 + 2] = (uint8_t)((deltas32[i] >> 8) & 0xFF);
-        plain32[(size_t)i * 4 + 3] = (uint8_t)(deltas32[i] & 0xFF);
-    }
+    // 32-bit, 3x1 RGB, ZIP-with-prediction. Stored bytes are the
+    // BYTE-PLANE deltas (F1): each row's 4-byte samples are
+    // deinterleaved (all byte 0s, then byte 1s, byte 2s, byte 3s) and
+    // delta-encoded as bytes with one accumulator across the whole
+    // row. The stored bytes below were verified against psd-tools'
+    // encode_prediction (same bytes for the same row values).
+    //   R [1.0, 2.0, 0.5]   stored 3F 01 FF 41 80 00 00 00 00 00 00 00
+    //   G [1.0, 1.0, 1.0]   stored 3F 00 00 41 00 00 80 00 00 00 00 00
+    //   B [0.5, 0.25, +Inf] stored 3F FF 41 81 80 00 80 00 00 00 00 00
+    //     (B exercises byte wraparound: 0x3E + 0xC2, 0x7F + 0x81,
+    //     0x80 + 0x80; +Inf is sanitized to 1e6 by SampleToLinear32.)
+    // Note: 32-bit reversal uses one reused scratch row, not the
+    // in-place reversal the 16-bit path uses (see PsdHdr.cpp).
+    const uint8_t plain32[36] = {
+        0x3F, 0x01, 0xFF, 0x41, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x3F, 0x00, 0x00, 0x41, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x3F, 0xFF, 0x41, 0x81, 0x80, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00
+    };
     uLongf bound32 = compressBound(sizeof(plain32));
     std::vector<uint8_t> comp32((size_t)bound32);
     Check(compress(comp32.data(), &bound32, plain32, sizeof(plain32)) == Z_OK,
           "zippred32 fixture compresses");
     comp32.resize((size_t)bound32);
-    float out32[6] = { 0.0f };
-    Check(DecodeImageData(comp32.data(), comp32.size(), 2, 1, 3,
+    float out32[9] = { 0.0f };
+    Check(DecodeImageData(comp32.data(), comp32.size(), 3, 1, 3,
                           kColorModeRgb, 32, kCompressionZipPrediction, 1,
                           out32, NULL, 0, NULL),
-          "zippred32 2x1 decodes");
-    Check(out32[0] == 1.0f, "zippred32 R0 first sample as-is (1.0f)");
-    Check(Near((double)out32[3], 1.0e6, 1.0),
-          "zippred32 R1 accumulates to +Inf, clamped to 1e6");
-    Check(out32[1] == 1.0f, "zippred32 G0 first sample as-is (1.0f)");
-    {
-        uint32_t bits = 0;
-        std::memcpy(&bits, &out32[4], sizeof(bits));
-        Check(bits == 0x7F000000u,
-              "zippred32 G1 bit-pattern sum 0x3F800000+0x3F800000");
-    }
-    Check(out32[2] == 8388608.0f, "zippred32 B0 first sample as-is");
-    Check(out32[5] == 0.0f,
-          "zippred32 B1 wraparound to negative float, sanitized to 0");
+          "zippred32 3x1 decodes");
+    // out is interleaved RGB, row-major: pixel x at out[x*3 + c].
+    Check(out32[0] == 1.0f, "zippred32 R0 (1.0f)");
+    Check(out32[3] == 2.0f, "zippred32 R1 (2.0f)");
+    Check(out32[6] == 0.5f, "zippred32 R2 (0.5f)");
+    Check(out32[1] == 1.0f && out32[4] == 1.0f && out32[7] == 1.0f,
+          "zippred32 G row stays 1.0f");
+    Check(out32[2] == 0.5f, "zippred32 B0 (0.5f)");
+    Check(out32[5] == 0.25f, "zippred32 B1 (0.25f, byte wraparound)");
+    Check(Near((double)out32[8], 1.0e6, 1.0),
+          "zippred32 B2 +Inf sanitized to 1e6");
 }
 
 

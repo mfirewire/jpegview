@@ -61,13 +61,19 @@ compression field, then planar channel data (R, G, B [, A] or grey;
 for RLE the byte-count table precedes the PackBits data, 2 bytes per
 row per channel for PSD v1, 4 bytes for PSB v2, big-endian).
 
-ZIP with prediction (3): each row's samples are stored as horizontal
-deltas — each sample minus the previous sample in the same row, same
-channel, in the sample's native width (uint16 / uint32 bit pattern,
-wraparound); the first sample of a row is stored as-is (delta from
-zero). This is the Adobe spec's prediction, cross-checked against the
-oov/psd decoder (decodeDelta accumulates uint16/uint32 differences
-row-by-row, accumulator reset per row).
+ZIP with prediction (3): 16-bit rows store per-sample uint16 deltas
+(each sample minus the previous sample in the same row, same channel,
+wraparound; first sample as-is, accumulator reset per row). 32-bit
+rows store BYTE PLANES: each row's 4-byte samples are deinterleaved
+(all byte 0s, then byte 1s, byte 2s, byte 3s) and delta-encoded as
+bytes with one accumulator across the whole 4*width-byte row. The
+byte-plane scheme is psd-tools' decode_prediction, OpenImageIO, and
+the PhotoshopAPI docs (all three agree). The Adobe spec lists
+compression value 3 ("ZIP with prediction") but defines no prediction
+algorithm, so it cannot corroborate either scheme — an earlier version
+of this script (and the decoder) wrongly used uint32 cumsum on
+interleaved float bit patterns (F1); the 32-bit fixture and the
+decoder were both fixed to the byte-plane scheme.
 
 This script also prints the expected 8-bit BGR output of every file
 after PsdHdr decode + HdrToneMap::ConvertLinearImage, computed by the
@@ -87,9 +93,11 @@ UnidentifiedImageError before any pixel is read — that is a Pillow
 limitation, not a defect in these files (the 8-bit
 cmyk_chart_6x1.psd opens fine in the same Pillow). The C++ unit test
 tests/psd_hdr_test.cpp is therefore the real check for these files.
-The ZIP-prediction direction (per-row delta, accumulator reset per
-row) is corroborated outside this repo by the Adobe spec text and the
-oov/psd decoder's decodeDelta, not only by the generator.
+The ZIP-prediction direction is corroborated outside this repo by
+psd-tools' decode_prediction/encode_prediction (cross-checked on real
+bytes), OpenImageIO, and the PhotoshopAPI docs — not only by the
+generator. The 16-bit direction (per-row uint16 delta) also agrees
+with oov/psd's decodeDelta.
 
 Requirements to regenerate: python3, Pillow (for the sanity check
 only). The checked-in samples are the deliverable; this script is
@@ -250,16 +258,13 @@ def packbits_encode(row_bytes):
         out.extend(row_bytes[start:i])
     return bytes(out)
 
-def delta_encode_row(samples, bit_depth):
-    """Horizontal delta per row, native width, wraparound."""
+def delta_encode_row(samples):
+    """Horizontal uint16 delta per row (16-bit ZIP prediction only),
+    wraparound. 32-bit uses byte planes instead (see encode_image_data)."""
     out = []
     prev = 0
     for s in samples:
-        if bit_depth == 16:
-            d = (s - prev) & 0xFFFF
-        else:
-            d = (s - prev) & 0xFFFFFFFF
-        out.append(d)
+        out.append((s - prev) & 0xFFFF)
         prev = s
     return out
 
@@ -297,20 +302,27 @@ def encode_image_data(planes, channels, bit_depth, compression, version):
         return bytes(table) + bytes(data)
     if compression in (2, 3):
         if compression == 3:
-            # Delta-encode each row in the sample's native width, then
-            # pack the deltas as big-endian samples.
+            # Delta-encode each row. 16-bit: per-sample uint16 deltas,
+            # packed as big-endian samples. 32-bit: BYTE PLANES — the
+            # row's 4-byte samples are deinterleaved (all byte 0s, then
+            # byte 1s, byte 2s, byte 3s) and delta-encoded as bytes with
+            # one accumulator across the whole row (F1).
             buf = bytearray()
             for ch in range(channels):
                 for y in range(height):
-                    samples = [struct.unpack(">H", raw_rows[ch][y][i:i+2])[0]
-                               if bit_depth == 16 else
-                               struct.unpack(">I", raw_rows[ch][y][i:i+4])[0]
-                               for i in range(0, len(raw_rows[ch][y]),
-                                              2 if bit_depth == 16 else 4)]
-                    deltas = delta_encode_row(samples, bit_depth)
-                    for d in deltas:
-                        buf += struct.pack(">H", d) if bit_depth == 16 \
-                            else struct.pack(">I", d)
+                    if bit_depth == 32:
+                        row_bytes = raw_rows[ch][y]
+                        planes = b"".join(row_bytes[b::4] for b in range(4))
+                        prev = 0
+                        for byte in planes:
+                            buf.append((byte - prev) & 0xFF)
+                            prev = byte
+                    else:
+                        samples = [struct.unpack(">H", raw_rows[ch][y][i:i+2])[0]
+                                   for i in range(0, len(raw_rows[ch][y]), 2)]
+                        deltas = delta_encode_row(samples)
+                        for d in deltas:
+                            buf += struct.pack(">H", d)
             return zlib.compress(bytes(buf), 9)
         return zlib.compress(b"".join(b"".join(rows) for rows in raw_rows), 9)
     raise ValueError("bad compression %d" % compression)

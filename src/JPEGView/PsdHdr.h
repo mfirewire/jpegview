@@ -44,14 +44,19 @@
 //     (9) 16/32-bit are rejected here; the wrapper keeps rejecting
 //     those as today. Bitmap (0), Indexed (2), Multichannel (7) and
 //     Duotone (8) are rejected too.
-//   * ZIP with prediction (3): each row's samples are stored as
-//     horizontal deltas — each sample minus the previous sample in the
-//     same row, same channel, in the sample's native width (uint16 /
-//     uint32 bit pattern, wraparound arithmetic); the first sample of
-//     a row is stored as-is (delta from zero). Verified against the
-//     Adobe spec ("ZIP with prediction") and the oov/psd decoder,
-//     whose decodeDelta accumulates uint16/uint32 differences
-//     row-by-row with the accumulator reset to zero per row.
+//   * ZIP with prediction (3): 16-bit rows store per-sample uint16
+//     deltas (each sample minus the previous sample in the same row,
+//     same channel, wraparound; first sample as-is, accumulator reset
+//     per row). 32-bit rows store BYTE PLANES: each row's 4-byte samples
+//     are deinterleaved (all byte 0s, then byte 1s, byte 2s, byte 3s) and
+//     delta-encoded as bytes with one accumulator running across the
+//     whole 4*width-byte row. The byte-plane scheme is psd-tools'
+//     decode_prediction, OpenImageIO, and the PhotoshopAPI docs (all
+//     three agree); the Adobe spec lists compression value 3 ("ZIP with
+//     prediction") but defines no prediction algorithm, so it cannot
+//     corroborate either scheme. (F1: an earlier version did uint32
+//     cumsum on interleaved float bit patterns — a different, mutually
+//     unreadable scheme.)
 //   * RLE (1) is PackBits at the BYTE level, per row per channel,
 //     exactly as the 8-bit wrapper does: a row holds width *
 //     sampleBytes bytes, and a run must not cross a row boundary

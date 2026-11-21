@@ -54,17 +54,12 @@ uint32_t ReadBe32(const uint8_t* p) {
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-// Write one big-endian uint16 / uint32 (the counterparts of ReadBe16/32).
+// Write one big-endian uint16 (the counterpart of ReadBe16; the
+// 32-bit counterpart was deleted with F1 — the 32-bit ZIP-prediction
+// path no longer writes uint32 samples).
 void WriteBe16(uint8_t* p, uint16_t v) {
     p[0] = (uint8_t)(v >> 8);
     p[1] = (uint8_t)(v & 0xFF);
-}
-
-void WriteBe32(uint8_t* p, uint32_t v) {
-    p[0] = (uint8_t)(v >> 24);
-    p[1] = (uint8_t)((v >> 16) & 0xFF);
-    p[2] = (uint8_t)((v >> 8) & 0xFF);
-    p[3] = (uint8_t)(v & 0xFF);
 }
 
 // Reinterpret a uint32 bit pattern as a float (no aliasing violation).
@@ -348,14 +343,34 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
             if (compression == kCompressionZipPrediction) {
                 // Reverse the per-row delta, per plane. The first
                 // sample of each row is stored as-is (delta from 0).
-                // In place, on the big-endian bytes: each sample is
-                // read, added to the running total (wraparound uint16
-                // / uint32 arithmetic on the stored bit patterns),
-                // and written back before the next sample is read, so
-                // no temp row is needed and nothing here can throw
-                // (the no-throw contract in PsdHdr.h: the per-row
-                // temp vectors this replaces were the only unguarded
-                // allocation in this file).
+                // 16-bit: in place, on the big-endian bytes — each
+                // sample is read, added to the running total
+                // (wraparound uint16 arithmetic), and written back
+                // before the next sample is read, so no temp row is
+                // needed and nothing here can throw.
+                // 32-bit: the prediction runs over BYTE PLANES, not
+                // over interleaved float bit patterns. Each row's
+                // 4-byte samples are stored deinterleaved (all byte
+                // 0s, then byte 1s, byte 2s, byte 3s) and delta-encoded
+                // as bytes with ONE accumulator running across the
+                // whole 4*width-byte row (psd-tools decode_prediction,
+                // OpenImageIO, and the PhotoshopAPI docs all agree;
+                // the Adobe spec lists compression value 3 but defines
+                // no prediction algorithm, so it cannot be cited
+                // either way). Transposition needs a scratch row: one
+                // buffer reused for every row, allocated once below
+                // (guarded like planes above, so the no-throw
+                // contract in PsdHdr.h holds). The old code did uint32
+                // cumsum on the interleaved bit patterns, a different,
+                // mutually unreadable scheme (F1).
+                std::vector<uint8_t> scratch;
+                if (bitDepth == 32) {
+                    try {
+                        scratch.resize(rowBytes);
+                    } catch (...) {
+                        return false;
+                    }
+                }
                 for (int ch = 0; ch < channels; ch++) {
                     uint8_t* plane = planes.data() + (size_t)ch * planeBytes;
                     for (int y = 0; y < height; y++) {
@@ -367,10 +382,23 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
                                 WriteBe16(row + (size_t)x * 2, (uint16_t)acc);
                             }
                         } else {
+                            // Byte-plane decode: copy the row to the
+                            // scratch buffer, run the uint8 cumsum
+                            // over the plane-ordered bytes, then
+                            // re-interleave to big-endian float bit
+                            // patterns. scratch[b*width + x] is byte b
+                            // of sample x.
+                            std::memcpy(scratch.data(), row, rowBytes);
                             uint32_t acc = 0;
+                            for (size_t i = 0; i < rowBytes; i++) {
+                                acc = (acc + scratch[i]) & 0xFFu;
+                                scratch[i] = (uint8_t)acc;
+                            }
                             for (int x = 0; x < width; x++) {
-                                acc = acc + ReadBe32(row + (size_t)x * 4);
-                                WriteBe32(row + (size_t)x * 4, acc);
+                                for (int b = 0; b < 4; b++) {
+                                    row[(size_t)x * 4 + (size_t)b] =
+                                        scratch[(size_t)b * (size_t)width + (size_t)x];
+                                }
                             }
                         }
                     }
