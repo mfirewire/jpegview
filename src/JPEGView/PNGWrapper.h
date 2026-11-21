@@ -84,6 +84,15 @@ private:
 		// HdrToneMap helper; SDR PNGs never set this and take the exact
 		// pre-existing path. Set in BeginReading, read in ReadNextFrame.
 		bool hdr = false;
+		// Whether the file carries a real alpha channel: color types 4/6
+		// (PNG_COLOR_MASK_ALPHA) or a tRNS chunk (png_set_expand turns it
+		// into a real alpha channel). Set in BeginReading right after
+		// png_read_info, read in ConvertHdrRowsToPixels. When false, the
+		// 16-bit rows hold only the png_set_add_alpha filler in px[3] -
+		// and that filler is 0x00ff (255) for 16-bit rows, NOT 0xffff -
+		// so copying px[3]/257 would yield alpha 0 (fully transparent).
+		// Files without alpha must be forced opaque instead.
+		bool hasAlpha = false;
 		HdrToneMap::Cicp cicp = {};
 		// Transform from the iCCP profile this file carries to sRGB, NULL when the
 		// file has none, when it already is sRGB or when the setting is off. Built

@@ -113,6 +113,11 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/loader_png_cicp_test.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/loader_png_cicp_test
           /tmp/loader_png_cicp_test
 
+      - name: PNG HDR alpha rule test (e8228df regression)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/png_hdr_alpha_test.cpp -o /tmp/png_hdr_alpha_test
+          /tmp/png_hdr_alpha_test
+
       - name: Save-path ICC filter test (N2)
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/save_icc_filter_test.cpp src/JPEGView/SaveIccFilter.cpp -o /tmp/save_icc_filter_test

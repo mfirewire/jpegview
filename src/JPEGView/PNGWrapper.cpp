@@ -140,11 +140,16 @@ bool PngReader::ReadFrameData()
 // content-adaptive EETF), then tone-map each pixel. The 16-bit values
 // are native-endian here because BeginReading called png_set_swap for
 // HDR, so they read directly as png_uint_16. The alpha channel is
-// copied from the 16-bit source (scaled /257); the tone mapper itself
-// works on RGB only. (P2-B4: previously the output alpha was forced
-// opaque, so a transparent HDR pixel rendered as a black block after
-// the background blend. Unlike the SDR path, which fills alpha with
-// 0xff via png_set_add_alpha, HDR rows carry the file's real alpha.)
+// copied from the 16-bit source (scaled /257) only when the file has
+// a real alpha channel (cache.hasAlpha); the tone mapper itself works
+// on RGB only. (P2-B4: previously the output alpha was forced opaque,
+// so a transparent HDR pixel rendered as a black block after the
+// background blend. The rows do NOT carry the file's alpha when it
+// has none: the png_set_add_alpha filler is 0x00ff (255) in 16-bit
+// rows, NOT 0xffff, so copying px[3]/257 would give alpha 0 for every
+// pixel - a 16-bit RGB HDR PNG with no alpha rendered fully
+// transparent (black screen). Proven with a libpng probe: alpha is
+// 255 for all 204,800 pixels of test_pq.png / test_pq_p3.png.)
 bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 {
 	const unsigned int w = cache.width;
@@ -192,12 +197,14 @@ bool PngReader::ConvertHdrRowsToPixels(unsigned char* pixels)
 			dst[1] = g;
 			dst[2] = r;
 			// P2-B4: copy the source alpha (16-bit -> 8-bit, /257 maps
-			// 65535 -> 255 exactly), not opaque. Rows are BGRA with
-			// channels forced to 4 (png_set_add_alpha), so px[3] is
-			// always the file's alpha (0xffff filler when absent).
+			// 65535 -> 255 exactly) only when the file has a real alpha
+			// channel (cache.hasAlpha). Otherwise px[3] is the
+			// png_set_add_alpha filler, which is 0x00ff (255) in 16-bit
+			// rows - not 0xffff - so px[3]/257 would be 0 and the whole
+			// image would render fully transparent. Force opaque then.
 			const png_uint_16* row = (const png_uint_16*)cache.rows_image[y];
 			const png_uint_16* px = row + x * 4;
-			dst[3] = (uint8_t)(px[3] / 257);
+			dst[3] = cache.hasAlpha ? (uint8_t)(px[3] / 257) : 0xff;
 		}
 	}
 	delete[] rgb;
@@ -363,6 +370,15 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 			if (cache.hdr)
 				cache.cicp = cicp;
 		}
+		// Whether the file has a real alpha channel, from the ORIGINAL
+		// color type and tRNS validity (read here, before the transforms
+		// below). Color types 4/6 carry alpha; a tRNS chunk becomes a
+		// real alpha channel under png_set_expand (0 or max). When
+		// false, px[3] in the HDR rows is only the add_alpha filler
+		// (0x00ff for 16-bit rows), so ConvertHdrRowsToPixels must force
+		// the output alpha opaque instead of copying px[3]/257.
+		cache.hasAlpha = (png_get_color_type(png_ptr, info_ptr) & PNG_COLOR_MASK_ALPHA) != 0
+			|| png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS) != 0;
 		png_set_expand(png_ptr);
 		if (!cache.hdr)
 			png_set_strip_16(png_ptr);
