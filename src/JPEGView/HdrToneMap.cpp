@@ -355,27 +355,6 @@ void ConvertPixel(double r, double g, double b, Transfer transfer, Primaries pri
     ConvertPixelWithParams(r, g, b, transfer, primaries, Bt2390MakeParams(peakNits), outR, outG, outB);
 }
 
-void ConvertImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
-                  uint8_t* dstRgb, size_t dstStrideBytes,
-                  Transfer transfer, Primaries primaries) {
-    if (srcRgb == NULL || dstRgb == NULL || width <= 0 || height <= 0) return;
-    double peakNits = ComputePeakNits(srcRgb, (size_t)width * (size_t)height, transfer, primaries);
-    for (int y = 0; y < height; y++) {
-        const float* srcRow = srcRgb + (size_t)y * srcStrideFloats;
-        uint8_t* dstRow = dstRgb + (size_t)y * dstStrideBytes;
-        for (int x = 0; x < width; x++) {
-            double r = (double)srcRow[(size_t)x * 3 + 0];
-            double g = (double)srcRow[(size_t)x * 3 + 1];
-            double b = (double)srcRow[(size_t)x * 3 + 2];
-            uint8_t outR = 0, outG = 0, outB = 0;
-            ConvertPixel(r, g, b, transfer, primaries, peakNits, outR, outG, outB);
-            dstRow[(size_t)x * 3 + 0] = outR;
-            dstRow[(size_t)x * 3 + 1] = outG;
-            dstRow[(size_t)x * 3 + 2] = outB;
-        }
-    }
-}
-
 double ComputePeakLinear(const float* srcRgb, int width, int height, size_t srcStrideFloats) {
     if (srcRgb == NULL || width <= 0 || height <= 0) return 0.0;
     double peak = 0.0;
@@ -468,7 +447,12 @@ void ConvertLinearPixel(double r, double g, double b, double peakLinear,
 
 void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
                         uint8_t* dstBgr, size_t dstStrideBytes) {
-    if (srcRgb == NULL || dstBgr == NULL || width <= 0 || height <= 0) return;
+    // P2-C5: reject strides narrower than a row (ComputePeakLinear reads
+    // by stride, so this must come before the peak call below). All
+    // in-tree callers pass exactly width*3, so the guard never triggers
+    // today - pure hardening.
+    if (srcRgb == NULL || dstBgr == NULL || width <= 0 || height <= 0 ||
+        srcStrideFloats < (size_t)width * 3 || dstStrideBytes < (size_t)width * 3) return;
     double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
     // P2-C3: precompute the EETF parameters once per image (the
     // per-pixel ConvertLinearPixel call recomputed them every pixel).
@@ -493,7 +477,10 @@ void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcSt
 void ConvertLinearImageToBgra(const float* srcRgb, int width, int height, size_t srcStrideFloats,
                               uint8_t* dstBgra, size_t dstStrideBytes,
                               const uint8_t* planarAlphaOrNull, size_t alphaStride) {
-    if (srcRgb == NULL || dstBgra == NULL || width <= 0 || height <= 0) return;
+    // P2-C5: same stride guard as ConvertLinearImage (dst is BGRA, so
+    // width*4 here).
+    if (srcRgb == NULL || dstBgra == NULL || width <= 0 || height <= 0 ||
+        srcStrideFloats < (size_t)width * 3 || dstStrideBytes < (size_t)width * 4) return;
     double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
     // P2-C3: precompute the EETF parameters once per image (see above).
     Bt2390Params params = Bt2390MakeParams(PeakNitsFromLinear(peakLinear));

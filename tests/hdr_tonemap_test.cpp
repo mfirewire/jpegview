@@ -340,6 +340,28 @@ void TestConvertLinearImage() {
           out[4] >= 116 && out[4] <= 120 &&
           out[5] >= 116 && out[5] <= 120,
           "ConvertLinearImage grey pixel -> BGR ~118");
+    // P2-C9: a color pixel. ConvertLinearPixel(1,0,0, peak=1.0) -> RGB
+    // (255,0,0) -> BGR (0,0,255). Holds at any peak (a single (1,0,0)
+    // image has peak luminance 0.2126, still 255).
+    float red[3] = { 1.0f, 0.0f, 0.0f };
+    uint8_t redOut[3] = { 0, 0, 0 };
+    ConvertLinearImage(red, 1, 1, 3, redOut, 3);
+    Check(redOut[0] == 0 && redOut[1] == 0 && redOut[2] == 255,
+          "ConvertLinearImage red pixel -> BGR 0,0,255");
+    // P2-C5: a stride narrower than a row is rejected (no write, no
+    // crash). The output is pre-filled with a sentinel; the guard must
+    // leave it untouched. (Without the guard the old code would have
+    // written a wrong result here.)
+    float img2[6] = { 1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f };
+    uint8_t out2[6] = { 0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD };
+    ConvertLinearImage(img2, 2, 1, 3, out2, 6);  // src stride 3 < 2*3
+    Check(out2[0] == 0xCD && out2[1] == 0xCD && out2[2] == 0xCD &&
+          out2[3] == 0xCD && out2[4] == 0xCD && out2[5] == 0xCD,
+          "ConvertLinearImage narrow src stride rejected");
+    ConvertLinearImage(img2, 2, 1, 6, out2, 3);  // dst stride 3 < 2*3
+    Check(out2[0] == 0xCD && out2[1] == 0xCD && out2[2] == 0xCD &&
+          out2[3] == 0xCD && out2[4] == 0xCD && out2[5] == 0xCD,
+          "ConvertLinearImage narrow dst stride rejected");
 }
 
 void TestConvertLinearImageToBgra() {
@@ -372,6 +394,12 @@ void TestConvertLinearImageToBgra() {
           out[5] >= 116 && out[5] <= 120 &&
           out[6] >= 116 && out[6] <= 120 && out[7] == 0xff,
           "ConvertLinearImageToBgra NULL alpha -> grey pixel alpha 0xff");
+    // P2-C5: a dst stride narrower than a BGRA row (width*4) is rejected.
+    uint8_t outB[8];
+    std::memset(outB, 0xCD, sizeof(outB));
+    ConvertLinearImageToBgra(img, 2, 1, 6, outB, 4, NULL, 0);  // 4 < 2*4
+    Check(outB[0] == 0xCD && outB[3] == 0xCD && outB[7] == 0xCD,
+          "ConvertLinearImageToBgra narrow dst stride rejected");
 }
 
 }  // namespace

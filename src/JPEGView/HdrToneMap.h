@@ -137,15 +137,6 @@ void ConvertPixelWithParams(double r, double g, double b, Transfer transfer, Pri
 // transfer/gamut). Used to drive the content-adaptive EETF.
 double ComputePeakNits(const float* srcRgb, size_t pixelCount, Transfer transfer, Primaries primaries);
 
-// Convert a whole image of interleaved float RGB signal values (width x
-// height x 3 floats, values in [0,1], source transfer/gamut) to 8-bit
-// sRGB (width x height x 3 bytes, R,G,B). Computes the content peak
-// internally. `srcStrideFloats` is the float stride between rows
-// (usually width*3); `dstStrideBytes` the byte stride between rows.
-void ConvertImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
-                  uint8_t* dstRgb, size_t dstStrideBytes,
-                  Transfer transfer, Primaries primaries);
-
 // ---- Linear-float input (Radiance .hdr / OpenEXR) ----
 //
 // These take scene-linear float RGB (sRGB primaries), the format
