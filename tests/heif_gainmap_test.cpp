@@ -220,8 +220,8 @@ const char* kXmpHdrgm =
     "<hdrgm:OffsetHDR>0.0</hdrgm:OffsetHDR>"
     "</rdf:Description></rdf:RDF></x:xmpmeta>";
 
-// Synthetic Apple HDRGainMap XMP packet (mapping UNVERIFIED — see
-// GainMap.h; no Apple sample was on hand).
+// Synthetic Apple HDRGainMap XMP packet. The headroom is a LINEAR
+// RATIO (P2-A2 settled, verified): 2.0 -> log2(2.0) = 1.0 stops.
 const char* kXmpApple =
     "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">"
     "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
@@ -242,7 +242,7 @@ void TestXmpInputs() {
     Check(ParseXmpMetadata(std::string(kXmpApple), m) && m.valid,
           "XMP Apple (HEIF path input) parses");
     Check(m.appleHeadroomFallback, "XMP Apple sets appleHeadroomFallback");
-    Check(Near(m.gainMapMax, 2.0, 1e-12), "XMP Apple gainMapMax = headroom 2.0");
+    Check(Near(m.gainMapMax, 1.0, 1e-12), "XMP Apple gainMapMax = log2(headroom 2.0) = 1.0");
     Check(Near(m.gainMapMin, 0.0, 1e-12), "XMP Apple gainMapMin 0.0");
     Check(Near(m.gamma, 1.0, 1e-12), "XMP Apple gamma 1.0");
     // A packet with neither scheme parses to nothing.

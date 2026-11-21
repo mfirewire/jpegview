@@ -251,46 +251,6 @@ static bool TryParseGainMapXmp(const heif::ImageHandle& handle, gainmap::Metadat
 	return false;
 }
 
-// Scan the XMP ("mime", application/rdf+xml) metadata blocks of
-// `handle` for Apple gain-map fields, WITHOUT parsing them. Accumulates
-// into `hasVersion` / `hasHeadroom` (OR-ed across calls, so the caller
-// scans the primary handle then the gain-map item) and captures the
-// first version-bearing packet's text in `versionXmp` (for the gamma
-// re-read in the derive path). Presence is checked by field NAME
-// (gainmap::XmpHasAppleGainMapVersion / XmpHasAppleGainMapHeadroom),
-// not by parsing: ParseXmpMetadata returns false both when a field is
-// absent and when it is present but unparseable, and the N1 derive
-// rule needs exactly that distinction (version present + headroom
-// absent -> derive; headroom present-but-invalid -> do not derive).
-// Mirrors TryParseGainMapXmp's iteration and exception handling.
-static void ScanAppleGainMapXmp(const heif::ImageHandle& handle,
-								bool& hasVersion, bool& hasHeadroom,
-								std::string& versionXmp)
-{
-	std::vector<heif_item_id> ids = handle.get_list_of_metadata_block_IDs("mime");
-	for (size_t i = 0; i < ids.size(); i++) {
-		std::string contentType = handle.get_metadata_content_type(ids[i]);
-		if (contentType != "application/rdf+xml")
-			continue;
-		std::vector<uint8_t> raw;
-		try {
-			raw = handle.get_metadata(ids[i]);
-		} catch (...) {
-			continue;
-		}
-		if (raw.empty())
-			continue;
-		std::string xmp(raw.begin(), raw.end());
-		if (gainmap::XmpHasAppleGainMapHeadroom(xmp))
-			hasHeadroom = true;
-		if (gainmap::XmpHasAppleGainMapVersion(xmp)) {
-			hasVersion = true;
-			if (versionXmp.empty())
-				versionXmp = xmp;
-		}
-	}
-}
-
 // Apply the gain map of an SDR HEIF base image, if it has one. `baseBgra`
 // is the already-decoded 8-bit BGRA base (width x height). Returns a NEW
 // 8-bit BGRA buffer with the gain map applied and tone-mapped via
@@ -318,25 +278,13 @@ static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
 		gainmap::Metadata meta;
 		// XMP on the primary image first, then on the gain-map item.
 		if (!TryParseGainMapXmp(handle, meta) && !TryParseGainMapXmp(auxHandle, meta)) {
-			// N1 (D1): real iPhone HEICs carry an XMP packet with only
-			// HDRGainMapVersion — no HDRGainMapHeadroom — so the parse
-			// above fails and the gain map would silently not apply.
-			// When the version field is present but no headroom field
-			// exists on either handle, derive the headroom from the
-			// decoded gain data instead. A headroom field that IS
-			// present anywhere means its value was invalid (the parse
-			// already rejected it) — do not derive, return NULL.
-			// HEIF only (scope decision: the JPEG XMP fallback shares
-			// the gap, but iPhone JPEGs normally carry ISO metadata).
-			bool hasVersion = false, hasHeadroom = false;
-			std::string versionXmp;
-			ScanAppleGainMapXmp(handle, hasVersion, hasHeadroom, versionXmp);
-			ScanAppleGainMapXmp(auxHandle, hasVersion, hasHeadroom, versionXmp);
-			if (!hasVersion || hasHeadroom)
-				return NULL;
-			if (!gainmap::DeriveAppleHeadroomFromGain(gainGray.data(), gainGray.size(),
-													  versionXmp, meta))
-				return NULL;
+			// No headroom metadata on either handle: the gain map has
+			// no scale, so it cannot be applied — show the SDR base.
+			// (The Batch 7 derive-from-pixels fallback was removed by
+			// user decision: without a scale the gain map is
+			// uninterpretable, and Apple Photos shows these files
+			// as SDR. Do not re-add a pixel-derived headroom.)
+			return NULL;
 		}
 		// Base BGRA -> RGB temp buffer (drop alpha), then reconstruct
 		// linear HDR floats and tone-map straight to BGRA with

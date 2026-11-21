@@ -292,39 +292,42 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
         return true;
     }
 
-    // Apple HDRGainMap XMP fallback. UNVERIFIED (see GainMap.h): the
-    // headroom -> gainMapMax (log2) mapping is a best guess from the
-    // field names and needs a real iPhone file WITH HDRGainMapHeadroom
-    // to confirm (P2-A2). The version-only XMP form, by contrast, is
-    // confirmed real (two iPhone HEICs) and is handled by
-    // DeriveAppleHeadroomFromGain, not here.
+    // Apple HDRGainMap XMP fallback. VERIFIED (P2-A2 settled
+    // 2026-11-21): HDRGainMapHeadroom is a LINEAR RATIO (brightest
+    // white / SDR white), not log2 stops — an iPhone 15 Pro HEIC
+    // carries 3.847906, and the same file's MakerNote independently
+    // yields 3.847921 (agreement to 0.0004%). So gainMapMax =
+    // log2(ratio); using the raw value as stops would overstate the
+    // max boost (3.847906 stops = 14.40x instead of 3.85x). The
+    // version-only XMP form (two iPhone 13 HEICs) carries no Headroom
+    // and fails here, so those files show SDR — no deriving.
     // Coexistence: this branch is only entered when NO hdrgm field is
     // present (!anyHdrgm below). An XMP packet carrying both hdrgm
     // fields and Apple fields therefore never uses the Apple Headroom
     // here: if the hdrgm set is incomplete or invalid, this function
-    // returns false and the HEIF caller derives the headroom from the
-    // gain-map pixels instead (N1) — but only when no Headroom field
-    // exists anywhere; a packet with both hdrgm and a valid Apple
-    // Headroom yields no gain map at all. No such packet is known
-    // to exist (Apple files carry no hdrgm; UltraHDR files carry no
-    // Apple version).
+    // returns false and the caller shows SDR — a packet with both
+    // hdrgm and a valid Apple Headroom yields no gain map at all. No
+    // such packet is known to exist (Apple files carry no hdrgm;
+    // UltraHDR files carry no Apple version).
     if (!anyHdrgm) {
         double headroom = 0.0;
         if (FindXmpField(xmp, "HDRGainMapHeadroom", headroom)) {
             double appleGamma = 1.0;
             bool hasAppleGamma = FindXmpField(xmp, "HDRGainMapGamma", appleGamma);
-            // N1/N-5: "headroom invalid" includes <= 0 (a headroom of
-            // zero or fewer stops is meaningless), not just
-            // unparseable/non-finite. A negative headroom used to be
-            // accepted here and passed through to ApplyGainMap.
-            if (!std::isfinite(headroom) || headroom <= 0.0) {
+            // The ratio must be finite and in [1.0, 65536.0] (0 to 16
+            // stops). Below 1.0 is physically meaningless (HDR dimmer
+            // than SDR); above 65536 is absurd (the ApplyGainMap
+            // clamp bound). A ratio of exactly 1.0 is valid with
+            // gainMapMax 0.0 (identity: no gain).
+            if (!std::isfinite(headroom) || headroom < 1.0 ||
+                headroom > 65536.0) {
                 return false;
             }
             if (hasAppleGamma &&
                 (!(appleGamma > 0.0) || !std::isfinite(appleGamma))) {
                 return false;
             }
-            out.gainMapMax = headroom;
+            out.gainMapMax = std::log2(headroom);
             out.gainMapMin = 0.0;
             out.gamma = hasAppleGamma ? appleGamma : 1.0;
             out.baseOffset = 0.0;
@@ -336,86 +339,6 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
     }
 
     return false;
-}
-
-// N1: presence checks for the Apple HDRGainMap XMP fields. See the
-// GainMap.h declarations for why a plain substring search is used
-// (FindXmpField conflates "absent" with "present but unparseable").
-// The field NAME is what is searched for, the same search FindXmpField
-// starts from. Note the xmlns declaration itself
-// ("http://ns.apple.com/HDRGainMap/1.0/") contains "HDRGainMap" but
-// neither "HDRGainMapVersion" nor "HDRGainMapHeadroom", so it cannot
-// trigger a false presence.
-bool XmpHasAppleGainMapVersion(const std::string& xmp) {
-    return xmp.find("HDRGainMapVersion") != std::string::npos;
-}
-
-bool XmpHasAppleGainMapHeadroom(const std::string& xmp) {
-    return xmp.find("HDRGainMapHeadroom") != std::string::npos;
-}
-
-bool DeriveAppleHeadroomFromGain(const uint8_t* gainMap, size_t gainSize,
-                                 const std::string& xmp, Metadata& out) {
-    out = Metadata();  // valid=false unless this function succeeds
-    if (gainMap == nullptr || gainSize == 0) {
-        return false;
-    }
-    if (!XmpHasAppleGainMapVersion(xmp) || XmpHasAppleGainMapHeadroom(xmp)) {
-        return false;
-    }
-    // 256-bin histogram; p99.9 = the smallest byte v with at least
-    // floor(99.9% * n) pixels <= v — the same integer rule the
-    // verification probe used (probe_p999: cumulative >= n*999/1000),
-    // so the two real files reproduce exactly 3.000 and 1.329 stops.
-    // The 64-bit multiply cannot overflow: gainSize is bounded by the
-    // callers' IsImageBufferSizeOk (<= 4 GB). `need` is clamped to at
-    // least 1 so a 1-pixel gain derives from that pixel (for n=1 the
-    // raw floor rule gives 0, which would always pick v=0).
-    size_t hist[256] = {};
-    for (size_t i = 0; i < gainSize; ++i) {
-        ++hist[gainMap[i]];
-    }
-    uint64_t need = (static_cast<uint64_t>(gainSize) * 999u) / 1000u;
-    if (need < 1) {
-        need = 1;
-    }
-    uint64_t cumulative = 0;
-    int p999 = 255;
-    for (int v = 0; v < 256; ++v) {
-        cumulative += hist[v];
-        if (cumulative >= need) {
-            p999 = v;
-            break;
-        }
-    }
-    // H_CAP = 3.0 stops (see GainMap.h): p99.9 = 255 -> 3.0, all
-    // zeros -> 0.0 (identity: boost 1.0 everywhere).
-    double headroom = 3.0 * static_cast<double>(p999) / 255.0;
-    if (headroom < 0.0) {
-        headroom = 0.0;
-    }
-    if (headroom > 3.0) {
-        headroom = 3.0;
-    }
-    // Gamma is re-read from the SAME XMP string that carried the
-    // version (N-5): TryParseGainMapXmp discards the XMP on failure,
-    // so the derive path must re-read it here. Present-and-valid wins,
-    // otherwise 1.0 — an invalid gamma never rejects the derivation.
-    double gamma = 1.0;
-    double parsedGamma = 1.0;
-    if (FindXmpField(xmp, "HDRGainMapGamma", parsedGamma) &&
-        parsedGamma > 0.0 && std::isfinite(parsedGamma)) {
-        gamma = parsedGamma;
-    }
-    out.gainMapMin = 0.0;
-    out.gainMapMax = headroom;
-    out.gamma = gamma;
-    out.baseOffset = 0.0;
-    out.alternateOffset = 0.0;
-    out.appleHeadroomFallback = true;
-    out.derivedHeadroom = true;
-    out.valid = true;
-    return true;
 }
 
 bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_t& gainSize) {

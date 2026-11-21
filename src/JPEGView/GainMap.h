@@ -17,19 +17,19 @@
 //   2. XMP (hdrgm namespace, UltraHDR/Adobe): a fallback for files
 //      that carry no ISO binary metadata.
 //   3. Apple HDRGainMap XMP (HDRGainMapHeadroom): a fallback for
-//      iPhone gain-map files. The XMP FORM is now confirmed real: two
-//      iPhone 13 HEICs (2026-06-07, 2026-04-05) carry an XMP packet
-//      with ONLY HDRGainMapVersion and no headroom at all — see N1.
-//      The VALUE mapping below (headroom -> gainMapMax in log2 stops,
-//      gamma from HDRGainMapGamma, offsets 0) is still *** UNVERIFIED
-//      ***: no real file with HDRGainMapHeadroom has been seen yet
-//      (P2-A2: log2 stops vs linear ratio is still open). Do not
-//      treat Apple fallback output as verified until that check is
-//      done. ParseXmpMetadata sets Metadata::appleHeadroomFallback so
-//      callers/tests can tell the two XMP paths apart. When the XMP
-//      has the version but no headroom, DeriveAppleHeadroomFromGain
-//      estimates the headroom from the gain bytes instead (N1/D1 — a
-//      principled estimate, not a measurement; see GainMap.cpp).
+//      iPhone gain-map files. Both the form and the value mapping are
+//      now VERIFIED against a real file (P2-A2 settled 2026-11-21):
+//      an iPhone 15 Pro HEIC (PhotoPrism sample) carries
+//      HDRGainMapHeadroom 3.847906, and the same file's MakerNote
+//      (0x21/0x30) independently yields 3.847921 — agreement to
+//      0.0004% — so the field is a LINEAR RATIO (brightest white /
+//      SDR white), not log2 stops: gainMapMax = log2(ratio),
+//      gamma from HDRGainMapGamma, offsets 0. ParseXmpMetadata sets
+//      Metadata::appleHeadroomFallback so callers/tests can tell the
+//      two XMP paths apart. When the XMP has the version but no
+//      headroom, there is no gain map: the file shows SDR. (The
+//      Batch 7 derive-from-pixels fallback was removed by user
+//      decision — without a scale the gain map is uninterpretable.)
 //
 // Reconstruction formula (ISO 21496-1, weightFactor = 1.0 for full HDR):
 //   logRecovery = gainPixel^(1/gamma)          (gainPixel = byte/255, 0..1)
@@ -70,8 +70,6 @@ struct Metadata {
     bool multiChannel = false;          // ISO flags bit 7: 3 channel sets present
     bool useBaseColorSpace = false;     // ISO flags bit 6
     bool appleHeadroomFallback = false; // true when parsed from Apple HDRGainMap XMP
-    bool derivedHeadroom = false;       // true when gainMapMax was derived from gain
-                                        // data (N1), not read from metadata
     bool valid = false;                 // set by the parsers on success
 };
 
@@ -102,54 +100,18 @@ bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out);
 // Uses a simple robust string search (find the field name, then parse
 // the first number or "num/den" rational after it) — no XML parser.
 // Apple fallback: if NO hdrgm field is present at all but
-// HDRGainMapHeadroom is, sets gainMapMax=headroom (log2), gainMapMin=0,
-// gamma=HDRGainMapGamma if present else 1.0, offsets 0, and
-// appleHeadroomFallback=true, and returns true. The Apple mapping is
-// UNVERIFIED (see the header note above) and needs a real iPhone file
-// with HDRGainMapHeadroom to confirm. Headroom must be > 0 (N1/N-5:
-// <= 0 is invalid, not just unparseable/non-finite). Returns false
-// (out.valid=false) when neither scheme yields the essential fields,
-// or when a found gamma is <= 0.
+// HDRGainMapHeadroom is, sets gainMapMax=log2(headroom),
+// gainMapMin=0, gamma=HDRGainMapGamma if present else 1.0, offsets 0,
+// and appleHeadroomFallback=true, and returns true. HDRGainMapHeadroom
+// is a LINEAR RATIO (verified, see the header note above), so the
+// log2 conversion is load-bearing: the raw value must NOT be used as
+// stops. The ratio must be finite and in [1.0, 65536.0] (0 to 16
+// stops): below 1.0 is physically meaningless (HDR dimmer than SDR),
+// above 65536 is absurd (the ApplyGainMap clamp bound) — both are
+// rejected. A ratio of exactly 1.0 is valid with gainMapMax 0.0
+// (identity: no gain). Returns false (out.valid=false) when neither
+// scheme yields the essential fields, or when a found gamma is <= 0.
 bool ParseXmpMetadata(const std::string& xmp, Metadata& out);
-
-// Returns true when `xmp` NAMES an HDRGainMapVersion field (Apple
-// gain-map XMP present). Presence only: the value is not parsed.
-// FindXmpField returns false both when a field is absent AND when it
-// is present but unparseable, so it cannot tell the two apart — but
-// the N1 derive rule needs exactly that distinction (version present
-// + headroom absent -> derive; headroom present-but-invalid -> do not
-// derive), so presence is checked by field name here.
-bool XmpHasAppleGainMapVersion(const std::string& xmp);
-
-// Returns true when `xmp` NAMES an HDRGainMapHeadroom field, whatever
-// its value (present-but-invalid counts as present). Presence only.
-bool XmpHasAppleGainMapHeadroom(const std::string& xmp);
-
-// Derive the Apple headroom from decoded gain bytes (N1, D1). Use when
-// the XMP carries HDRGainMapVersion but no HDRGainMapHeadroom (the
-// form real iPhone HEICs use). Builds a 256-bin histogram of the gain
-// bytes, takes p99.9 (the smallest byte v with at least
-// floor(99.9% of n) pixels <= v), and sets headroom =
-// 3.0 * (p99.9 / 255), clamped to [0, 3.0]. The 3.0-stop cap comes from
-// device knowledge (iPhone HDR peak ~1600 nits vs SDR white 203 nits:
-// log2(1600/203) = 2.98 ~= 3.0), NOT from the bytes. p99.9 (not max)
-// is used because a single hot pixel must not hijack the headroom
-// (on the 2026-04-05 file the max is 247 — one pixel — while p99.9
-// is 113: the max rule would give 2.906 stops, the p99.9 rule 1.329).
-// Gamma is re-read from the same XMP string (HDRGainMapGamma when
-// present and valid, else 1.0). Strict derivation is IMPOSSIBLE: the
-// gain bytes encode boost relative to the headroom, so the absolute
-// scale can only come from metadata or an assumption — this is a
-// principled estimate, not a measurement. Fills `out` with
-// gainMapMin=0, gainMapMax=headroom, gamma as above, offsets 0,
-// appleHeadroomFallback=true and derivedHeadroom=true, and returns
-// true. Returns false (out reset, valid=false) when the gain data is
-// null/empty, when the XMP names no version field, or when it names a
-// headroom field (present-but-invalid: ParseXmpMetadata already
-// rejected it, so deriving a different value would contradict the
-// writer's value).
-bool DeriveAppleHeadroomFromGain(const uint8_t* gainMap, size_t gainSize,
-                                 const std::string& xmp, Metadata& out);
 
 // Find the gain-map JPEG embedded in an UltraHDR JPEG (MPF APP2).
 // Scans the JPEG markers for the MPF APP2 ("MPF\0" + TIFF header),
