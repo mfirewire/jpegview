@@ -12,7 +12,7 @@
 //   * the 32-bit sanitize (NaN/negative -> 0, +Inf -> 1e6);
 //   * the ZIP-prediction delta reversal, including wraparound;
 //   * the alpha byte conversion for both depths;
-//   * the full decode over all 13 synthetic PSD/PSB fixtures (raw,
+//   * the full decode over all 17 synthetic PSD/PSB fixtures (raw,
 //     RLE, ZIP, ZIP-with-prediction; RGB, grey, RGBA; PSD v1 and PSB
 //     v2), followed by HdrToneMap::ConvertLinearImage, compared
 //     against the Python-reference BGR values (tolerance +/-2, the
@@ -445,6 +445,15 @@ void TestFixtures() {
                  kExpected32Gray, sizeof(kExpected32Gray));
     CheckFixture("tests/samples/psd_hdr_32bit_rgba_raw.psd",
                  kExpected32Rgb, sizeof(kExpected32Rgb));
+    // P3-D4: 32-bit RGBA ZIP, PSB ZIP, gray RLE/ZIP.
+    CheckFixture("tests/samples/psd_hdr_32bit_rgba_zip.psd",
+                 kExpected32Rgb, sizeof(kExpected32Rgb));
+    CheckFixture("tests/samples/psd_hdr_16bit_rgb_zip_psb.psd",
+                 kExpected16Rgb, sizeof(kExpected16Rgb));
+    CheckFixture("tests/samples/psd_hdr_16bit_gray_rle.psd",
+                 kExpected16Gray, sizeof(kExpected16Gray));
+    CheckFixture("tests/samples/psd_hdr_16bit_gray_zip.psd",
+                 kExpected16Gray, sizeof(kExpected16Gray));
 }
 
 // The alpha planes of the RGBA fixtures: 16-bit alpha ramp

@@ -586,6 +586,11 @@ SPECS = [
     ("psd_hdr_32bit_rgb_zippred.psd", 1, 32, 3, 3, 3),
     ("psd_hdr_32bit_gray_raw.psd", 1, 32, 1, 1, 0),
     ("psd_hdr_32bit_rgba_raw.psd", 1, 32, 3, 4, 0),
+    # P3-D4 (top-3 by risk): 32-bit RGBA ZIP, PSB ZIP, gray RLE/ZIP.
+    ("psd_hdr_32bit_rgba_zip.psd", 1, 32, 3, 4, 2),
+    ("psd_hdr_16bit_rgb_zip_psb.psd", 2, 16, 3, 3, 2),
+    ("psd_hdr_16bit_gray_rle.psd", 1, 16, 1, 1, 1),
+    ("psd_hdr_16bit_gray_zip.psd", 1, 16, 1, 1, 2),
 ]
 
 SPECS_H02 = [
