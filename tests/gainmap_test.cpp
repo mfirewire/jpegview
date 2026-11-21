@@ -370,8 +370,9 @@ const char* kXmpPlain =
     "<hdrgm:OffsetHDR>0.0</hdrgm:OffsetHDR>"
     "</rdf:Description></rdf:RDF></x:xmpmeta>";
 
-// Synthetic Apple HDRGainMap XMP (field names only — the mapping is
-// UNVERIFIED, no Apple sample was on hand; see GainMap.h).
+// Synthetic Apple HDRGainMap XMP (field names only — the headroom ->
+// gainMapMax mapping is UNVERIFIED: no real file with HDRGainMapHeadroom
+// has been seen yet, see GainMap.h; the version-only form below IS real).
 const char* kXmpApple =
     "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">"
     "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
@@ -386,6 +387,21 @@ const char* kXmpAppleNoGamma =
     "<rdf:Description rdf:about=\"\">"
     "<HDRGainMapHeadroom>1.5</HDRGainMapHeadroom>"
     "</rdf:Description></rdf:RDF></x:xmpmeta>";
+
+// The REAL version-only Apple XMP packet from the gain-map item (item
+// 64, 363 bytes) of both iPhone 13 HEICs (2026-06-07 19.13.11.HEIC and
+// 2026-04-05 16.21.46.HEIC), byte-for-byte as dumped with xmp_dump
+// (libheif). It carries ONLY HDRGainMapVersion — no Headroom, no
+// Gamma, no hdrgm. Do NOT hand-edit.
+const char* kXmpAppleVersionOnly =
+    "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"XMP Core 6.0.0\">\n"
+    "   <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+    "      <rdf:Description rdf:about=\"\"\n"
+    "            xmlns:HDRGainMap=\"http://ns.apple.com/HDRGainMap/1.0/\">\n"
+    "         <HDRGainMap:HDRGainMapVersion>65536</HDRGainMap:HDRGainMapVersion>\n"
+    "      </rdf:Description>\n"
+    "   </rdf:RDF>\n"
+    "</x:xmpmeta>\n";
 
 void TestParseXmp() {
     using namespace gainmap;
@@ -428,6 +444,17 @@ void TestParseXmp() {
     Check(Near(m.gainMapMax, 1.5, 1e-12), "XMP Apple no-gamma gainMapMax 1.5");
     Check(Near(m.gamma, 1.0, 1e-12), "XMP Apple no-gamma defaults gamma 1.0");
     Check(m.appleHeadroomFallback, "XMP Apple no-gamma sets fallback flag");
+    // N1/N-5: Apple headroom <= 0 is invalid (a headroom of zero or
+    // fewer stops is meaningless). Pre-fix the parser only checked
+    // isfinite, so -1.5 and 0.0 were accepted as gainMapMax.
+    Check(!ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>0.0</HDRGainMapHeadroom>"), m) &&
+              !m.valid,
+          "XMP Apple headroom 0.0 rejected");
+    Check(!ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>-1.5</HDRGainMapHeadroom>"), m) &&
+              !m.valid,
+          "XMP Apple headroom -1.5 rejected");
     // Negative: no gain-map fields at all -> false.
     Check(!ParseXmpMetadata(std::string("<x:xmpmeta></x:xmpmeta>"), m) &&
               !m.valid,
@@ -507,6 +534,148 @@ void TestParseXmp() {
               m) &&
               !m.valid,
           "XMP hdrgm gamma denominator past limit rejected");
+}
+
+void TestDeriveAppleHeadroom() {
+    using namespace gainmap;
+    Metadata m;
+    // Presence predicates.
+    Check(XmpHasAppleGainMapVersion(std::string(kXmpAppleVersionOnly)),
+          "derive: version-only XMP has version");
+    Check(!XmpHasAppleGainMapHeadroom(std::string(kXmpAppleVersionOnly)),
+          "derive: version-only XMP has no headroom");
+    Check(!XmpHasAppleGainMapVersion(std::string(kXmpApple)),
+          "derive: headroom-only XMP has no version");
+    Check(XmpHasAppleGainMapHeadroom(std::string(kXmpApple)),
+          "derive: headroom-only XMP has headroom");
+    Check(!XmpHasAppleGainMapVersion(std::string("<x:xmpmeta></x:xmpmeta>")),
+          "derive: empty XMP has no version");
+    Check(!XmpHasAppleGainMapHeadroom(std::string("<x:xmpmeta></x:xmpmeta>")),
+          "derive: empty XMP has no headroom");
+    // ParseXmpMetadata on the version-only form fails (no headroom to
+    // parse) — that failure is what routes real iPhone files to derive.
+    Check(!ParseXmpMetadata(std::string(kXmpAppleVersionOnly), m) && !m.valid,
+          "derive: version-only XMP does not parse (no headroom)");
+
+    // All 255 -> 3.0 stops; all 0 -> 0.0 (identity); all 128 -> 1.5059.
+    std::vector<uint8_t> all255(1000, 255);
+    Check(DeriveAppleHeadroomFromGain(all255.data(), all255.size(),
+                                      std::string(kXmpAppleVersionOnly), m) &&
+              m.valid,
+          "derive: all-255 gain derives");
+    Check(Near(m.gainMapMax, 3.0, 1e-12), "derive: all-255 headroom 3.0");
+    Check(Near(m.gainMapMin, 0.0, 1e-12), "derive: gainMapMin 0.0");
+    Check(Near(m.gamma, 1.0, 1e-12), "derive: gamma defaults 1.0");
+    Check(Near(m.baseOffset, 0.0, 1e-12), "derive: baseOffset 0.0");
+    Check(Near(m.alternateOffset, 0.0, 1e-12), "derive: alternateOffset 0.0");
+    Check(m.appleHeadroomFallback, "derive: sets appleHeadroomFallback");
+    Check(m.derivedHeadroom, "derive: sets derivedHeadroom");
+    std::vector<uint8_t> allZero(1000, 0);
+    Check(DeriveAppleHeadroomFromGain(allZero.data(), allZero.size(),
+                                      std::string(kXmpAppleVersionOnly), m) &&
+              m.valid,
+          "derive: all-zero gain derives");
+    Check(Near(m.gainMapMax, 0.0, 1e-12), "derive: all-zero headroom 0.0");
+    std::vector<uint8_t> all128(1000, 128);
+    Check(DeriveAppleHeadroomFromGain(all128.data(), all128.size(),
+                                      std::string(kXmpAppleVersionOnly), m) &&
+              m.valid,
+          "derive: all-128 gain derives");
+    Check(Near(m.gainMapMax, 3.0 * 128.0 / 255.0, 1e-12),
+          "derive: all-128 headroom 3.0*128/255");
+    // p99.9, not max: 999 pixels at 113 + 1 pixel at 247 (n=1000).
+    // p99.9 = 113 -> 3.0*113/255 = 1.32941 (the real 2026-04-05 file's
+    // number); the max rule would give 3.0*247/255 = 2.906 — the one
+    // hot pixel must not hijack the headroom.
+    std::vector<uint8_t> p999case(1000, 113);
+    p999case[999] = 247;
+    Check(DeriveAppleHeadroomFromGain(p999case.data(), p999case.size(),
+                                      std::string(kXmpAppleVersionOnly), m) &&
+              m.valid,
+          "derive: p99.9 case derives");
+    Check(Near(m.gainMapMax, 3.0 * 113.0 / 255.0, 1e-9),
+          "derive: p99.9=113 headroom 1.32941 (not max-rule 2.906)");
+    // Boundary: 999 pixels at 255 + 1 at 0 -> p99.9 = 255 -> 3.0.
+    std::vector<uint8_t> almostMax(1000, 255);
+    almostMax[0] = 0;
+    Check(DeriveAppleHeadroomFromGain(almostMax.data(), almostMax.size(),
+                                      std::string(kXmpAppleVersionOnly), m) &&
+              m.valid,
+          "derive: 999x255+1x0 derives");
+    Check(Near(m.gainMapMax, 3.0, 1e-12),
+          "derive: 999x255+1x0 headroom 3.0");
+    // Single pixel: derives from that pixel (need clamps to >= 1).
+    uint8_t one = 200;
+    Check(DeriveAppleHeadroomFromGain(&one, 1,
+                                      std::string(kXmpAppleVersionOnly), m) &&
+              m.valid,
+          "derive: single-pixel gain derives");
+    Check(Near(m.gainMapMax, 3.0 * 200.0 / 255.0, 1e-12),
+          "derive: single-pixel headroom 3.0*200/255");
+    // Empty gain -> false.
+    Check(!DeriveAppleHeadroomFromGain(nullptr, 0,
+                                       std::string(kXmpAppleVersionOnly), m) &&
+              !m.valid,
+          "derive: null/empty gain rejected");
+    Check(!DeriveAppleHeadroomFromGain(all255.data(), 0,
+                                       std::string(kXmpAppleVersionOnly), m) &&
+              !m.valid,
+          "derive: zero-size gain rejected");
+    // No version in the XMP -> false (nothing to derive from).
+    Check(!DeriveAppleHeadroomFromGain(all255.data(), all255.size(),
+                                       std::string(kXmpApple), m) &&
+              !m.valid,
+          "derive: headroom-only XMP (no version) rejected");
+    Check(!DeriveAppleHeadroomFromGain(all255.data(), all255.size(),
+                                       std::string("<x:xmpmeta></x:xmpmeta>"), m) &&
+              !m.valid,
+          "derive: empty XMP rejected");
+    // Headroom present but invalid -> false (do not derive over the
+    // writer's value): unparseable, negative, and zero forms.
+    Check(!DeriveAppleHeadroomFromGain(
+              all255.data(), all255.size(),
+              std::string("<HDRGainMapVersion>65536</HDRGainMapVersion>"
+                          "<HDRGainMapHeadroom>abc</HDRGainMapHeadroom>"),
+              m) &&
+              !m.valid,
+          "derive: version + unparseable headroom rejected");
+    Check(!DeriveAppleHeadroomFromGain(
+              all255.data(), all255.size(),
+              std::string("<HDRGainMapVersion>65536</HDRGainMapVersion>"
+                          "<HDRGainMapHeadroom>-1.5</HDRGainMapHeadroom>"),
+              m) &&
+              !m.valid,
+          "derive: version + negative headroom rejected");
+    Check(!DeriveAppleHeadroomFromGain(
+              all255.data(), all255.size(),
+              std::string("<HDRGainMapVersion>65536</HDRGainMapVersion>"
+                          "<HDRGainMapHeadroom>0.0</HDRGainMapHeadroom>"),
+              m) &&
+              !m.valid,
+          "derive: version + zero headroom rejected");
+    // Gamma is re-read from the same XMP string: present-and-valid
+    // wins, invalid falls back to 1.0 without rejecting.
+    Check(DeriveAppleHeadroomFromGain(
+              all255.data(), all255.size(),
+              std::string("<HDRGainMapVersion>65536</HDRGainMapVersion>"
+                          "<HDRGainMapGamma>2.0</HDRGainMapGamma>"),
+              m) &&
+              m.valid && Near(m.gamma, 2.0, 1e-12),
+          "derive: gamma re-read from version XMP (2.0)");
+    Check(DeriveAppleHeadroomFromGain(
+              all255.data(), all255.size(),
+              std::string("<HDRGainMapVersion>65536</HDRGainMapVersion>"
+                          "<HDRGainMapGamma>-1.0</HDRGainMapGamma>"),
+              m) &&
+              m.valid && Near(m.gamma, 1.0, 1e-12),
+          "derive: invalid gamma falls back to 1.0");
+    Check(DeriveAppleHeadroomFromGain(
+              all255.data(), all255.size(),
+              std::string("<HDRGainMapVersion>65536</HDRGainMapVersion>"
+                          "<HDRGainMapGamma>inf</HDRGainMapGamma>"),
+              m) &&
+              m.valid && Near(m.gamma, 1.0, 1e-12),
+          "derive: unparseable gamma falls back to 1.0");
 }
 
 void TestSrgbToLinear() {
@@ -932,6 +1101,7 @@ int main() {
     TestFindGainMapJpeg();
     TestFindIso21496Payload();
     TestParseXmp();
+    TestDeriveAppleHeadroom();
     TestSrgbToLinear();
     TestBilinearUpsample();
     TestApplyGainMap();
