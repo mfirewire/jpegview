@@ -51,6 +51,7 @@ enum class Primaries : int {
     kUnknown = 0,
     kBt709 = 1,   // BT.709 / sRGB
     kBt2020 = 9,  // BT.2020
+    kP3Dci = 11,  // DCI-P3 (SMPTE RP 431-2, DCI white 0.314, 0.351)
     kP3 = 12,     // Display P3 (DCI-P3, D65)
 };
 

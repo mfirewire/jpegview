@@ -235,12 +235,41 @@ void TestDetection() {
     Check(TransferFromCode(18) == Transfer::kHlg, "CICP 18 -> HLG");
     Check(TransferFromCode(13) == Transfer::kSrgb, "CICP 13 -> sRGB");
     Check(PrimariesFromCode(9) == Primaries::kBt2020, "CICP 9 -> BT.2020");
+    Check(PrimariesFromCode(11) == Primaries::kP3Dci, "CICP 11 -> DCI-P3");
     Check(PrimariesFromCode(12) == Primaries::kP3, "CICP 12 -> P3");
     Check(PrimariesFromCode(1) == Primaries::kBt709, "CICP 1 -> BT.709");
     // IsHdr is the ONLY gate for the new code path: an SDR transfer
     // must never reach the tone mapper.
     Check(!IsHdr(cicpFor(13)), "transfer 13 not HDR (gate)");
     Check(!IsHdr(cicpFor(0)), "transfer 0 not HDR (gate)");
+}
+
+void TestDciP3Primaries() {
+    using namespace HdrToneMap;
+    // P2-B1/D7: CICP 11 is DCI-P3 (DCI white 0.314, 0.351), not Display
+    // P3 (D65). A 50% grey PQ pixel under the DCI matrix comes out
+    // green-shifted (178,192,175); the D65 matrix would give neutral
+    // (188,188,188) - up to 13 levels wrong. Values pinned from the
+    // real helper (probe_dci); ranges allow +-3 for float rounding.
+    uint8_t outR = 0, outG = 0, outB = 0;
+    double sigGrey = PqNitsToSignal(101.5);  // 50% of SDR white (203)
+    ConvertPixel(sigGrey, sigGrey, sigGrey, Transfer::kPq, Primaries::kP3Dci, 203.0, outR, outG, outB);
+    Check(outR >= 175 && outR <= 181 && outG >= 189 && outG <= 195 &&
+          outB >= 172 && outB <= 178,
+          "PQ DCI-P3 50% grey -> ~(178,192,175)");
+    Check(outG > outR && outG > outB,
+          "PQ DCI-P3 50% grey is green-shifted, not neutral");
+    ConvertPixel(sigGrey, sigGrey, sigGrey, Transfer::kPq, Primaries::kP3, 203.0, outR, outG, outB);
+    Check(outR >= 185 && outR <= 191 && outG >= 185 && outG <= 191 &&
+          outB >= 185 && outB <= 191,
+          "PQ Display P3 50% grey stays neutral ~(188,188,188)");
+    // A half-red pixel differs by ~7 levels between the two matrices.
+    ConvertPixel(sigGrey, 0.0, 0.0, Transfer::kPq, Primaries::kP3Dci, 203.0, outR, outG, outB);
+    Check(outR >= 183 && outR <= 189 && outG == 0 && outB >= 20 && outB <= 26,
+          "PQ DCI-P3 half red -> ~(186,0,23)");
+    ConvertPixel(sigGrey, 0.0, 0.0, Transfer::kPq, Primaries::kP3, 203.0, outR, outG, outB);
+    Check(outR >= 190 && outR <= 196 && outG == 0 && outB >= 22 && outB <= 28,
+          "PQ Display P3 half red -> ~(193,0,25)");
 }
 
 void TestComputePeakNits() {
@@ -494,6 +523,7 @@ int main() {
     TestEetfIdentityAtSdrPeak();
     TestConvertPixel();
     TestDetection();
+    TestDciP3Primaries();
     TestComputePeakNits();
     TestConvertLinearPixel();
     TestComputePeakLinear();

@@ -208,8 +208,14 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			// The ICC profile is then not fetched at all. If the
 			// image has no structured profile (XYB or a custom ICC
 			// profile - GetColorAsEncodedProfile fails), the ICC
-			// path below is used exactly as before. JXL P3 (11) + a
-			// D65 white point is Display P3 = CICP 12.
+			// path below is used exactly as before. JXL carries the
+			// primaries and the white point separately, while CICP
+			// folds the white point into the primaries code: JXL P3
+			// (11) + a D65 white point is Display P3 = CICP 12, and
+			// P3 + a DCI white point stays 11 (DCI-P3). The rewrite
+			// below must stay: PrimariesFromCode cannot tell the two
+			// apart from the code alone, and deleting it would route
+			// Display P3 JXL files through the DCI matrix (P2-B1).
 			JxlColorEncoding enc;
 			if (JXL_DEC_SUCCESS == JxlDecoderGetColorAsEncodedProfile(
 				cache.decoder, JXL_COLOR_PROFILE_TARGET_DATA, &enc)) {

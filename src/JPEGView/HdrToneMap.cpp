@@ -55,15 +55,31 @@ const double kP3ToSrgb[3][3] = {
     {-0.019638, -0.078635,  1.098274},
 };
 
+// P3 with the DCI white point (CICP 11, SMPTE RP 431-2) -> sRGB.
+// Same primaries as Display P3 but a different white point, so the
+// matrix differs: the D65 matrix maps DCI white (1,1,1) to sRGB white
+// (255,255,255), while the correct rendering is (242,255,238)
+// pre-gamut-map (the D65 matrix is off by up to 17 levels on blue and
+// ~13 on mid-grey). Computed the same way as kP3ToSrgb (XYZ->sRGB times
+// the DCI-P3 NPM, float64); DCI luma is the Y row of that NPM.
+// (P2-B1/D7: a proper DCI variant, not the D65 matrix.)
+const double kP3DciToSrgb[3][3] = {
+    { 1.120535, -0.234612,  0.000000},
+    {-0.038479,  1.087059,  0.000000},
+    {-0.017971, -0.082050,  0.954805},
+};
+
 // Luma coefficients (Y row of the RGB-to-XYZ matrix).
 const double kRec2020Luma[3] = {0.2627, 0.6780, 0.0593};
 const double kP3Luma[3] = {0.2290, 0.6917, 0.0793};
+const double kP3DciLuma[3] = {0.2095, 0.7216, 0.0689};
 const double kSrgbLuma[3] = {0.2126, 0.7152, 0.0722};
 
 const double (*GamutInverse(Primaries primaries))[3] {
     switch (primaries) {
         case Primaries::kBt2020: return kRec2020ToSrgb;
         case Primaries::kP3: return kP3ToSrgb;
+        case Primaries::kP3Dci: return kP3DciToSrgb;
         default: return NULL;  // BT.709 / sRGB: identity, no matrix needed.
     }
 }
@@ -72,6 +88,7 @@ const double* GamutLuma(Primaries primaries) {
     switch (primaries) {
         case Primaries::kBt2020: return kRec2020Luma;
         case Primaries::kP3: return kP3Luma;
+        case Primaries::kP3Dci: return kP3DciLuma;
         default: return kSrgbLuma;  // BT.709 / sRGB: sRGB luma coefficients.
     }
 }
@@ -163,6 +180,7 @@ Primaries PrimariesFromCode(int code) {
     switch (code) {
         case 1: return Primaries::kBt709;
         case 9: return Primaries::kBt2020;
+        case 11: return Primaries::kP3Dci;
         case 12: return Primaries::kP3;
         default: return Primaries::kUnknown;
     }
