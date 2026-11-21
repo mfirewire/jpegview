@@ -17,6 +17,7 @@
 #include "MaxImageDef.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -99,6 +100,23 @@ static void SetInflateDiag(int initRet, int inflateRet, unsigned long totalOut) 
     g_lastInflateDiag.totalOut = totalOut;
 }
 
+// Explicit zlib allocators for InflateTo below. The vendored zlib.lib
+// (libpng-apng 1.3.2) ships no default allocator (no zcalloc/zcfree
+// or malloc in the .lib), so inflateInit_ returns Z_STREAM_ERROR (-2)
+// when zalloc/zfree are NULL in this build -- device-proven 2026-11-21
+// on flat_16bit_rgba_zip.psd (INFLATE init=-2, inflate never ran).
+// libpng works with the same .lib because it sets them explicitly.
+// Do NOT remove these or revert to relying on zlib defaults.
+static void* PsdZAlloc(void* opaque, unsigned items, unsigned size) {
+    (void)opaque;
+    return std::malloc((size_t)items * (size_t)size);
+}
+
+static void PsdZFree(void* opaque, void* address) {
+    (void)opaque;
+    std::free(address);
+}
+
 // Inflate src[0..srcSize) into dst[0..dstSize). Returns false unless
 // the stream ends cleanly (Z_STREAM_END) with exactly dstSize bytes
 // produced. Only the stream end and the produced count are checked:
@@ -128,6 +146,9 @@ bool InflateTo(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstSize)
     strm.avail_in = (uInt)srcSize;
     strm.next_out = dst;
     strm.avail_out = (uInt)dstSize;
+    strm.zalloc = PsdZAlloc;
+    strm.zfree = PsdZFree;
+    strm.opaque = Z_NULL;
     int initRet = inflateInit(&strm);
     if (initRet != Z_OK) {
         // TEMPORARY DIAGNOSTIC (2026-11-21): record the inflateInit
