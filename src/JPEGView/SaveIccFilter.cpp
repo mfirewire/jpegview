@@ -18,7 +18,10 @@ namespace {
 // Same colourant values and tolerance as
 // ICCProfileTransform::IsNoTransformNeeded, so the load side (which
 // decides whether to convert) and the save side (which decides whether
-// to keep the profile) agree on what "sRGB" means.
+// to keep the profile) agree on the PRIMARIES of "sRGB". The white
+// point does NOT agree: the load side only accepts D50 (see
+// ICCProfileTransform.cpp:280), while this classifier also accepts
+// D65. TRC is not part of the decision here either (F3 residual).
 const double kSrgbRed[3] = { 0.4361, 0.2225, 0.0139 };
 const double kSrgbGreen[3] = { 0.3851, 0.7169, 0.0971 };
 const double kSrgbBlue[3] = { 0.1431, 0.0606, 0.7141 };

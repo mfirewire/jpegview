@@ -327,8 +327,10 @@ double ComputePeakNits(const float* srcRgb, size_t pixelCount, Transfer transfer
     } else {
         return kSdrWhiteNits;
     }
-    // P2-C2: a non-finite peak (Inf from a single HLG super-white pixel)
-    // falls back to SDR white instead of poisoning the EETF.
+    // P2-C2: a non-finite peak falls back to SDR white instead of
+    // poisoning the EETF. (The HLG super-white source is unreachable
+    // since P2-C10 clamps HlgSignalToSceneLinear; this stays as a
+    // defence-in-depth fallback for any other non-finite peak.)
     if (!(peak > 0.0) || !std::isfinite(peak)) return kSdrWhiteNits;
     return peak;
 }

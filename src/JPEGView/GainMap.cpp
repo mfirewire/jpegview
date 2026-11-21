@@ -298,6 +298,16 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
     // to confirm (P2-A2). The version-only XMP form, by contrast, is
     // confirmed real (two iPhone HEICs) and is handled by
     // DeriveAppleHeadroomFromGain, not here.
+    // Coexistence: this branch is only entered when NO hdrgm field is
+    // present (!anyHdrgm below). An XMP packet carrying both hdrgm
+    // fields and Apple fields therefore never uses the Apple Headroom
+    // here: if the hdrgm set is incomplete or invalid, this function
+    // returns false and the HEIF caller derives the headroom from the
+    // gain-map pixels instead (N1) — but only when no Headroom field
+    // exists anywhere; a packet with both hdrgm and a valid Apple
+    // Headroom yields no gain map at all. No such packet is known
+    // to exist (Apple files carry no hdrgm; UltraHDR files carry no
+    // Apple version).
     if (!anyHdrgm) {
         double headroom = 0.0;
         if (FindXmpField(xmp, "HDRGainMapHeadroom", headroom)) {

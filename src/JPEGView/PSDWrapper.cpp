@@ -349,7 +349,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		if (bIsHdr) {
 			// PSD HDR: 16/32-bit RGB/grayscale. Decode the planar image
 			// data to linear-float RGB here (PsdHdr); the tone map into
-			// the 8-bit BGR pPixelData happens in the bIsHdr arm below,
+			// the 8-bit BGRA pPixelData happens in the bIsHdr arm below,
 			// once the shared block has allocated it at the right
 			// stride. The 8-bit decompress loops and the post-tone-map
 			// ICC transform are skipped on this path (see the bIsHdr
