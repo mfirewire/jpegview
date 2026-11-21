@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 
 #include "HdrToneMap.h"
 
@@ -296,6 +297,38 @@ void TestConvertLinearImage() {
           "ConvertLinearImage grey pixel -> BGR ~118");
 }
 
+void TestConvertLinearImageToBgra() {
+    using namespace HdrToneMap;
+    // A 2x1 image: white (linear 1.0) and 18% grey, with a planar
+    // alpha of 128 and 255. Peak is 1.0, so the colour bytes must
+    // match ConvertLinearImage (white 255, grey ~118) and the alpha
+    // bytes must come from the plane. Output is BGRA (JPEGView order).
+    // The output is pre-filled with a sentinel so a missed byte
+    // (H-01/N-3: the old packed-BGR path left bytes uninitialized
+    // for 4-channel PSDs) fails the checks instead of passing silently.
+    float img[6] = { 1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f };
+    uint8_t alpha[2] = { 128, 255 };
+    uint8_t out[8];
+    std::memset(out, 0xCD, sizeof(out));
+    ConvertLinearImageToBgra(img, 2, 1, 6, out, 8, alpha, 1);
+    Check(out[0] == 255 && out[1] == 255 && out[2] == 255 && out[3] == 128,
+          "ConvertLinearImageToBgra white pixel -> BGRA 255,255,255,128");
+    Check(out[4] >= 116 && out[4] <= 120 &&
+          out[5] >= 116 && out[5] <= 120 &&
+          out[6] >= 116 && out[6] <= 120 && out[7] == 255,
+          "ConvertLinearImageToBgra grey pixel -> BGRA ~118,255");
+    // NULL alpha: every alpha byte is 0xff (opaque) and the colour
+    // bytes are unchanged; the sentinel must be gone from all bytes.
+    std::memset(out, 0xCD, sizeof(out));
+    ConvertLinearImageToBgra(img, 2, 1, 6, out, 8, NULL, 0);
+    Check(out[0] == 255 && out[1] == 255 && out[2] == 255 && out[3] == 0xff,
+          "ConvertLinearImageToBgra NULL alpha -> white pixel alpha 0xff");
+    Check(out[4] >= 116 && out[4] <= 120 &&
+          out[5] >= 116 && out[5] <= 120 &&
+          out[6] >= 116 && out[6] <= 120 && out[7] == 0xff,
+          "ConvertLinearImageToBgra NULL alpha -> grey pixel alpha 0xff");
+}
+
 }  // namespace
 
 int main() {
@@ -309,6 +342,7 @@ int main() {
     TestConvertLinearPixel();
     TestComputePeakLinear();
     TestConvertLinearImage();
+    TestConvertLinearImageToBgra();
     std::printf("hdr_tonemap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

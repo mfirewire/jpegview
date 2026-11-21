@@ -432,4 +432,31 @@ void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcSt
     }
 }
 
+void ConvertLinearImageToBgra(const float* srcRgb, int width, int height, size_t srcStrideFloats,
+                              uint8_t* dstBgra, size_t dstStrideBytes,
+                              const uint8_t* planarAlphaOrNull, size_t alphaStride) {
+    if (srcRgb == NULL || dstBgra == NULL || width <= 0 || height <= 0) return;
+    double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
+    for (int y = 0; y < height; y++) {
+        const float* srcRow = srcRgb + (size_t)y * srcStrideFloats;
+        uint8_t* dstRow = dstBgra + (size_t)y * dstStrideBytes;
+        const uint8_t* alphaRow = (planarAlphaOrNull != NULL)
+            ? planarAlphaOrNull + (size_t)y * (size_t)width * alphaStride : NULL;
+        for (int x = 0; x < width; x++) {
+            double r = (double)srcRow[(size_t)x * 3 + 0];
+            double g = (double)srcRow[(size_t)x * 3 + 1];
+            double b = (double)srcRow[(size_t)x * 3 + 2];
+            uint8_t outR = 0, outG = 0, outB = 0;
+            ConvertLinearPixel(r, g, b, peakLinear, outR, outG, outB);
+            // JPEGView pixels are BGR, with alpha last. Every
+            // byte of the quad is written (H-01/N-3).
+            dstRow[(size_t)x * 4 + 0] = outB;
+            dstRow[(size_t)x * 4 + 1] = outG;
+            dstRow[(size_t)x * 4 + 2] = outR;
+            dstRow[(size_t)x * 4 + 3] = (alphaRow != NULL)
+                ? alphaRow[(size_t)x * alphaStride] : (uint8_t)0xff;
+        }
+    }
+}
+
 }  // namespace HdrToneMap

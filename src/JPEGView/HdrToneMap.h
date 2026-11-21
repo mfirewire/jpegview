@@ -167,4 +167,24 @@ void ConvertLinearPixel(double r, double g, double b, double peakLinear,
 void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcStrideFloats,
                         uint8_t* dstBgr, size_t dstStrideBytes);
 
+// Convert a whole image of interleaved float RGB (width x height x 3
+// floats, scene-linear, sRGB primaries) to 8-bit sRGB BGRA (width x
+// height x 4 bytes, B,G,R,A, the JPEGView pixel order with alpha).
+// Computes the content peak internally. `srcStrideFloats` is the float
+// stride between rows (usually width*3); `dstStrideBytes` the byte
+// stride between rows (padded). `planarAlphaOrNull` is an optional
+// per-pixel alpha plane: when non-NULL, the alpha byte of each pixel
+// is read from it (`alphaStride` is the byte stride between
+// consecutive pixels in the plane, usually 1; a row is width *
+// alphaStride bytes, so an interleaved source can pass a pointer
+// into its own BGRA buffer with a stride of 4); when NULL, every
+// alpha byte is 0xff (opaque). Every byte of the BGRA output is
+// written (H-01/N-3: the old ConvertLinearImage path left bytes
+// uninitialized for 4-channel PSDs). This is the variant PSDWrapper
+// uses for HDR PSDs, and Batch 4 reuses it for the AVIF/HEIF
+// gain-map repack.
+void ConvertLinearImageToBgra(const float* srcRgb, int width, int height, size_t srcStrideFloats,
+                              uint8_t* dstBgra, size_t dstStrideBytes,
+                              const uint8_t* planarAlphaOrNull, size_t alphaStride);
+
 }  // namespace HdrToneMap

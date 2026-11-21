@@ -365,15 +365,19 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			// The 4th plane is alpha only when bUseAlpha says so (alpha
 			// identifiers, or their absence); a 4-channel file whose
 			// 4th plane is not alpha is decoded with channels = 4 but
-			// rendered as 3-channel BGR, the same as the 8-bit path
-			// dropping the plane. PsdHdr decodes (and discards) the
-			// alpha plane in that case, so ZIP stays consistent.
+			// rendered as 4-channel BGRA with opaque alpha (H-01),
+			// the same colours as the 8-bit path dropping the plane.
+			// PsdHdr decodes (and discards) the alpha plane in that
+			// case, so ZIP stays consistent.
 			bHdrAlpha = (nColorMode == MODE_RGB && nHdrChannels == 4 && bUseAlpha);
-			// Grayscale HDR renders as 3-channel BGR (PsdHdr already
-			// replicates the grey plane to R = G = B), unlike the 8-bit
-			// grayscale path which yields nChannels = 1: CJPEGImage
-			// handles 3 channels fine, and it keeps the tone-mapped
-			// output identical to an RGB rendering of the same grey.
+			// Grayscale HDR renders as 4-channel BGRA with opaque
+			// alpha (PsdHdr already replicates the grey plane to
+			// R = G = B; H-01 stores every HDR image as BGRA),
+			// unlike the 8-bit grayscale path which yields
+			// nChannels = 1: CJPEGImage handles 4 channels fine,
+			// and the alpha blend below is a no-op for the opaque
+			// alpha, so the tone-mapped output stays identical to
+			// an RGB rendering of the same grey.
 			nChannels = (unsigned short)(bHdrAlpha ? 4 : 3);
 			size_t nLinearBytes = 0;
 			if (!IsImageBufferSizeOk((size_t)nWidth * 3 * sizeof(float), (size_t)nHeight, &nLinearBytes)) {
@@ -453,6 +457,13 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			}
 		}
 
+		// H-01: the BGRA tone-map variant writes 4 bytes/pixel, so a
+		// 3-channel HDR image is stored as 4-channel BGRA with
+		// opaque alpha (0xff). The alpha blend below is a no-op for
+		// it, and CJPEGImage is created with 4 channels.
+		if (bIsHdr && !bHdrAlpha)
+			nChannels = 4;
+
 		int nRowSize = Helpers::DoPadding(nWidth * nChannels, 4);
 		// nRowSize * nHeight is int arithmetic: 262144 x 65535 is 17GB and wraps.
 		size_t allocSize = 0;
@@ -471,21 +482,14 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		unsigned char* p = (unsigned char*)pBuffer;
 		if (bIsHdr) {
 			// Tone-map the linear RGB decoded in the HDR branch above
-			// into the 8-bit BGR pPixelData allocated by the shared
-			// block above (nRowSize already matches the 3/4-channel
-			// layout set there). ConvertLinearImage writes BGR
-			// triples; the 4th byte of each BGRA pixel is filled from
-			// the alpha plane below, so the existing alpha-blend block
+			// into the 8-bit BGRA pPixelData allocated by the shared
+			// block above (nRowSize already matches the 4-channel
+			// layout set there). ConvertLinearImageToBgra writes BGRA
+			// quads and every byte of them: the alpha byte comes from
+			// the alpha plane when present, or 0xff (opaque) for
+			// 3-channel HDR, so the existing alpha-blend block below
 			// runs unchanged.
-			HdrToneMap::ConvertLinearImage(pLinearRgb, (int)nWidth, (int)nHeight, (size_t)nWidth * 3, (unsigned char*)pPixelData, (size_t)nRowSize);
-			if (bHdrAlpha) {
-				unsigned char* pDst = (unsigned char*)pPixelData;
-				for (unsigned int y = 0; y < nHeight; y++) {
-					for (unsigned int x = 0; x < nWidth; x++) {
-						pDst[(size_t)y * nRowSize + (size_t)x * 4 + 3] = pAlphaBuf[(size_t)y * nWidth + x];
-					}
-				}
-			}
+			HdrToneMap::ConvertLinearImageToBgra(pLinearRgb, (int)nWidth, (int)nHeight, (size_t)nWidth * 3, (unsigned char*)pPixelData, (size_t)nRowSize, bHdrAlpha ? pAlphaBuf : NULL, 1);
 		} else if (nCompressionMethod == COMPRESSION_RLE) {
 			// Skip byte counts for scanlines. The table size is computed in
 			// 64 bit: nHeight * nRealChannels * 2 * nVersion overflows 32 bit
