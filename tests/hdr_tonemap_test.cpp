@@ -131,6 +131,11 @@ void TestEetfIdentityAtSdrPeak() {
         }
     }
     g_checks++;
+    // A signal above PQ(203) at an SDR peak is capped to PQ(203)
+    // (the fast path returns min(Clamp01(signal), PQ(203))).
+    double pqCap = HdrToneMap::PqNitsToSignal(203.0);
+    Check(Near(HdrToneMap::Bt2390EetfPq(0.9, 203.0), pqCap, 1e-12),
+          "EETF caps signal above PQ(203) at SDR peak");
     // With a real HDR peak (1000 nits) the EETF must compress the
     // highlights but stay monotonic and never exceed 1.0.
     double prev = -1.0;
@@ -281,6 +286,24 @@ void TestConvertLinearPixel() {
     double nan = std::nan("");
     ConvertLinearPixel(nan, nan, nan, 1.0, outR, outG, outB);
     Check(outR == 0 && outG == 0 && outB == 0, "linear NaN -> 0");
+    // P2-C3 fast path: a color pixel at SDR peak takes the fast path
+    // (peak 1.0, channels in [0,1]) and must stay pure red.
+    ConvertLinearPixel(1.0, 0.0, 0.0, 1.0, outR, outG, outB);
+    Check(outR == 255 && outG == 0 && outB == 0,
+          "linear (1,0,0) (peak 1.0) -> sRGB (255,0,0)");
+    // P2-C3 regression guard: a (2,0,0) pixel in an image whose peak
+    // is 0.4252 (2*0.2126) must NOT take the fast path - the 2.0
+    // channel is rolled off by the EETF to 1.0. The peak-only fast
+    // path gave (255,142,142) here (GamutMap desaturates the
+    // un-rolled-off 2.0 toward grey); the correct output is (255,0,0).
+    ConvertLinearPixel(2.0, 0.0, 0.0, 0.4252, outR, outG, outB);
+    Check(outR == 255 && outG == 0 && outB == 0,
+          "linear (2,0,0) (peak 0.4252) -> sRGB (255,0,0)");
+    // Same pixel with peak exactly 1.0: still the slow path (channel
+    // above 1.0), still (255,0,0).
+    ConvertLinearPixel(2.0, 0.0, 0.0, 1.0, outR, outG, outB);
+    Check(outR == 255 && outG == 0 && outB == 0,
+          "linear (2,0,0) (peak 1.0) -> sRGB (255,0,0)");
 }
 
 void TestComputePeakLinear() {

@@ -198,6 +198,17 @@ double HlgSignalToSceneLinear(double signal) {
 double Bt2390EetfPq(double signal, double peakNits) {
     double lw = peakNits;
     if (!(lw > kSdrWhiteNits)) lw = kSdrWhiteNits;
+    // P2-C3: when the peak is at or below SDR white, the EETF is the
+    // identity up to the PQ(203) cap (maxLum == 1, ks == 1, so e2 == e1
+    // and the return is min(Clamp01(signal), PQ(203))) - skip the
+    // spline and the four PQ conversions. (Hoisting will make this
+    // pow-free via the precomputed pqLw; until then it costs one
+    // PqNitsToSignal call.)
+    if (lw <= kSdrWhiteNits) {
+        double c = Clamp01(signal);
+        double pqLw = PqNitsToSignal(kSdrWhiteNits);
+        return c < pqLw ? c : pqLw;
+    }
     const double lmax = kSdrWhiteNits;
     double pqLw = PqNitsToSignal(lw);
     double pqLmax = PqNitsToSignal(lmax);
@@ -207,9 +218,8 @@ double Bt2390EetfPq(double signal, double peakNits) {
     if (!(denom > 0.0)) return Clamp01(signal);
     double maxLum = pqLmax / denom;
     double ks = 1.5 * maxLum - 0.5;
-    // Normalised PQ signal (source white = 1). When the content peak is
-    // at or below SDR white, maxLum == 1 and ks == 1, so E1 < ks for
-    // every in-range signal and the EETF is the identity.
+    // Normalised PQ signal (source white = 1). (The peak <= SDR white
+    // case is handled by the fast path above; here maxLum < 1, ks < 1.)
     double e1 = Clamp01(signal) / pqLw;
     if (!(e1 < 1.0)) e1 = 1.0;
     double e2;
@@ -387,18 +397,33 @@ void ConvertLinearPixel(double r, double g, double b, double peakLinear,
     if (!(cr >= 0.0)) cr = 0.0;
     if (!(cg >= 0.0)) cg = 0.0;
     if (!(cb >= 0.0)) cb = 0.0;
-    // Linear -> nits -> PQ signal -> EETF -> nits -> display-linear
-    // (SDR white = 1.0), the same PQ-domain roll-off as the PQ/HLG
-    // path, so both share one highlight curve.
-    double sigR = PqNitsToSignal(cr * kSdrWhiteNits);
-    double sigG = PqNitsToSignal(cg * kSdrWhiteNits);
-    double sigB = PqNitsToSignal(cb * kSdrWhiteNits);
-    double eR = Bt2390EetfPq(sigR, peakNits);
-    double eG = Bt2390EetfPq(sigG, peakNits);
-    double eB = Bt2390EetfPq(sigB, peakNits);
-    double linR = PqSignalToNits(eR) / kSdrWhiteNits;
-    double linG = PqSignalToNits(eG) / kSdrWhiteNits;
-    double linB = PqSignalToNits(eB) / kSdrWhiteNits;
+    double linR, linG, linB;
+    // P2-C3 fast path: when the content peak is at or below SDR white
+    // AND every channel is in [0,1], the PQ round-trip is the identity
+    // (the EETF passes the signal through unchanged), so skip it.
+    // The channel test is essential: a single channel above 1.0 is
+    // rolled off by the EETF, and skipping the round-trip would leave
+    // it un-rolled-off - a (2,0,0) pixel in a peak<=1.0 image came out
+    // (255,142,142) instead of (255,0,0) with the peak-only condition
+    // (GamutMap desaturates the un-rolled-off 2.0 toward grey).
+    if (peakLinear <= 1.0 && cr <= 1.0 && cg <= 1.0 && cb <= 1.0) {
+        linR = cr;
+        linG = cg;
+        linB = cb;
+    } else {
+        // Linear -> nits -> PQ signal -> EETF -> nits -> display-linear
+        // (SDR white = 1.0), the same PQ-domain roll-off as the PQ/HLG
+        // path, so both share one highlight curve.
+        double sigR = PqNitsToSignal(cr * kSdrWhiteNits);
+        double sigG = PqNitsToSignal(cg * kSdrWhiteNits);
+        double sigB = PqNitsToSignal(cb * kSdrWhiteNits);
+        double eR = Bt2390EetfPq(sigR, peakNits);
+        double eG = Bt2390EetfPq(sigG, peakNits);
+        double eB = Bt2390EetfPq(sigB, peakNits);
+        linR = PqSignalToNits(eR) / kSdrWhiteNits;
+        linG = PqSignalToNits(eG) / kSdrWhiteNits;
+        linB = PqSignalToNits(eB) / kSdrWhiteNits;
+    }
     // Gamut is identity (sRGB primaries); GamutMap still runs as a
     // safety clamp for out-of-range values.
     GamutMap(&linR, &linG, &linB);
