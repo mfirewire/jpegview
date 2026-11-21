@@ -15,10 +15,10 @@
  *  needs the first two (primaries + transfer) to decide whether a PNG is
  *  HDR (PQ/HLG) and which tone-mapping path to take.
  *
- *  Inclusion rule: this header is included by PNGWrapper.cpp only. It
- *  defines a non-inline function, so including it from a second .cpp in
- *  the app build would be a duplicate definition at link time. The test
- *  TU is a separate binary, which is the only other includer.
+ *  The function is inline (S3), so any translation unit may include
+ *  this header without a duplicate-definition link error. It is
+ *  currently included by PNGWrapper.cpp and by
+ *  tests/loader_png_cicp_test.cpp (a separate binary).
  */
 
 #pragma once
@@ -38,7 +38,7 @@ namespace PngCicp {
 // when there is none, it is malformed, or the scan runs out of buffer.
 // A cICP chunk is only 4 bytes of data, so a truncated or over-long
 // one is ignored (treated as no cICP).
-bool FindCicpChunk(const void* bufferIn, size_t sizebytes, size_t startOffset, HdrToneMap::Cicp& cicp)
+inline bool FindCicpChunk(const void* bufferIn, size_t sizebytes, size_t startOffset, HdrToneMap::Cicp& cicp)
 {
 	const unsigned char* buffer = (const unsigned char*)bufferIn;
 	size_t offset = startOffset;
