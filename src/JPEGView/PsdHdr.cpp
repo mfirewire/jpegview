@@ -54,6 +54,19 @@ uint32_t ReadBe32(const uint8_t* p) {
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
+// Write one big-endian uint16 / uint32 (the counterparts of ReadBe16/32).
+void WriteBe16(uint8_t* p, uint16_t v) {
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)(v & 0xFF);
+}
+
+void WriteBe32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)((v >> 16) & 0xFF);
+    p[2] = (uint8_t)((v >> 8) & 0xFF);
+    p[3] = (uint8_t)(v & 0xFF);
+}
+
 // Reinterpret a uint32 bit pattern as a float (no aliasing violation).
 float BitsToFloat(uint32_t bits) {
     float f = 0.0f;
@@ -164,31 +177,6 @@ float SanitizeFloat32(float v) {
         return kClampedInfinity;
     }
     return v;
-}
-
-void ReverseDelta16(uint16_t* samples, int count) {
-    if (samples == NULL || count <= 0) {
-        return;
-    }
-    // Wraparound uint16 arithmetic: the delta encoding is defined on
-    // the stored bit patterns, so the sum wraps mod 65536.
-    uint32_t acc = 0;
-    for (int i = 0; i < count; i++) {
-        acc = (acc + (uint32_t)samples[i]) & 0xFFFFu;
-        samples[i] = (uint16_t)acc;
-    }
-}
-
-void ReverseDelta32(uint32_t* samples, int count) {
-    if (samples == NULL || count <= 0) {
-        return;
-    }
-    // Wraparound uint32 arithmetic on the float bit patterns.
-    uint32_t acc = 0;
-    for (int i = 0; i < count; i++) {
-        acc = acc + samples[i];
-        samples[i] = acc;
-    }
 }
 
 uint8_t FloatAlphaToByte(float a) {
@@ -353,36 +341,29 @@ bool DecodeImageData(const uint8_t* src, size_t srcSize,
             if (compression == kCompressionZipPrediction) {
                 // Reverse the per-row delta, per plane. The first
                 // sample of each row is stored as-is (delta from 0).
-                // Work on host-order values in a temp row: the
-                // inflated bytes are big-endian, and the delta is
-                // defined on the sample values, not the byte stream.
+                // In place, on the big-endian bytes: each sample is
+                // read, added to the running total (wraparound uint16
+                // / uint32 arithmetic on the stored bit patterns),
+                // and written back before the next sample is read, so
+                // no temp row is needed and nothing here can throw
+                // (the no-throw contract in PsdHdr.h: the per-row
+                // temp vectors this replaces were the only unguarded
+                // allocation in this file).
                 for (int ch = 0; ch < channels; ch++) {
                     uint8_t* plane = planes.data() + (size_t)ch * planeBytes;
                     for (int y = 0; y < height; y++) {
                         uint8_t* row = plane + (size_t)y * rowBytes;
                         if (bitDepth == 16) {
-                            std::vector<uint16_t> samples((size_t)width);
+                            uint32_t acc = 0;
                             for (int x = 0; x < width; x++) {
-                                samples[(size_t)x] = ReadBe16(row + (size_t)x * 2);
-                            }
-                            ReverseDelta16(samples.data(), width);
-                            for (int x = 0; x < width; x++) {
-                                uint16_t v = samples[(size_t)x];
-                                row[(size_t)x * 2 + 0] = (uint8_t)(v >> 8);
-                                row[(size_t)x * 2 + 1] = (uint8_t)(v & 0xFF);
+                                acc = (acc + (uint32_t)ReadBe16(row + (size_t)x * 2)) & 0xFFFFu;
+                                WriteBe16(row + (size_t)x * 2, (uint16_t)acc);
                             }
                         } else {
-                            std::vector<uint32_t> samples((size_t)width);
+                            uint32_t acc = 0;
                             for (int x = 0; x < width; x++) {
-                                samples[(size_t)x] = ReadBe32(row + (size_t)x * 4);
-                            }
-                            ReverseDelta32(samples.data(), width);
-                            for (int x = 0; x < width; x++) {
-                                uint32_t v = samples[(size_t)x];
-                                row[(size_t)x * 4 + 0] = (uint8_t)(v >> 24);
-                                row[(size_t)x * 4 + 1] = (uint8_t)((v >> 16) & 0xFF);
-                                row[(size_t)x * 4 + 2] = (uint8_t)((v >> 8) & 0xFF);
-                                row[(size_t)x * 4 + 3] = (uint8_t)(v & 0xFF);
+                                acc = acc + ReadBe32(row + (size_t)x * 4);
+                                WriteBe32(row + (size_t)x * 4, acc);
                             }
                         }
                     }

@@ -102,13 +102,6 @@ double SrgbEotf16(uint16_t v);
 // pass through unchanged.
 float SanitizeFloat32(float v);
 
-// Reverse the ZIP-prediction delta in place for one row of samples:
-// out[i] = sum of deltas[0..i] (wraparound arithmetic in the sample's
-// native width), i.e. the accumulator resets at the start of the row.
-// Pinned by the unit test.
-void ReverseDelta16(uint16_t* samples, int count);
-void ReverseDelta32(uint32_t* samples, int count);
-
 // Convert one alpha sample to an 8-bit byte (clamped to [0,1] first
 // for float alpha, then rounded): round(a * 255) for 32-bit float,
 // round(a / 65535 * 255) for 16-bit.

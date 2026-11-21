@@ -68,6 +68,7 @@
 #include "PsdHdr.h"
 #include "PsdIcc.h"
 #include "lcms2.h"
+#include "zlib.h"
 
 namespace {
 
@@ -252,39 +253,6 @@ void TestSanitizeFloat32() {
     Check(clamped == 1.0e6f, "sanitize +Inf -> 1e6");
 }
 
-void TestReverseDelta() {
-    using namespace PsdHdr;
-    {
-        uint16_t row[4] = { 100, 200, 300, 400 };
-        ReverseDelta16(row, 4);
-        Check(row[0] == 100 && row[1] == 300 && row[2] == 600 && row[3] == 1000,
-              "delta16 cumulative sum");
-    }
-    {
-        // Wraparound: 60000 + 10000 = 70000 mod 65536 = 4464.
-        uint16_t row[2] = { 60000, 10000 };
-        ReverseDelta16(row, 2);
-        Check(row[0] == 60000 && row[1] == 4464, "delta16 wraparound");
-    }
-    {
-        // First sample of a row is stored as-is (delta from zero).
-        uint16_t row[1] = { 12345 };
-        ReverseDelta16(row, 1);
-        Check(row[0] == 12345, "delta16 single sample unchanged");
-    }
-    {
-        uint32_t row[3] = { 5, 7, 9 };
-        ReverseDelta32(row, 3);
-        Check(row[0] == 5 && row[1] == 12 && row[2] == 21,
-              "delta32 cumulative sum");
-    }
-    {
-        // Wraparound on the float bit patterns: 0xFFFFFFF0 + 0x20 = 0x10.
-        uint32_t row[2] = { 0xFFFFFFF0u, 0x20u };
-        ReverseDelta32(row, 2);
-        Check(row[0] == 0xFFFFFFF0u && row[1] == 0x10u, "delta32 wraparound");
-    }
-}
 
 void TestAlphaBytes() {
     using namespace PsdHdr;
@@ -1080,6 +1048,96 @@ void PutBe32Float(uint8_t* p, float f) {
     p[3] = (uint8_t)(bits & 0xFF);
 }
 
+// P2-D1: the ZIP-prediction delta reversal, exercised through
+// DecodeImageData (the in-place reversal replaced ReverseDelta16/32,
+// so the old unit test of those helpers is gone; these cases pin
+// the same behaviour on the code that actually ships). The delta
+// planes are zlib-compressed in-test; the expected linear values
+// come from SrgbEotfRef, independent of PsdHdr::SrgbEotf16.
+void TestZipPredictionInPlace() {
+    using namespace PsdHdr;
+    // 16-bit, 3x1 RGB, ZIP-with-prediction. Delta-encoded planes
+    // (big-endian), one row per plane:
+    //   R deltas {100, 200, 300}      -> {100, 300, 600}
+    //   G deltas {60000, 10000, 0}   -> {60000, 4464, 4464} (wrap:
+    //                                   60000 + 10000 = 70000 mod 65536)
+    //   B deltas {0, 0, 0}            -> {0, 0, 0}
+    const uint16_t deltas16[9] = { 100, 200, 300,
+                                   60000, 10000, 0,
+                                   0, 0, 0 };
+    uint8_t plain16[18];
+    for (int i = 0; i < 9; i++) {
+        PutBe16(plain16 + (size_t)i * 2, deltas16[i]);
+    }
+    uLongf bound16 = compressBound(sizeof(plain16));
+    std::vector<uint8_t> comp16((size_t)bound16);
+    Check(compress(comp16.data(), &bound16, plain16, sizeof(plain16)) == Z_OK,
+          "zippred16 fixture compresses");
+    comp16.resize((size_t)bound16);
+    float out16[9] = { 0.0f };
+    Check(DecodeImageData(comp16.data(), comp16.size(), 3, 1, 3,
+                          kColorModeRgb, 16, kCompressionZipPrediction, 1,
+                          out16, NULL, 0, NULL),
+          "zippred16 3x1 decodes");
+    // out is interleaved RGB, row-major: pixel x at out[x*3 + c].
+    Check(Near((double)out16[0], SrgbEotfRef(100), 1e-4),
+          "zippred16 R0 first sample as-is");
+    Check(Near((double)out16[3], SrgbEotfRef(300), 1e-4),
+          "zippred16 R1 cumulative sum");
+    Check(Near((double)out16[6], SrgbEotfRef(600), 1e-4),
+          "zippred16 R2 cumulative sum");
+    Check(Near((double)out16[1], SrgbEotfRef(60000), 1e-4),
+          "zippred16 G0 first sample as-is");
+    Check(Near((double)out16[4], SrgbEotfRef(4464), 1e-4),
+          "zippred16 G1 wraparound (60000+10000 mod 65536)");
+    Check(Near((double)out16[7], SrgbEotfRef(4464), 1e-4),
+          "zippred16 G2 accumulation after wrap");
+    Check(out16[2] == 0.0f && out16[5] == 0.0f && out16[8] == 0.0f,
+          "zippred16 B row stays zero");
+    // 32-bit, 2x1 RGB, ZIP-with-prediction. Deltas are float bit
+    // patterns, added as uint32 (wraparound mod 2^32):
+    //   R deltas {bits(1.0f), bits(2.0f)} -> {1.0f, +Inf -> 1e6}
+    //   G deltas {bits(1.0f), bits(1.0f)} -> {1.0f, bits 0x7F000000}
+    //   B deltas {bits(2^23), bits(2^23)} -> {8388608.0f, 0.0f}
+    //     (wraparound: 0x4B000000 + 0x4B000000 = 0x96000000, a
+    //     negative float, sanitized to 0; without the reversal the
+    //     second sample would stay 8388608.0f)
+    const uint32_t deltas32[6] = { 0x3F800000u, 0x40000000u,
+                                   0x3F800000u, 0x3F800000u,
+                                   0x4B000000u, 0x4B000000u };
+    uint8_t plain32[24];
+    for (int i = 0; i < 6; i++) {
+        plain32[(size_t)i * 4 + 0] = (uint8_t)(deltas32[i] >> 24);
+        plain32[(size_t)i * 4 + 1] = (uint8_t)((deltas32[i] >> 16) & 0xFF);
+        plain32[(size_t)i * 4 + 2] = (uint8_t)((deltas32[i] >> 8) & 0xFF);
+        plain32[(size_t)i * 4 + 3] = (uint8_t)(deltas32[i] & 0xFF);
+    }
+    uLongf bound32 = compressBound(sizeof(plain32));
+    std::vector<uint8_t> comp32((size_t)bound32);
+    Check(compress(comp32.data(), &bound32, plain32, sizeof(plain32)) == Z_OK,
+          "zippred32 fixture compresses");
+    comp32.resize((size_t)bound32);
+    float out32[6] = { 0.0f };
+    Check(DecodeImageData(comp32.data(), comp32.size(), 2, 1, 3,
+                          kColorModeRgb, 32, kCompressionZipPrediction, 1,
+                          out32, NULL, 0, NULL),
+          "zippred32 2x1 decodes");
+    Check(out32[0] == 1.0f, "zippred32 R0 first sample as-is (1.0f)");
+    Check(Near((double)out32[3], 1.0e6, 1.0),
+          "zippred32 R1 accumulates to +Inf, clamped to 1e6");
+    Check(out32[1] == 1.0f, "zippred32 G0 first sample as-is (1.0f)");
+    {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &out32[4], sizeof(bits));
+        Check(bits == 0x7F000000u,
+              "zippred32 G1 bit-pattern sum 0x3F800000+0x3F800000");
+    }
+    Check(out32[2] == 8388608.0f, "zippred32 B0 first sample as-is");
+    Check(out32[5] == 0.0f,
+          "zippred32 B1 wraparound to negative float, sanitized to 0");
+}
+
+
 void TestPsdHdrColorSpaceSynthetic() {
     using namespace PsdHdr;
     // Hand-built ColorSpace: a gamma-2.2 TRC (built here with pow,
@@ -1398,7 +1456,7 @@ void TestH02Fixtures() {
 int main() {
     TestSrgbEotf16();
     TestSanitizeFloat32();
-    TestReverseDelta();
+    TestZipPredictionInPlace();
     TestAlphaBytes();
     TestRejections();
     TestPsdHdrByteCap();
