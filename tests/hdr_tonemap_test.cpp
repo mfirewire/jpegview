@@ -67,15 +67,19 @@ void TestPqConstants() {
     Check(Near(HdrToneMap::PqNitsToSignal(1e308), 1.0, 1e-12), "PQ 1e308 -> 1");
     Check(Near(HdrToneMap::PqNitsToSignal(std::nan("")), 0.0, 1e-12), "PQ NaN -> 0 (pre-existing)");
     // Round-trip: signal -> nits -> signal must be identity.
+    // P3-C5: single Check(ok) after the loop (the old pattern -
+    // Check(false) inside + unconditional g_checks++ after -
+    // counted one failed loop as two checks).
+    bool roundTripOk = true;
     for (double s = 0.0; s <= 1.0; s += 0.05) {
         double n = HdrToneMap::PqSignalToNits(s);
         double s2 = HdrToneMap::PqNitsToSignal(n);
         if (!Near(s, s2, 1e-9)) {
-            Check(false, "PQ signal->nits->signal round-trip");
+            roundTripOk = false;
             break;
         }
     }
-    g_checks++;  // the loop above passed as one check
+    Check(roundTripOk, "PQ signal->nits->signal round-trip");
     // EOTF monotonic: more signal means more nits.
     Check(HdrToneMap::PqSignalToNits(0.75) > HdrToneMap::PqSignalToNits(0.5),
           "PQ EOTF monotonic");
@@ -84,6 +88,8 @@ void TestPqConstants() {
 void TestHlg() {
     // HLG OETF inverse is the exact inverse of the OETF: feeding the
     // OETF output back must return the scene-linear value.
+    // P3-C5: single Check(ok) after the loop (see TestPqConstants).
+    bool hlgRoundTripOk = true;
     for (double v = 0.0; v <= 1.0; v += 0.1) {
         // Forward OETF (ARIB STD-B67), replicated here only to feed the
         // inverse; the inverse itself is what is pinned.
@@ -95,11 +101,11 @@ void TestHlg() {
         }
         double back = HdrToneMap::HlgSignalToSceneLinear(e);
         if (!Near(v, back, 1e-9)) {
-            Check(false, "HLG OETF inverse round-trip");
+            hlgRoundTripOk = false;
             break;
         }
     }
-    g_checks++;
+    Check(hlgRoundTripOk, "HLG OETF inverse round-trip");
     Check(Near(HdrToneMap::HlgSignalToSceneLinear(0.0), 0.0, 1e-12), "HLG 0 -> 0");
     // 2.4e-8: the log/exp round-trip is not exact in double precision.
     Check(Near(HdrToneMap::HlgSignalToSceneLinear(1.0), 1.0, 1e-6), "HLG 1 -> 1");
@@ -122,6 +128,22 @@ void TestSrgbOetf() {
     Check(Near(HdrToneMap::SrgbOetf(1.0), 1.0, 1e-12), "sRGB 1 -> 1");
     Check(Near(HdrToneMap::SrgbOetf(0.18), 0.461356, 1e-6), "sRGB 0.18 -> 0.461356");
     Check(Near(HdrToneMap::SrgbOetf(0.5), 0.735357, 1e-6), "sRGB 0.5 -> 0.735357");
+    // P3-C5: the sRGB OETF join point (IEC 61966-2-1). The linear
+    // segment (12.92*v) meets the power segment at v = 0.0031308,
+    // where both give 0.040449936 (12.92 * 0.0031308). The -9
+    // deep-shadow deviation in the .hdr/EXR path hangs on this
+    // junction, so pin the value, the continuity, and the byte.
+    Check(Near(HdrToneMap::SrgbOetf(0.0031308), 0.040449936, 1e-9),
+          "sRGB join point 0.0031308 -> 0.040449936");
+    Check(Near(HdrToneMap::SrgbOetf(0.0031308 - 1e-9),
+               HdrToneMap::SrgbOetf(0.0031308 + 1e-9), 1e-6),
+          "sRGB OETF continuous across the join point");
+    // Out-of-range inputs: negative clamps to 0; above 1.0 the power
+    // branch keeps going (1.353... at 2.0) - the byte clamp happens
+    // downstream in ToByte/GamutMap, not here.
+    Check(Near(HdrToneMap::SrgbOetf(-1.0), 0.0, 1e-12), "sRGB OETF -1 -> 0");
+    Check(Near(HdrToneMap::SrgbOetf(2.0), 1.353256046, 1e-9),
+          "sRGB OETF 2.0 -> 1.353256046");
 }
 
 void TestEetfIdentityAtSdrPeak() {
@@ -134,14 +156,16 @@ void TestEetfIdentityAtSdrPeak() {
     // a PQ signal above PqNitsToSignal(203) would be > 203 nits, which
     // contradicts the peak, and the EETF clamps it to SDR white.
     double pqSdrWhite = HdrToneMap::PqNitsToSignal(203.0);
+    // P3-C5: single Check(ok) after the loop (see TestPqConstants).
+    bool identityOk = true;
     for (double s = 0.0; s <= pqSdrWhite; s += 0.01) {
         double out = HdrToneMap::Bt2390EetfPq(s, 203.0);
         if (!Near(s, out, 1e-9)) {
-            Check(false, "EETF identity when peak <= SDR white");
+            identityOk = false;
             break;
         }
     }
-    g_checks++;
+    Check(identityOk, "EETF identity when peak <= SDR white");
     // A signal above PQ(203) at an SDR peak is capped to PQ(203)
     // (the fast path returns min(Clamp01(signal), PQ(203))).
     double pqCap = HdrToneMap::PqNitsToSignal(203.0);
@@ -320,19 +344,82 @@ void TestConvertLinearPixel() {
     ConvertLinearPixel(0.5, 0.5, 0.5, 1.0, outR, outG, outB);
     Check(outR >= 186 && outR <= 190,
           "linear 0.5 (peak 1.0) -> sRGB ~188");
-    // HDR roll-off: with a peak of 16.0, linear 1.0 must NOT clip to
-    // 255 (the old pow() path gave 255) - it rolls off to ~211.
+    // HDR roll-off, pinned (P3-C5): with a peak of 16.0 the old
+    // pow() path clipped everything >= 1.0 to 255; the BT.2390
+    // roll-off gives 211/235/249/254 for linear 1/2/4/8. Values
+    // re-confirmed on the post-Batch-2 code (fast path + hoisting)
+    // and identical to the pre-change probe: the fast path does not
+    // apply above peak 1.0, and hoisting is byte-identical (see
+    // TestHoistingEquivalence). The +-1 band absorbs cross-libm pow
+    // rounding (the Linux probe gives the exact values; pre-rounding
+    // margins to the .5 boundary are >= 0.03); a wrong constant
+    // would move them by far more than 1 level.
     ConvertLinearPixel(1.0, 1.0, 1.0, 16.0, outR, outG, outB);
-    Check(outR > 180 && outR < 255,
-          "linear 1.0 (peak 16) rolls off, does not clip");
-    // Linear 4.0 with a peak of 16.0: ~249, still below white.
+    Check(outR >= 210 && outR <= 212 && outG >= 210 && outG <= 212 &&
+          outB >= 210 && outB <= 212,
+          "linear 1.0 (peak 16) rolls off to 211");
+    ConvertLinearPixel(2.0, 2.0, 2.0, 16.0, outR, outG, outB);
+    Check(outR >= 234 && outR <= 236 && outG >= 234 && outG <= 236 &&
+          outB >= 234 && outB <= 236,
+          "linear 2.0 (peak 16) rolls off to 235");
     ConvertLinearPixel(4.0, 4.0, 4.0, 16.0, outR, outG, outB);
-    Check(outR > 230 && outR < 255,
-          "linear 4.0 (peak 16) rolls off, does not clip");
+    Check(outR >= 248 && outR <= 250 && outG >= 248 && outG <= 250 &&
+          outB >= 248 && outB <= 250,
+          "linear 4.0 (peak 16) rolls off to 249");
+    ConvertLinearPixel(8.0, 8.0, 8.0, 16.0, outR, outG, outB);
+    Check(outR >= 253 && outR <= 254 && outG >= 253 && outG <= 254 &&
+          outB >= 253 && outB <= 254,
+          "linear 8.0 (peak 16) rolls off to 254");
+    // Mid-tone under the same peak: 0.5 rolls off to 177 (not 188).
+    ConvertLinearPixel(0.5, 0.5, 0.5, 16.0, outR, outG, outB);
+    Check(outR >= 176 && outR <= 178 && outG >= 176 && outG <= 178 &&
+          outB >= 176 && outB <= 178,
+          "linear 0.5 (peak 16) rolls off to 177");
     // The peak itself maps to white.
     ConvertLinearPixel(16.0, 16.0, 16.0, 16.0, outR, outG, outB);
     Check(outR == 255 && outG == 255 && outB == 255,
           "linear peak (16) -> sRGB 255");
+    // sRGB join point as a byte (P3-C5): linear 0.0031308 at SDR
+    // peak takes the fast path (peak 1.0, channels in [0,1]) and the
+    // linear OETF branch, giving ToByte(0.040449936) = 10.
+    ConvertLinearPixel(0.0031308, 0.0031308, 0.0031308, 1.0, outR, outG, outB);
+    Check(outR == 10 && outG == 10 && outB == 10,
+          "linear 0.0031308 (peak 1.0) -> sRGB 10 (join point)");
+    // Colored roll-off (P3-C5): channels roll off independently - a
+    // red pixel keeps its hue (G/B stay 0) and the red channel
+    // follows the same 211/235/249/254 curve as grey.
+    ConvertLinearPixel(1.0, 0.0, 0.0, 16.0, outR, outG, outB);
+    Check(outR >= 210 && outR <= 212 && outG == 0 && outB == 0,
+          "linear red 1.0 (peak 16) rolls off to (211,0,0)");
+    ConvertLinearPixel(4.0, 0.0, 0.0, 16.0, outR, outG, outB);
+    Check(outR >= 248 && outR <= 250 && outG == 0 && outB == 0,
+          "linear red 4.0 (peak 16) rolls off to (249,0,0)");
+    ConvertLinearPixel(1.0, 0.5, 0.0, 16.0, outR, outG, outB);
+    Check(outR >= 210 && outR <= 212 && outG >= 176 && outG <= 178 && outB == 0,
+          "linear (1,0.5,0) (peak 16) rolls off to (211,177,0)");
+    // Non-finite / degenerate peakLinear (P3-C5): NaN, negative and
+    // zero peaks fall back to SDR white (PeakNitsFromLinear), so a
+    // grey pixel comes out exactly as at peak 1.0; an Inf peak
+    // behaves like a 10000-nit peak (Bt2390MakeParams caps via
+    // Pq(Inf) = 1). Each case is compared against a same-test
+    // reference, so the pin is on the fallback behaviour, not the
+    // absolute byte.
+    uint8_t refR = 0, refG = 0, refB = 0;
+    ConvertLinearPixel(0.5, 0.5, 0.5, 1.0, refR, refG, refB);
+    ConvertLinearPixel(0.5, 0.5, 0.5, std::nan(""), outR, outG, outB);
+    Check(outR == refR && outG == refG && outB == refB,
+          "linear 0.5 (peak NaN) == peak 1.0 (SDR fallback)");
+    ConvertLinearPixel(0.5, 0.5, 0.5, -1.0, outR, outG, outB);
+    Check(outR == refR && outG == refG && outB == refB,
+          "linear 0.5 (peak -1) == peak 1.0 (SDR fallback)");
+    ConvertLinearPixel(0.5, 0.5, 0.5, 0.0, outR, outG, outB);
+    Check(outR == refR && outG == refG && outB == refB,
+          "linear 0.5 (peak 0) == peak 1.0 (SDR fallback)");
+    uint8_t ref10kR = 0, ref10kG = 0, ref10kB = 0;
+    ConvertLinearPixel(0.5, 0.5, 0.5, 10000.0 / 203.0, ref10kR, ref10kG, ref10kB);
+    ConvertLinearPixel(0.5, 0.5, 0.5, HUGE_VAL, outR, outG, outB);
+    Check(outR == ref10kR && outG == ref10kG && outB == ref10kB,
+          "linear 0.5 (peak Inf) == peak 10000 nits");
     // Negative and NaN inputs map to 0 (the !(v >= 0) guard).
     ConvertLinearPixel(-1.0, -1.0, -1.0, 1.0, outR, outG, outB);
     Check(outR == 0 && outG == 0 && outB == 0, "linear negative -> 0");
@@ -422,6 +509,30 @@ void TestConvertLinearImage() {
     Check(out2[0] == 0xCD && out2[1] == 0xCD && out2[2] == 0xCD &&
           out2[3] == 0xCD && out2[4] == 0xCD && out2[5] == 0xCD,
           "ConvertLinearImage narrow dst stride rejected");
+    // P3-C5: padded strides (src stride wider than a row, dst stride
+    // wider than a row). Only tight strides were exercised before;
+    // the row-offset arithmetic must also work with padding, and the
+    // padding bytes must be left untouched. The padding floats are
+    // 9.0: if the stride were ignored and the buffer read linearly,
+    // the 9.0 would become the peak and the pixels would change.
+    float img3[18] = {
+        1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f, 9.0f, 9.0f, 9.0f,  // row 0 + pad
+        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 9.0f, 9.0f, 9.0f,   // row 1 + pad
+    };
+    uint8_t out3[18];
+    std::memset(out3, 0xCD, sizeof(out3));
+    ConvertLinearImage(img3, 2, 2, 9, out3, 9);
+    Check(out3[0] == 255 && out3[1] == 255 && out3[2] == 255 &&
+          out3[3] >= 116 && out3[3] <= 120 &&
+          out3[4] >= 116 && out3[4] <= 120 &&
+          out3[5] >= 116 && out3[5] <= 120,
+          "ConvertLinearImage padded strides row 0 -> white + grey ~118");
+    Check(out3[9] == 0 && out3[10] == 0 && out3[11] == 255 &&
+          out3[12] == 0 && out3[13] == 0 && out3[14] == 0,
+          "ConvertLinearImage padded strides row 1 -> red + black");
+    Check(out3[6] == 0xCD && out3[7] == 0xCD && out3[8] == 0xCD &&
+          out3[15] == 0xCD && out3[16] == 0xCD && out3[17] == 0xCD,
+          "ConvertLinearImage padded strides leave padding untouched");
 }
 
 void TestConvertLinearImageToBgra() {
@@ -473,6 +584,28 @@ void TestConvertLinearImageToBgra() {
     ConvertLinearImageToBgra(img, 2, 1, 6, outB, 4, NULL, 0);  // 4 < 2*4
     Check(outB[0] == 0xCD && outB[3] == 0xCD && outB[7] == 0xCD,
           "ConvertLinearImageToBgra narrow dst stride rejected");
+    // P3-C5: padded strides, as in TestConvertLinearImage above:
+    // src stride 9 floats (3 pad), dst stride 12 bytes (4 pad),
+    // alpha plane 4 bytes (128, 255, 64, 0). Padding must stay 0xCD.
+    float imgP[18] = {
+        1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f, 9.0f, 9.0f, 9.0f,
+        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 9.0f, 9.0f, 9.0f,
+    };
+    uint8_t alphaP[4] = { 128, 255, 64, 0 };
+    uint8_t outP[24];
+    std::memset(outP, 0xCD, sizeof(outP));
+    ConvertLinearImageToBgra(imgP, 2, 2, 9, outP, 12, alphaP, 1);
+    Check(outP[0] == 255 && outP[1] == 255 && outP[2] == 255 && outP[3] == 128 &&
+          outP[4] >= 116 && outP[4] <= 120 &&
+          outP[5] >= 116 && outP[5] <= 120 &&
+          outP[6] >= 116 && outP[6] <= 120 && outP[7] == 255,
+          "ConvertLinearImageToBgra padded strides row 0 -> white/128 + grey/255");
+    Check(outP[12] == 0 && outP[13] == 0 && outP[14] == 255 && outP[15] == 64 &&
+          outP[16] == 0 && outP[17] == 0 && outP[18] == 0 && outP[19] == 0,
+          "ConvertLinearImageToBgra padded strides row 1 -> red/64 + black/0");
+    Check(outP[8] == 0xCD && outP[9] == 0xCD && outP[10] == 0xCD && outP[11] == 0xCD &&
+          outP[20] == 0xCD && outP[21] == 0xCD && outP[22] == 0xCD && outP[23] == 0xCD,
+          "ConvertLinearImageToBgra padded strides leave padding untouched");
 }
 
 }  // namespace
