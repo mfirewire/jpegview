@@ -373,6 +373,66 @@ void TestParseXmp() {
               m) &&
               !m.valid,
           "XMP hdrgm gamma 0 rejected");
+    // P3-A3: blank self-closing Gamma (<hdrgm:Gamma />) must not
+    // steal the next field's number. Without the whitespace skip in
+    // FindXmpField, the '/' is missed and Gamma parses as 2.0 (the
+    // following GainMapMax) — the packet is wrongly accepted.
+    // Note: Gamma is required by ParseXmpMetadata (hasMin && hasMax
+    // && hasGamma), so a blank Gamma rejects the whole packet; the
+    // point is that it must NOT be accepted with a stolen value.
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:Gamma />"
+                          "<hdrgm:GainMapMax>2.0</hdrgm:GainMapMax>"),
+              m) &&
+              !m.valid,
+          "XMP blank self-closing Gamma rejected (must not steal GainMapMax)");
+    // Negative gamma -> rejected.
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:GainMapMax>0.1</hdrgm:GainMapMax>"
+                          "<hdrgm:Gamma>-1.0</hdrgm:Gamma>"),
+              m) &&
+              !m.valid,
+          "XMP hdrgm gamma -1.0 rejected");
+    // "inf" / "nan" gamma: no parseable number -> field absent ->
+    // packet rejected (Gamma is required).
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:GainMapMax>0.1</hdrgm:GainMapMax>"
+                          "<hdrgm:Gamma>inf</hdrgm:Gamma>"),
+              m) &&
+              !m.valid,
+          "XMP hdrgm gamma inf rejected");
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:GainMapMax>0.1</hdrgm:GainMapMax>"
+                          "<hdrgm:Gamma>nan</hdrgm:Gamma>"),
+              m) &&
+              !m.valid,
+          "XMP hdrgm gamma nan rejected");
+    // Overflow gamma (1e999 -> inf) -> rejected.
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:GainMapMax>0.1</hdrgm:GainMapMax>"
+                          "<hdrgm:Gamma>1e999</hdrgm:Gamma>"),
+              m) &&
+              !m.valid,
+          "XMP hdrgm gamma 1e999 (overflow) rejected");
+    // Denominator bound: Gamma = "1/" + 1022 spaces + "2", so the
+    // denominator's digits start inside the 1024-char window but end
+    // beyond it. Without the denominator bound in
+    // ParseFirstNumberAfter, strtod reads past the limit and Gamma
+    // parses as 0.5 — the packet is wrongly accepted.
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:Gamma>1/") +
+                  std::string(1022, ' ') +
+                  std::string("2</hdrgm:Gamma>"
+                              "<hdrgm:GainMapMax>0.1</hdrgm:GainMapMax>"),
+              m) &&
+              !m.valid,
+          "XMP hdrgm gamma denominator past limit rejected");
 }
 
 void TestSrgbToLinear() {

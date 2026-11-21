@@ -123,12 +123,26 @@ bool ParseFirstNumberAfter(const std::string& s, size_t pos, size_t limit, doubl
     if (end == begin) {
         return false;
     }
+    // P3-A3: strtod reads past `limit` — bound the numerator's parsed
+    // extent. A number that starts inside the range but runs past the
+    // closing tag is not this field's value.
+    if (static_cast<size_t>(end - s.c_str()) > limit) {
+        return false;
+    }
     value = num;
     if (*end == '/' && static_cast<size_t>(end - s.c_str()) < limit) {
         const char* denBegin = end + 1;
         char* denEnd = nullptr;
         double den = std::strtod(denBegin, &denEnd);
         if (denEnd == denBegin || den == 0.0) {
+            return false;
+        }
+        // P3-A3: bound the denominator's parsed extent as well.
+        // strtod skips leading whitespace, so a denominator whose
+        // digits start inside the range but end beyond it must be
+        // rejected, not silently accepted (e.g. "1/" + 1022 spaces +
+        // "2" parsed as 0.5 past the 1024-char window).
+        if (static_cast<size_t>(denEnd - s.c_str()) > limit) {
             return false;
         }
         value = num / den;
@@ -149,6 +163,16 @@ bool FindXmpField(const std::string& xmp, const char* field, double& value) {
         return false;
     }
     size_t after = pos + std::strlen(field);
+    // P3-A3: skip whitespace after the field name. A blank
+    // self-closing element (<hdrgm:Gamma />) must be treated the same
+    // as <hdrgm:Gamma/> — without this, the '/' is missed and the
+    // value search runs past the element and steals the next field's
+    // number (verified: <hdrgm:Gamma /> stole gamma=2.0 from the
+    // following GainMapMax).
+    while (after < xmp.size() && (xmp[after] == ' ' || xmp[after] == '\t' ||
+                                  xmp[after] == '\r' || xmp[after] == '\n')) {
+        ++after;
+    }
     if (after < xmp.size() && xmp[after] == '/') {
         return false;  // self-closing element: no value
     }
