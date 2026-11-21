@@ -177,6 +177,56 @@ std::vector<uint8_t> BuildUhdrJpeg(const uint8_t* mpfSeg, size_t gainSize) {
     return buf;
 }
 
+// Build a little-endian copy of the REAL big-endian MPF segment
+// (P3-A8 (1)): the TIFF header and all multi-byte TIFF fields are
+// byte-swapped; the JPEG APP2 length and the ASCII "0100" version
+// stay as-is (the length is JPEG big-endian by spec, the version is
+// a byte string, not a number). No real little-endian MPF file was
+// on hand - all real UltraHDR MPFs are big-endian "MM" - so this is
+// a synthetic mutation of the real segment, not a real file.
+std::vector<uint8_t> MakeLittleEndianMpf() {
+    std::vector<uint8_t> le(kMpfSegmentHlg,
+                            kMpfSegmentHlg + sizeof(kMpfSegmentHlg));
+    auto swap16 = [&le](size_t off) {
+        uint8_t t = le[off];
+        le[off] = le[off + 1];
+        le[off + 1] = t;
+    };
+    auto swap32 = [&le](size_t off) {
+        uint8_t t0 = le[off], t1 = le[off + 1];
+        le[off] = le[off + 3];
+        le[off + 1] = le[off + 2];
+        le[off + 2] = t1;
+        le[off + 3] = t0;
+    };
+    le[8] = 'I';
+    le[9] = 'I';  // TIFF byte order
+    swap16(10);   // magic 42
+    swap32(12);   // IFD offset
+    swap16(16);   // entry count
+    // Entry 0 (B000): tag, type, count; "0100" value is ASCII.
+    swap16(18);
+    swap16(20);
+    swap32(22);
+    // Entry 1 (B001 NumberOfImages): tag, type, count, value.
+    swap16(30);
+    swap16(32);
+    swap32(34);
+    swap32(38);
+    // Entry 2 (B002 MP list): tag, type, count, value offset.
+    swap16(42);
+    swap16(44);
+    swap32(46);
+    swap32(50);
+    // MP entry 0: attributes, size; data offset is 0.
+    swap32(58);
+    swap32(62);
+    // MP entry 1: attributes are 0; size, data offset.
+    swap32(78);
+    swap32(82);
+    return le;
+}
+
 void TestParseIsoReal() {
     using namespace gainmap;
     Metadata m;
@@ -200,6 +250,30 @@ void TestParseIsoReal() {
     Check(!m.multiChannel, "ISO flags 0x00 -> single channel");
     Check(!m.useBaseColorSpace, "ISO flags 0x00 -> useBaseColorSpace false");
     Check(!m.appleHeadroomFallback, "ISO parse does not set Apple fallback");
+    // P3-A8 (3): trailing data after the 7 rational pairs. A
+    // multi-channel payload carries further channel sets after the
+    // first; the parser reads only the first set and ignores the
+    // rest ("further sets are ignored"). Here the trailing 56 bytes
+    // are a second fake channel set (all pairs 2/1) - the parsed
+    // values must still be the first set's (gamma 1.0, gainMapMax
+    // 0.1), not the trailing set's (gamma 2.0, gainMapMax 2.0).
+    uint8_t trailing[89 + 56];
+    std::memcpy(trailing, kIsoPayloadHlg, 89);
+    for (int k = 0; k < 7; ++k) {
+        trailing[89 + k * 8 + 0] = 0x00;
+        trailing[89 + k * 8 + 1] = 0x00;
+        trailing[89 + k * 8 + 2] = 0x00;
+        trailing[89 + k * 8 + 3] = 0x02;  // numerator 2
+        trailing[89 + k * 8 + 4] = 0x00;
+        trailing[89 + k * 8 + 5] = 0x00;
+        trailing[89 + k * 8 + 6] = 0x00;
+        trailing[89 + k * 8 + 7] = 0x01;  // denominator 1
+    }
+    Check(ParseIso21496Metadata(trailing, sizeof(trailing), m) && m.valid,
+          "ISO payload with 56 trailing bytes parses");
+    Check(Near(m.gamma, 1.0, 1e-12) &&
+              Near(m.gainMapMax, 13421763.0 / 134217728.0, 1e-12),
+          "ISO trailing second channel set ignored (first set wins)");
 }
 
 void TestParseIsoNegative() {
@@ -485,6 +559,17 @@ void TestBilinearUpsample() {
         }
     }
     Check(all77, "upsample 1x1 source fills with the single value");
+    // P3-A8 (2): downsampling (4x4 -> 2x2). Centre-aligned mapping:
+    // dst (0,0) samples src (0.5,0.5), the mean of the top-left 2x2
+    // block; dst (1,1) samples src (2.5,2.5), the mean of the
+    // bottom-right block. Values are multiples of 4 so every mean
+    // is an exact integer (no rounding dependence).
+    uint8_t big4[16] = {0, 4, 8, 12, 16, 20, 24, 28,
+                        32, 36, 40, 44, 48, 52, 56, 60};
+    uint8_t small[4] = {0};
+    BilinearUpsampleGray(big4, 4, 4, small, 2, 2);
+    Check(small[0] == 10 && small[1] == 18 && small[2] == 42 && small[3] == 50,
+          "downsample 4x4 -> 2x2 == block means (10,18,42,50)");
 }
 
 void TestApplyGainMap() {
@@ -530,6 +615,25 @@ void TestApplyGainMap() {
     Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, 0.5, out) &&
               Near(out[0], 0.21586050011389926 * 1.4142135623730951, 1e-5),
           "ApplyGainMap weightFactor 0.5 -> gain sqrt(2)");
+    // P3-A8 (2): downsampling through ApplyGainMap - a 4x4 gain map
+    // on a 2x2 base. All-255 gain downsamples to 255, so every pixel
+    // gets boost 2^1 = 2; all-0 gain downsamples to 0, boost 1.
+    uint8_t gainBig[16];
+    std::memset(gainBig, 255, sizeof(gainBig));
+    uint8_t base2[12];
+    for (int i = 0; i < 12; ++i) base2[i] = 128;
+    float outDown[12] = {0};
+    Check(ApplyGainMap(base2, 2, 2, gainBig, 4, 4, m, 1.0, outDown),
+          "ApplyGainMap 4x4 gain on 2x2 base succeeds (downsample)");
+    bool downOk = true;
+    for (int i = 0; i < 12; ++i) {
+        if (!Near(outDown[i], 0.4317210002277985, 1e-5)) downOk = false;
+    }
+    Check(downOk, "ApplyGainMap downsampled all-255 gain -> linear * 2");
+    std::memset(gainBig, 0, sizeof(gainBig));
+    Check(ApplyGainMap(base2, 2, 2, gainBig, 4, 4, m, 1.0, outDown) &&
+              Near(outDown[0], 0.21586050011389926, 1e-6),
+          "ApplyGainMap downsampled all-0 gain -> linear unchanged");
     // Bad inputs -> false.
     Check(!ApplyGainMap(nullptr, 1, 1, gainFull, 1, 1, m, 1.0, out),
           "ApplyGainMap null base rejected");
@@ -544,6 +648,16 @@ void TestApplyGainMap() {
     double nanW = std::nan("");
     Check(!ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, nanW, out),
           "ApplyGainMap NaN weightFactor rejected");
+    // P3-A8 (5): weightFactor +-Inf clamps like the finite
+    // out-of-range values (+Inf -> 1.0, -Inf -> 0.0); only NaN
+    // rejects (checked above).
+    double infW = HUGE_VAL;
+    Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, infW, out) &&
+              Near(out[0], 0.4317210002277985, 1e-5),
+          "ApplyGainMap weightFactor +Inf clamps to 1.0");
+    Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, -infW, out) &&
+              Near(out[0], 0.21586050011389926, 1e-6),
+          "ApplyGainMap weightFactor -Inf clamps to 0.0 (gain 1.0)");
     Metadata invalid;
     Check(!ApplyGainMap(base, 1, 1, gainFull, 1, 1, invalid, 1.0, out),
           "ApplyGainMap invalid metadata rejected");
@@ -662,6 +776,27 @@ void TestFindGainMapJpeg() {
     oneImg[685] = 0x01;
     Check(!FindGainMapJpeg(oneImg.data(), oneImg.size(), off, sz),
           "FindGainMapJpeg NumberOfImages=1 -> false");
+    // P3-A8 (6): NumberOfImages = 3. No real 3-image MPF file was on
+    // hand (all real UltraHDR MPFs carry 2 images) - synthetic
+    // mutation of the real HLG segment. The finder only reads entry
+    // 1 and never cross-checks count == numImages*16, so a third
+    // image is accepted with the same gain-map offset/size. This
+    // test pins the current "entry 1 is the gain map" assumption:
+    // a real 3-image file could violate it (entry 1 might not be
+    // the gain map).
+    std::vector<uint8_t> threeImg = hlg;
+    threeImg[685] = 0x03;
+    Check(FindGainMapJpeg(threeImg.data(), threeImg.size(), off, sz) &&
+              off == 8087 && sz == 8277,
+          "FindGainMapJpeg NumberOfImages=3 -> offset 8087 size 8277 (entry 1)");
+    // P3-A8 (1): little-endian MPF (synthetic mutation of the real
+    // HLG segment, see MakeLittleEndianMpf). The finder must read
+    // it identically: offset 8087, size 8277.
+    std::vector<uint8_t> leMpf = MakeLittleEndianMpf();
+    std::vector<uint8_t> leJpeg = BuildUhdrJpeg(leMpf.data(), 8277);
+    Check(FindGainMapJpeg(leJpeg.data(), leJpeg.size(), off, sz) && off == 8087 &&
+              sz == 8277,
+          "FindGainMapJpeg little-endian MPF -> offset 8087 size 8277");
     // Gain-map bytes do not start with FFD8 -> false.
     std::vector<uint8_t> badSoi = hlg;
     badSoi[8087] = 0x00;
@@ -758,6 +893,26 @@ void TestFindIso21496Payload() {
     Check(!FindIso21496Payload(verOnly, sizeof(verOnly), payload,
                                payloadSize),
           "FindIso21496Payload version-only ISO segment skipped (< 89 bytes)");
+    // P3-A8 (3): a 145-byte ISO APP2 (89 + 56 trailing junk bytes)
+    // is found with its full size and parses (the finder floor is
+    // 89, so a longer payload is not skipped).
+    uint8_t gmLong[2 + 2 + 2 + 145 + 2];
+    gmLong[0] = 0xFF;
+    gmLong[1] = 0xD8;  // SOI
+    gmLong[2] = 0xFF;
+    gmLong[3] = 0xE2;  // APP2
+    gmLong[4] = 0x00;
+    gmLong[5] = 0x93;  // length 147
+    std::memcpy(gmLong + 6, kIsoPayloadHlg, 89);
+    std::memset(gmLong + 6 + 89, 0xAB, 56);  // trailing junk
+    gmLong[151] = 0xFF;
+    gmLong[152] = 0xD9;  // EOI
+    Check(FindIso21496Payload(gmLong, sizeof(gmLong), payload, payloadSize) &&
+              payloadSize == 145,
+          "FindIso21496Payload 145-byte ISO APP2 found with full size");
+    Check(ParseIso21496Metadata(payload, payloadSize, m) && m.valid &&
+              Near(m.gainMapMax, 0.1, 1e-6),
+          "FindIso21496Payload 145-byte payload parses as first set");
     // The parser still rejects the 32-byte payload directly
     // (size < 33+56), if it ever saw one.
     Check(!ParseIso21496Metadata(verOnly + 6, 32, m) && !m.valid,
