@@ -10616,7 +10616,26 @@ int ParseEXRMultipartHeaderFromMemory(EXRHeader ***exr_headers,
     infos.push_back(info);
 
     // move to next header.
+    // CVE-2026-110597: `marker_size` is the remaining length handed to
+    // ParseEXRHeader for the next part, so it must shrink by exactly the
+    // bytes just consumed. It used to be computed once before the loop
+    // while only the unused local `size` was decremented here, so from
+    // the second part on the parser was told more bytes remained than
+    // really did and ReadAttribute could memcpy past the end of the
+    // input buffer. Reject a part whose header claims more bytes than
+    // remain, so `marker_size` can never underflow or go stale.
+    if (info.header_len > marker_size) {
+      // Free malloc-allocated memory here.
+      for (size_t i = 0; i < info.attributes.size(); i++) {
+        if (info.attributes[i].value) {
+          free(info.attributes[i].value);
+        }
+      }
+      tinyexr::SetErrorMessage("Invalid part header length.", err);
+      return TINYEXR_ERROR_INVALID_DATA;
+    }
     marker += info.header_len;
+    marker_size -= info.header_len;
     size -= info.header_len;
   }
 

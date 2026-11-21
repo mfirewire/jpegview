@@ -118,6 +118,21 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/png_hdr_alpha_test.cpp -o /tmp/png_hdr_alpha_test
           /tmp/png_hdr_alpha_test
 
+      - name: TinyEXR multipart header test (CVE-2026-110597)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/tinyexr tests/tinyexr_multipart_test.cpp src/JPEGView/tinyexr/miniz.c src/JPEGView/tinyexr/miniz_tdef.c src/JPEGView/tinyexr/miniz_tinfl.c -o /tmp/tinyexr_multipart_test
+          /tmp/tinyexr_multipart_test
+
+      # The PoC does not crash a plain build (the over-read garbage
+      # fails later), so the ASan run is the guard with teeth: on
+      # unpatched code it aborts with a heap-buffer-overflow in
+      # ReadAttribute. Verified locally both ways (patched: clean,
+      # unpatched: abort).
+      - name: TinyEXR multipart test under ASan (CVE-2026-110597 guard)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O1 -g -fsanitize=address -I src/JPEGView -I src/JPEGView/tinyexr tests/tinyexr_multipart_test.cpp src/JPEGView/tinyexr/miniz.c src/JPEGView/tinyexr/miniz_tdef.c src/JPEGView/tinyexr/miniz_tinfl.c -o /tmp/tinyexr_multipart_test_asan
+          ASAN_OPTIONS=detect_leaks=0 /tmp/tinyexr_multipart_test_asan
+
       - name: Save-path ICC filter test (N2)
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/save_icc_filter_test.cpp src/JPEGView/SaveIccFilter.cpp -o /tmp/save_icc_filter_test
