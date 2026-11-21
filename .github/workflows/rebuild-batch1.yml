@@ -1,7 +1,7 @@
 name: Rebuild zlib + lcms2
 
 # 批次 1：两个零依赖的库
-#  - zlib 1.3 -> 1.3.2（静态库，被 libpng 使用，所以顺带重编 libpng16.lib）
+#  - zlib 1.3.2 -> 1.4（静态库，被 libpng 使用，所以顺带重编 libpng16.lib）
 #  - lcms2 2.15 -> 2.20（DLL + 导入库 + 头文件）
 # 产物直接提交回分支，随后的常规构建会验证能否链接。
 #
@@ -14,6 +14,9 @@ name: Rebuild zlib + lcms2
 on:
   # 批次 1 已完成（zlib 1.3.2 / lcms2 2.20 已入库）。保留手动触发，
   # 避免每次改这个文件都重编一遍、生成一个只有时间戳不同的提交。
+  # 2026-11-21：zlib 1.4 升级同样走本工作流（只重编 zlib + libpng；
+  # lcms2 已是 2.20，重编只会因 PE 时间戳产生无意义的二进制差异，
+  # 所以本次提交不收 lcms2 的产物，见底部的 commit 步骤）。
   workflow_dispatch:
 
 jobs:
@@ -26,12 +29,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Pin zlib to v1.3.2
+      - name: Pin zlib to v1.4
         shell: bash
         run: |
           cd extras/third_party/libpng-apng.src-patch/zlib
-          git fetch --depth 1 origin refs/tags/v1.3.2:refs/tags/v1.3.2
-          git checkout -q v1.3.2
+          git fetch --depth 1 origin refs/tags/v1.4:refs/tags/v1.4
+          git checkout -q v1.4
           grep -m1 'define ZLIB_VERSION' zlib.h
 
       - name: Pin Little-CMS to lcms2.20
@@ -94,10 +97,13 @@ jobs:
         run: |
           git config user.name "mfirewire"
           git config user.email "mfirewire@gmail.com"
-          git add -A src/JPEGView/lcms2 src/JPEGView/libpng-apng extras/third_party/Little-CMS extras/third_party/libpng-apng.src-patch/zlib
+          # 本次只收 zlib 1.4 的产物：libpng-apng（含重编的 zlib.lib /
+          # libpng16.lib）和 zlib 子模块指针。lcms2 已是 2.20，重编
+          # 只会因 PE 时间戳产生无意义的二进制差异，故不收。
+          git add -A src/JPEGView/libpng-apng extras/third_party/libpng-apng.src-patch/zlib
           if git diff --cached --quiet; then
             echo "没有变化，跳过提交"
             exit 0
           fi
-          git commit -m "build(deps): zlib 1.3.2 + lcms2 2.20 rebuilt in CI"
+          git commit -m "build(deps): zlib 1.4 rebuilt in CI"
           git push

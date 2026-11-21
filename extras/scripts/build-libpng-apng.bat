@@ -44,6 +44,7 @@ IF ERRORLEVEL 1 exit /b 1
 
 REM zlib 1.3.2 的 compress.c / uncompr.c 用了 NULL 却没 include <stddef.h>，
 REM 新版 MSVC 直接报 C2065。补一行，幂等。
+REM 1.4 已改用 Z_NULL（定义在 zlib.h），此补已无需要，但保留作冗余保护，写入也无害。
 call :ENSURE_ZLIB_STDDEF
 IF ERRORLEVEL 1 exit /b 1
 
