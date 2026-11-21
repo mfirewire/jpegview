@@ -491,6 +491,30 @@ void TestApplyGainMap() {
     badGamma.gamma = 0.0;
     Check(!ApplyGainMap(base, 1, 1, gainFull, 1, 1, badGamma, 1.0, out),
           "ApplyGainMap gamma 0 rejected");
+    // P3-A2+P3-B3: hostile gainMapMax (1e6 / 1e308) is clamped to +16
+    // stops: gain 255 -> logBoost = 16 -> boost 2^16 = 65536 (finite),
+    // not Inf. (Probe: without the clamp, gainMapMax=1e6/1e308 makes
+    // boost Inf and out[0] Inf.)
+    Metadata hugeMax = m;
+    hugeMax.gainMapMax = 1e6;
+    Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, hugeMax, 1.0, out) &&
+              std::isfinite(out[0]) &&
+              Near(out[0], 14146.633735464502, 0.01),
+          "ApplyGainMap gainMapMax=1e6 clamps to +16 stops (finite)");
+    Metadata hugeMax2 = m;
+    hugeMax2.gainMapMax = 1e308;
+    Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, hugeMax2, 1.0, out) &&
+              std::isfinite(out[0]) &&
+              Near(out[0], 14146.633735464502, 0.01),
+          "ApplyGainMap gainMapMax=1e308 clamps to +16 stops (finite)");
+    // Negative side: gainMapMin=-1e6 clamps to -16; gain 0 ->
+    // logRecovery 0 -> logBoost = gainMapMin = -16 -> boost 2^-16.
+    Metadata hugeMin = m;
+    hugeMin.gainMapMin = -1e6;
+    Check(ApplyGainMap(base, 1, 1, gainZero, 1, 1, hugeMin, 1.0, out) &&
+              std::isfinite(out[0]) &&
+              Near(out[0], 3.293769838163746e-06, 1e-9),
+          "ApplyGainMap gainMapMin=-1e6 clamps to -16 stops (finite)");
 }
 
 void TestApplyGainMapRealMeta() {

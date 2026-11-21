@@ -5,6 +5,7 @@
 
 #include "GainMap.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -441,6 +442,19 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
         !std::isfinite(meta.baseOffset) || !std::isfinite(meta.alternateOffset)) {
         return false;
     }
+
+    // P3-A2+P3-B3: clamp the metadata gain range to [-16, +16] stops.
+    // A corrupt/hostile file could carry gainMapMin/Max of +/-1e308;
+    // logBoost is a convex combination of the two, so it would overflow
+    // to +/-Inf and boost = 2^(logBoost) would be Inf (or 0), making
+    // every output pixel Inf/NaN. Real files carry logBoost <= ~2.3
+    // (two real iPhone HEICs), so this changes nothing on real files.
+    // The clamp bounds `boost` only, not the final hdr value: a huge
+    // finite offset can still push hdr to +/-Inf, which
+    // ConvertLinearPixel maps to white (C1+C2) — worst case one white
+    // pixel, no crash.
+    const double gainMapMin = std::min(16.0, std::max(-16.0, meta.gainMapMin));
+    const double gainMapMax = std::min(16.0, std::max(-16.0, meta.gainMapMax));
     if (std::isnan(weightFactor)) {
         return false;
     }
@@ -473,7 +487,7 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
         }
         double logRecovery = std::pow(g, invGamma);
         double logBoost =
-            meta.gainMapMin * (1.0 - logRecovery) + meta.gainMapMax * logRecovery;
+            gainMapMin * (1.0 - logRecovery) + gainMapMax * logRecovery;
         double boost = std::pow(2.0, logBoost * weightFactor);
         for (int c = 0; c < 3; ++c) {
             double sdr = SrgbToLinearDouble(
