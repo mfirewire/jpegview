@@ -354,10 +354,20 @@ bool PngReader::BeginReading(void* buffer, size_t sizebytes, bool& outOfMemory, 
 		png_set_add_alpha(png_ptr, 0xff, PNG_FILLER_AFTER);
 		png_set_bgr(png_ptr);
 		if (cache.hdr)
+		{
+			// H-03: png_set_expand does not expand bit depth, so an
+			// 8-bit PQ/HLG source keeps 8-bit rows (4 bytes/pixel)
+			// while ReadNextFrame writes HDR rows at 8 bytes/pixel
+			// (bytesPerPixel = channels * 2) - the last row writes
+			// width*4 bytes past the end of p_image. Expand 8-bit
+			// to 16-bit so the rows match; a 16-bit source is
+			// unaffected (expand_16 is a no-op for it).
+			png_set_expand_16(png_ptr);
 			// 16-bit values are stored big-endian in the file; swap to
 			// native (little-endian on x86) so the HDR conversion in
 			// ReadNextFrame reads them directly as png_uint_16.
 			png_set_swap(png_ptr);
+		}
 
 		// gAMA / sRGB chunks used to be ignored here: the libpng path displayed the
 		// raw values as sRGB while the GDI+ path applied the gamma, so the same file

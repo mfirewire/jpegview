@@ -7,6 +7,7 @@ New features:
 - HDR images with PQ (ST 2084) or HLG transfer now display tone-mapped to SDR (1000-nit peak, SDR white 203 nits) instead of showing the raw signal too dark; PNG, AVIF, HEIF and JXL are supported. SDR images are unaffected
 
 Bugs fixed:
+- HDR PNG: an 8-bit PNG declaring a PQ/HLG transfer (cICP) could write past the end of the image buffer, because the 8-bit rows were not expanded to 16-bit before the HDR tone-map copy; 8-bit rows are now expanded to 16-bit (16-bit sources are unaffected)
 - Lossless JPEG transformations: EXIF auto-rotation no longer marks the image as destructively processed, so the lossless menu stays available for rotated phone photos; a real in-memory rotation still blocks it
 - Lossless JPEG transformations: the EXIF orientation tag is now composed with the transform (rotation/flip), so the reloaded file shows the transformed image instead of applying the old orientation a second time (mirroring an orientation-6 photo used to flip it twice)
 - 16-bit PNM: a maxval other than 65535 (e.g. 4095) used to render far too dark because stb_image's >>8 path was left unscaled (white 4095 decoded as 15); the decoded range [0, maxval>>8] is now scaled to [0, 255], the same fix already applied to 8-bit maxval<255
