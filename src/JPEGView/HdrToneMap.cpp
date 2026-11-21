@@ -33,20 +33,11 @@ const double kHlgC = 0.55991073;
 // HLG OOTF system gamma for a kHdrPeakNits display (BT.2100).
 const double kHlgSystemGamma = 1.2;
 
-// Gamut matrices (linear RGB -> linear RGB, D65). Values match GTK
-// gdkcolordefs and the kennylevinsen test generator.
-const double kSrgbToRec2020[3][3] = {
-    {0.627504, 0.329275, 0.043303},
-    {0.069108, 0.919519, 0.011360},
-    {0.016394, 0.088011, 0.895380},
-};
-const double kSrgbToP3[3][3] = {
-    {0.822462, 0.177538, 0.000000},
-    {0.033194, 0.966806, 0.000000},
-    {0.017083, 0.072397, 0.910520},
-};
-// Inverses (BT.2020/P3 -> sRGB), computed from the above matrices
-// (numpy, float64). Verified by round-trip: max error 2.2e-16.
+// Inverses (BT.2020/P3 -> sRGB), computed from the standard forward
+// matrices (numpy, float64). Values match GTK gdkcolordefs and the
+// kennylevinsen test generator. Verified by round-trip: max error 2.2e-16.
+// (P3-C2: the forward matrices were deleted here; only the inverses
+// have readers, via GamutInverse.)
 const double kRec2020ToSrgb[3][3] = {
     { 1.660226, -0.587547, -0.072839},
     {-0.124553,  1.132926, -0.008350},
@@ -208,16 +199,13 @@ double Bt2390EetfPq(double signal, double peakNits) {
     double lw = peakNits;
     if (!(lw > kSdrWhiteNits)) lw = kSdrWhiteNits;
     const double lmax = kSdrWhiteNits;
-    const double lb = 0.0;
-    const double lmin = 0.0;
     double pqLw = PqNitsToSignal(lw);
-    double pqLb = PqNitsToSignal(lb);
     double pqLmax = PqNitsToSignal(lmax);
-    double pqLmin = PqNitsToSignal(lmin);
-    double denom = pqLw - pqLb;
+    // P3-C2: pqLb is 0 (black level), so denom == pqLw; the black-level
+    // lines (lb/lmin/pqLb/pqLmin/minLum) were dead code and are deleted.
+    double denom = pqLw;
     if (!(denom > 0.0)) return Clamp01(signal);
-    double maxLum = (pqLmax - pqLb) / denom;
-    double minLum = (pqLmin - pqLb) / denom;
+    double maxLum = pqLmax / denom;
     double ks = 1.5 * maxLum - 0.5;
     // Normalised PQ signal (source white = 1). When the content peak is
     // at or below SDR white, maxLum == 1 and ks == 1, so E1 < ks for
@@ -237,9 +225,9 @@ double Bt2390EetfPq(double signal, double peakNits) {
            + (t3 - 2.0 * t2 + t) * (1.0 - ks)
            + (-2.0 * t3 + 3.0 * t2) * maxLum;
     }
-    double e3 = e2 + minLum * std::pow(1.0 - e2, 4.0);
     // Denormalise back to a PQ signal for the target display.
-    return PqNitsToSignal(PqSignalToNits(e3 * denom + pqLb));
+    // (P3-C2: e3 was e2 + minLum*pow(1-e2,4) with minLum == 0, so e3 == e2.)
+    return PqNitsToSignal(PqSignalToNits(e2 * denom));
 }
 
 double SrgbOetf(double linear) {

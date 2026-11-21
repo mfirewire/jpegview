@@ -165,8 +165,7 @@ void* EXRReader::ReadImage(int& width,
 	// The composited linear RGB lives in a transient buffer (3 floats
 	// per pixel); it is smaller than the RGBA float buffer tinyexr
 	// already allocated, and is freed before returning.
-	size_t rgbFloats = 0;
-	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &rgbFloats)) {
+	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, NULL)) {
 		outOfMemory = true;
 		free(pRGBA);
 		delete[] pPixelData;
