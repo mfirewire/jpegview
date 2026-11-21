@@ -96,7 +96,13 @@ void* HDRReader::ReadImage(int& width,
 	// white), which rolls highlights off instead of clipping them.
 	double dGamma = ParseHDRGamma(pMagic, sizebytes);
 	double dInvGamma = 1.0;
-	if (dGamma > 0.0 && dGamma <= 4.0) {
+	// P2-C8: the lower bound is 0.25, the mirror of the upper bound
+	// (1/4.0), not a Radiance spec value. A tiny but finite gamma
+	// (e.g. 1e-300) would invert to 1e300 and blow the linearize
+	// exponent up; below 0.25 it now falls back to g=1.0 like a
+	// missing/absurd value. (1/DBL_MAX is ~5.56e-309, so overflow to
+	// Inf needs dGamma below that; the 0.25 bound is far above it.)
+	if (dGamma >= 0.25 && dGamma <= 4.0) {
 		dInvGamma = 1.0 / dGamma;
 	}
 	float* pDecodedFloat = stbi_loadf_from_memory(pMagic, sizebytes, &width, &height, &nChannels, 0);
