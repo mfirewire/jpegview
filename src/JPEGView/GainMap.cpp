@@ -253,6 +253,29 @@ bool FindXmpField(const std::string& xmp, const char* field, double& value) {
     return ParseFirstNumberAfter(xmp, after, limit, value);
 }
 
+// G4: whether the XMP packet contains an HDRGainMapGamma field with a
+// value — as opposed to missing, or a self-closing element, which
+// FindXmpField treats as missing. Mirrors FindXmpField's own search:
+// find the field name, skip whitespace, and report present-with-value
+// only when the next character is not '/'. A bare substring check
+// would wrongly reject self-closing tags and match stray occurrences.
+bool AppleGammaFieldPresentWithValue(const std::string& xmp) {
+    static const char kField[] = "HDRGainMapGamma";
+    size_t pos = xmp.find(kField);
+    if (pos == std::string::npos) {
+        return false;
+    }
+    size_t after = pos + std::strlen(kField);
+    while (after < xmp.size() && (xmp[after] == ' ' || xmp[after] == '\t' ||
+                                  xmp[after] == '\r' || xmp[after] == '\n')) {
+        ++after;
+    }
+    if (after >= xmp.size() || xmp[after] == '/') {
+        return false;  // self-closing element (or truncated): missing
+    }
+    return true;
+}
+
 }  // namespace
 
 bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out) {
@@ -396,6 +419,13 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
             // gainMapMax 0.0 (identity: no gain).
             if (!std::isfinite(headroom) || headroom < 1.0 ||
                 headroom > 65536.0) {
+                return false;
+            }
+            // G4: an HDRGainMapGamma that is PRESENT but unparseable
+            // must reject the packet (like the hdrgm path), not
+            // silently default to 1.0. Missing (including
+            // self-closing) still defaults to 1.0.
+            if (!hasAppleGamma && AppleGammaFieldPresentWithValue(xmp)) {
                 return false;
             }
             if (hasAppleGamma &&

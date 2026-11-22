@@ -676,6 +676,50 @@ void TestParseXmp() {
               m) &&
               !m.valid,
           "XMP hdrgm gamma denominator past limit rejected");
+    // G4: Apple HDRGainMapGamma present but unparseable rejects the
+    // packet (like the hdrgm path); missing (including self-closing)
+    // still defaults to 1.0.
+    Check(!ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>2.0</HDRGainMapHeadroom>"
+                          "<HDRGainMapGamma>abc</HDRGainMapGamma>"),
+              m) &&
+              !m.valid,
+          "XMP Apple gamma abc rejected");
+    Check(!ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>2.0</HDRGainMapHeadroom>"
+                          "<HDRGainMapGamma>0</HDRGainMapGamma>"),
+              m) &&
+              !m.valid,
+          "XMP Apple gamma 0 rejected");
+    Check(ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>2.0</HDRGainMapHeadroom>"
+                          "<HDRGainMapGamma/>"),
+              m) &&
+              m.valid && Near(m.gainMapMax, 1.0, 1e-12) &&
+              Near(m.gamma, 1.0, 1e-12),
+          "XMP Apple self-closing gamma treated as missing (gamma 1.0)");
+    Check(ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>2.0</HDRGainMapHeadroom>"
+                          "<HDRGainMapGamma />"),
+              m) &&
+              m.valid && Near(m.gamma, 1.0, 1e-12),
+          "XMP Apple blank self-closing gamma treated as missing (gamma 1.0)");
+    // hdrgm gamma "abc" rejects (existing behaviour, pinned).
+    Check(!ParseXmpMetadata(
+              std::string("<hdrgm:GainMapMin>0.0</hdrgm:GainMapMin>"
+                          "<hdrgm:GainMapMax>0.1</hdrgm:GainMapMax>"
+                          "<hdrgm:Gamma>abc</hdrgm:Gamma>"),
+              m) &&
+              !m.valid,
+          "XMP hdrgm gamma abc rejected");
+    // Known leniency (NOT changed by G4): ParseFirstNumberAfter scans
+    // forward for the first digit, so "abc 2.0" parses as 2.0.
+    Check(ParseXmpMetadata(
+              std::string("<HDRGainMapHeadroom>2.0</HDRGainMapHeadroom>"
+                          "<HDRGainMapGamma>abc 2.0</HDRGainMapGamma>"),
+              m) &&
+              m.valid && Near(m.gamma, 2.0, 1e-12),
+          "XMP Apple gamma 'abc 2.0' parses as 2.0 (forward-scan leniency, pinned)");
 }
 
 void TestAppleHeadroomRatioRealXmp() {
