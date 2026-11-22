@@ -63,6 +63,9 @@ Bugs fixed:
 - A PSB with a crafted 8-bit RLE row length could crash the Win32 build by wrapping the read pointer; row lengths are now checked against the remaining image data before the pointer is advanced
 - A PSD with duplicate ICC profile or thumbnail resources no longer leaks the earlier buffer; the first ICC profile wins and the last thumbnail wins, so the observable behaviour is unchanged
 - A PSD thumbnail resource smaller than its 28-byte header is now rejected as a corrupt file instead of being misreported as out-of-memory
+- Saving a JPEG whose embedded ICC profile has a crafted tag offset could crash the Win32 build, because the offset check wrapped in 32-bit arithmetic; the check is now written so it cannot wrap
+- A 16/32-bit PSD with a crafted near-singular ICC colour space could produce an out-of-range colour matrix; the matrix is now rejected before the tone map if any element exceeds the float range, falling back to sRGB
+- The PSD ZIP decoder's allocator now checks the allocation size for overflow before allocating (defence in depth; unreachable through the decoder today)
 
 Investigated (no change):
 - E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
