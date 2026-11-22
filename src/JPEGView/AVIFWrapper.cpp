@@ -196,6 +196,8 @@ static bool DecodeAvifGainMapGray(const avifGainMap* gainMap, int baseWidth, int
 	const size_t bytesPerSample = (depth > 8) ? 2 : 1;
 	if (rowBytes < (uint32_t)gw * bytesPerSample)
 		return false;
+	if (!IsImageBufferSizeOk((size_t)gw, (size_t)gh))
+		return false;
 	gainGray.assign((size_t)gw * gh, 0);
 	for (int y = 0; y < gh; y++) {
 		const uint8_t* srcRow = plane + (size_t)y * rowBytes;
