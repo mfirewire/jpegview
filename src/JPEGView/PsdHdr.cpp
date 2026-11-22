@@ -91,7 +91,11 @@ float SampleToLinear32(uint32_t bits) {
 // relying on zlib defaults.
 static void* PsdZAlloc(void* opaque, unsigned items, unsigned size) {
     (void)opaque;
-    return std::malloc((size_t)items * (size_t)size);
+    size_t nBytes = 0;
+    if (!CheckedMul((size_t)items, (size_t)size, &nBytes)) {
+        return NULL;
+    }
+    return std::malloc(nBytes);
 }
 
 static void PsdZFree(void* opaque, void* address) {
