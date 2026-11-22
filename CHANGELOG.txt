@@ -61,10 +61,10 @@ Bugs fixed:
 - A PSD whose image-resource section is crafted so the resource loop advances by zero bytes no longer hangs the load thread forever; the loop is now bounded by the end of the resource section (in both the full-image and the thumbnail paths)
 - A PSD that is too large for the byte cap (for example a 40000x30000 16-bit file) is now reported as exceeding the size limit instead of 'not enough memory'; only a genuine allocation failure is reported as out-of-memory
 - A PSB with a crafted 8-bit RLE row length could crash the Win32 build by wrapping the read pointer; row lengths are now checked against the remaining image data before the pointer is advanced
-- A PSD with duplicate ICC profile or thumbnail resources no longer leaks the earlier buffer; the first ICC profile wins and the last thumbnail wins, so the observable behaviour is unchanged
+- A PSD with duplicate ICC profile or thumbnail resources no longer leaks the earlier buffer; the first ICC profile wins and the last thumbnail wins, so the observable behaviour is unchanged for files with a single profile
 - A PSD thumbnail resource smaller than its 28-byte header is now rejected as a corrupt file instead of being misreported as out-of-memory
 - Saving a JPEG whose embedded ICC profile has a crafted tag offset could crash the Win32 build, because the offset check wrapped in 32-bit arithmetic; the check is now written so it cannot wrap
-- A 16/32-bit PSD with a crafted near-singular ICC colour space could produce an out-of-range colour matrix; the matrix is now rejected before the tone map if any element exceeds the float range, falling back to sRGB
+- A 16/32-bit PSD with a crafted near-singular ICC colour space could produce an out-of-range colour matrix; the matrix is now rejected before the tone map if any element exceeds the float range, falling back to sRGB (defence in depth; unreachable from real ICC data)
 - The PSD ZIP decoder's allocator now checks the allocation size for overflow before allocating (defence in depth; unreachable through the decoder today)
 - A JPEG with a malformed first MPF segment no longer loses its gain map outright; the finder now skips the bad segment and keeps scanning for a valid one
 - A JPEG whose MPF entry points at an arbitrary FFD8 sequence inside the file instead of the gain image appended after the primary image no longer has that data applied as a gain map; the gain image must start after the primary image's end marker
