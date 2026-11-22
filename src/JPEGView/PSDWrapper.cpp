@@ -577,11 +577,15 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					// advances from the table, not from p).
 					unsigned int nElemSize = (nVersion == 2) ? 4 : 2;
 					ThrowIf(((unsigned __int64)channel * nHeight + row) * nElemSize + nElemSize > nImageDataSize);
-					if (nVersion == 2) {
-						pOffset += _byteswap_ulong(*(unsigned int*)(pBuffer + (channel * nHeight + row) * 4));
-					} else {
-						pOffset += _byteswap_ushort(*(unsigned short*)(pBuffer + (channel * nHeight + row) * 2));
-					}
+					// P2-4: validate the row length before advancing pOffset.
+					// pOffset stays inside [pBuffer, pBuffer + nImageDataSize]
+					// (table check above), so the subtraction cannot underflow
+					// and the checked addition cannot wrap the pointer.
+					unsigned __int64 nRowLen = (nVersion == 2)
+						? _byteswap_ulong(*(unsigned int*)(pBuffer + (channel * nHeight + row) * 4))
+						: _byteswap_ushort(*(unsigned short*)(pBuffer + (channel * nHeight + row) * 2));
+					ThrowIf(nRowLen > (unsigned __int64)nImageDataSize - (unsigned __int64)(pOffset - (unsigned char*)pBuffer));
+					pOffset += (size_t)nRowLen;
 #ifdef DEBUG
 					if (p != pOffset) {
 						WCHAR buf[100];
