@@ -133,6 +133,8 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 			if (IsImageBufferSizeOk(outStride, (size_t)height, &outBytes)) {
 				pOutBgr = new(std::nothrow) unsigned char[outBytes];
 				if (pOutBgr != NULL) {
+					// Zero the row padding so no uninitialised bytes reach the DIB.
+					memset(pOutBgr, 0, outBytes);
 					HdrToneMap::ConvertLinearImage(pLinear.get(), width, height,
 						(size_t)width * 3, pOutBgr, outStride);
 				}
