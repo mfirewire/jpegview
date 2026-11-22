@@ -263,11 +263,15 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			// Parse image resources
 			switch (nResourceID) {
 				case 0x040F: // ICC Profile
-					pICCProfile = new(std::nothrow) char[nResourceSize];
-					if (pICCProfile != NULL) {
-						ReadFromFile(pICCProfile, hFile, nResourceSize);
-						SeekFile(hFile, -nResourceSize);
-						nICCProfileSize = nResourceSize;
+					// P3-2: first profile wins (same as the EXIF branch
+					// below); later duplicates are skipped, not leaked.
+					if (pICCProfile == NULL) {
+						pICCProfile = new(std::nothrow) char[nResourceSize];
+						if (pICCProfile != NULL) {
+							ReadFromFile(pICCProfile, hFile, nResourceSize);
+							SeekFile(hFile, -nResourceSize);
+							nICCProfileSize = nResourceSize;
+						}
 					}
 					break;
 				case 0x041D: // 0x041D 1053 (Photoshop 6.0) Alpha Identifiers. 4 bytes of length, followed by 4 bytes each for every alpha identifier.
@@ -797,6 +801,8 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 						ThrowIf(true);
 					}
 
+					// P3-2: last thumbnail wins; free the previous one first.
+					delete[] pBuffer;
 					pBuffer = new(std::nothrow) char[nJpegSize];
 					if (pBuffer == NULL) {
 						bOutOfMemory = true;
@@ -807,6 +813,8 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					SeekFile(hFile, -nResourceSize);
 
 
+					// P3-2: last thumbnail wins; free the previous one first.
+					delete[] pPixelData;
 					pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nChannels, eChromoSubSampling, bOutOfMemory, bSizeLimitExceeded, pBuffer, nJpegSize);
 					break;
 
