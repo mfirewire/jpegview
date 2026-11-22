@@ -217,10 +217,12 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 		// Skip color mode data
 		unsigned int nColorDataSize = ReadUIntFromFile(hFile);
+		ThrowIf((unsigned __int64)nColorDataSize > (unsigned __int64)nFileSize - (PSD_HEADER_SIZE + 4));
 		SeekFile(hFile, nColorDataSize);
 
 		// Read resource section size
 		unsigned int nResourceSectionSize = ReadUIntFromFile(hFile);
+		ThrowIf((unsigned __int64)nResourceSectionSize > (unsigned __int64)nFileSize - TellFile(hFile));
 
 		// This default value should detect alpha channels for PSDs created by programs which don't save alpha identifiers (e.g. Krita, GIMP)
 		bool bUseAlpha = nChannels >= 4;
@@ -296,7 +298,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		}
 		
 		// Go back to start of file
-		SeekFileFromStart(hFile, PSD_HEADER_SIZE + 4 + nColorDataSize + 4 + nResourceSectionSize);
+		SeekFileFromStart(hFile, (LONG)(PSD_HEADER_SIZE + 4 + (unsigned __int64)nColorDataSize + 4 + nResourceSectionSize));
 
 		// Skip Layer and Mask Info section
 		unsigned long long nLayerSize;
@@ -715,15 +717,19 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 	TJSAMP eChromoSubSampling;
 
 	try {
+		long long nFileSize = Helpers::GetFileSize(hFile);
+
 		// Skip file header
 		SeekFile(hFile, PSD_HEADER_SIZE);
 
 		// Skip color mode data
 		unsigned int nColorDataSize = ReadUIntFromFile(hFile);
+		ThrowIf((unsigned __int64)nColorDataSize > (unsigned __int64)nFileSize - (PSD_HEADER_SIZE + 4));
 		SeekFile(hFile, nColorDataSize);
 
 		// Skip resource section size
-		ReadUIntFromFile(hFile);
+		unsigned int nResourceSectionSize = ReadUIntFromFile(hFile);
+		ThrowIf((unsigned __int64)nResourceSectionSize > (unsigned __int64)nFileSize - TellFile(hFile));
 
 		for (;;) {
 			// Resource block signature
