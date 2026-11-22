@@ -1,7 +1,7 @@
 #include "stdafx.h"
 
 #include "SVGWrapper.h"
-// ThorVG 1.1.3, vendored under libthorvg/ (headers from the 1.1.3 release
+// ThorVG 1.1.4, vendored under libthorvg/ (headers from the 1.1.4 release
 // tarball; libthorvg-1.dll is built from that source with MinGW, see
 // libthorvg/README-THORVG.txt). Only the C API header is used:
 // thorvg_capi.h. That is deliberate, not incidental -- the C++ API
