@@ -223,11 +223,16 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		// Read resource section size
 		unsigned int nResourceSectionSize = ReadUIntFromFile(hFile);
 		ThrowIf((unsigned __int64)nResourceSectionSize > (unsigned __int64)nFileSize - TellFile(hFile));
+		// P2-1: end of the resource section; the loop below must not read past it.
+		unsigned __int64 sectionEnd = (unsigned __int64)TellFile(hFile) + nResourceSectionSize;
 
 		// This default value should detect alpha channels for PSDs created by programs which don't save alpha identifiers (e.g. Krita, GIMP)
 		bool bUseAlpha = nChannels >= 4;
 
 		for (;;) {
+			// P2-1: stop at the end of the resource section.
+			unsigned int nLoopStartPos = TellFile(hFile);
+			if (nLoopStartPos >= sectionEnd) break;
 			// Resource block signature
 			try {
 				if (ReadUIntFromFile(hFile) != 0x3842494D) { // "8BIM"
@@ -246,6 +251,14 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 			// Resource size
 			unsigned int nResourceSize = ReadUIntFromFile(hFile);
+
+			// P2-1: the padded resource must fit in the remaining section bytes.
+			// The header may straddle the section end (oversized Pascal-string
+			// skip), so reject that before the subtraction below can wrap.
+			unsigned __int64 nPosAfterSize = TellFile(hFile);
+			ThrowIf(nPosAfterSize > sectionEnd);
+			unsigned __int64 nRemaining = sectionEnd - nPosAfterSize;
+			ThrowIf((((unsigned __int64)nResourceSize + 1) & ~1ULL) > nRemaining);
 
 			// Parse image resources
 			switch (nResourceID) {
@@ -295,6 +308,8 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 			// Skip resource data (padded to be even length)
 			SeekFile(hFile, (nResourceSize + 1) & -2);
+			// P2-1 (defence in depth): every iteration must make progress.
+			ThrowIf(TellFile(hFile) <= nLoopStartPos);
 		}
 		
 		// Go back to start of file
@@ -730,8 +745,13 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		// Skip resource section size
 		unsigned int nResourceSectionSize = ReadUIntFromFile(hFile);
 		ThrowIf((unsigned __int64)nResourceSectionSize > (unsigned __int64)nFileSize - TellFile(hFile));
+		// P2-1: end of the resource section; the loop below must not read past it.
+		unsigned __int64 sectionEnd = (unsigned __int64)TellFile(hFile) + nResourceSectionSize;
 
 		for (;;) {
+			// P2-1: stop at the end of the resource section.
+			unsigned int nLoopStartPos = TellFile(hFile);
+			if (nLoopStartPos >= sectionEnd) break;
 			// Resource block signature
 			try {
 				if (ReadUIntFromFile(hFile) != 0x3842494D) { // "8BIM"
@@ -750,6 +770,14 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 			// Resource size
 			unsigned int nResourceSize = ReadUIntFromFile(hFile);
+
+			// P2-1: the padded resource must fit in the remaining section bytes.
+			// The header may straddle the section end (oversized Pascal-string
+			// skip), so reject that before the subtraction below can wrap.
+			unsigned __int64 nPosAfterSize = TellFile(hFile);
+			ThrowIf(nPosAfterSize > sectionEnd);
+			unsigned __int64 nRemaining = sectionEnd - nPosAfterSize;
+			ThrowIf((((unsigned __int64)nResourceSize + 1) & ~1ULL) > nRemaining);
 
 			// Parse image resources
 			switch (nResourceID) {
@@ -794,6 +822,8 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 
 			// Skip resource data (padded to be even length)
 			SeekFile(hFile, (nResourceSize + 1) & -2);
+			// P2-1 (defence in depth): every iteration must make progress.
+			ThrowIf(TellFile(hFile) <= nLoopStartPos);
 		}
 
 		if (pPixelData != NULL) {
