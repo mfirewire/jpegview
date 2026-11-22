@@ -403,7 +403,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			nChannels = (unsigned short)(bHdrAlpha ? 4 : 3);
 			size_t nLinearBytes = 0;
 			if (!IsImageBufferSizeOk((size_t)nWidth * 3 * sizeof(float), (size_t)nHeight, &nLinearBytes)) {
-				bOutOfMemory = true;
+				bSizeLimitExceeded = true;
 				ThrowIf(true);
 			}
 			pLinearRgb = new(std::nothrow) float[nLinearBytes / sizeof(float)];
@@ -414,7 +414,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			if (bHdrAlpha) {
 				size_t nAlphaBytes = 0;
 				if (!IsImageBufferSizeOk((size_t)nWidth, (size_t)nHeight, &nAlphaBytes)) {
-					bOutOfMemory = true;
+					bSizeLimitExceeded = true;
 					ThrowIf(true);
 				}
 				pAlphaBuf = new(std::nothrow) unsigned char[nAlphaBytes];
@@ -490,7 +490,7 @@ CJPEGImage* PsdReader::ReadImage(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 		// nRowSize * nHeight is int arithmetic: 262144 x 65535 is 17GB and wraps.
 		size_t allocSize = 0;
 		if (!IsImageBufferSizeOk((size_t)nRowSize, (size_t)nHeight, &allocSize)) {
-			bOutOfMemory = true;
+			bSizeLimitExceeded = true;
 			ThrowIf(true);
 		}
 		pPixelData = new(std::nothrow) char[allocSize];
@@ -789,7 +789,7 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 					// Read embedded JPEG thumbnail
 					nJpegSize = nResourceSize - 28;
 					if (nJpegSize > MAX_JPEG_FILE_SIZE) {
-						bOutOfMemory = true;
+						bSizeLimitExceeded = true;
 						ThrowIf(true);
 					}
 
