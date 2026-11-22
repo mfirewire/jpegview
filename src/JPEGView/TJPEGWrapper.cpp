@@ -39,8 +39,14 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 		gainW = tj3Get(hGain, TJPARAM_JPEGWIDTH);
 		gainH = tj3Get(hGain, TJPARAM_JPEGHEIGHT);
 		size_t gainBytes = 0;
+		// G1: the gain map must not be absurdly larger than the base
+		// image (sanity cap 4x per side, mirroring the HEIF/AVIF
+		// paths); a larger gain map is skipped and the file shows
+		// SDR. Per-side comparison, not an area cap. No overflow:
+		// base width/height <= 65535, so width * 4 <= 262140 fits int.
 		if (gainW > 0 && gainH > 0 &&
 			gainW <= MAX_IMAGE_DIMENSION && gainH <= MAX_IMAGE_DIMENSION &&
+			gainW <= width * 4 && gainH <= height * 4 &&
 			IsImageBufferSizeOk((size_t)gainW, (size_t)gainH, &gainBytes)) {
 			pGainGray = new(std::nothrow) unsigned char[gainBytes];
 			if (pGainGray != NULL) {
