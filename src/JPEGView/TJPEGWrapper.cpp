@@ -8,6 +8,7 @@
 #include "HdrToneMap.h"
 #include <climits>
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -33,7 +34,12 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 	if (hGain == NULL) {
 		return NULL;
 	}
-	unsigned char* pGainGray = NULL;
+	// G2: scope-guarded (F7): the three temp buffers are freed
+	// automatically on every path, including a bad_alloc unwind
+	// from ApplyGainMap's upsampled.resize or the XMP std::string
+	// copies. pOutBgr (returned to the caller) and pBaseBgr
+	// (caller-owned, deleted only on the success path) stay raw.
+	std::unique_ptr<unsigned char[]> pGainGray;
 	int gainW = 0, gainH = 0;
 	if (tj3DecompressHeader(hGain, (unsigned char*)pGainJpeg, (int)gainSize) == 0) {
 		gainW = tj3Get(hGain, TJPARAM_JPEGWIDTH);
@@ -48,12 +54,11 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 			gainW <= MAX_IMAGE_DIMENSION && gainH <= MAX_IMAGE_DIMENSION &&
 			gainW <= width * 4 && gainH <= height * 4 &&
 			IsImageBufferSizeOk((size_t)gainW, (size_t)gainH, &gainBytes)) {
-			pGainGray = new(std::nothrow) unsigned char[gainBytes];
+			pGainGray.reset(new(std::nothrow) unsigned char[gainBytes]);
 			if (pGainGray != NULL) {
 				if (tj3Decompress8(hGain, (unsigned char*)pGainJpeg, (int)gainSize,
-						pGainGray, gainW, TJPF_GRAY) != 0) {
-					delete[] pGainGray;
-					pGainGray = NULL;
+						pGainGray.get(), gainW, TJPF_GRAY) != 0) {
+					pGainGray.reset();
 				}
 			}
 		}
@@ -96,7 +101,6 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 		}
 	}
 	if (!bHaveMeta) {
-		delete[] pGainGray;
 		return NULL;
 	}
 
@@ -107,38 +111,34 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 	size_t rgbBytes = 0, linearBytes = 0;
 	if (!IsImageBufferSizeOk((size_t)width * 3, (size_t)height, &rgbBytes) ||
 		!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &linearBytes)) {
-		delete[] pGainGray;
 		return NULL;
 	}
-	unsigned char* pBaseRgb = new(std::nothrow) unsigned char[rgbBytes];
-	float* pLinear = new(std::nothrow) float[linearBytes / sizeof(float)];
+	std::unique_ptr<unsigned char[]> pBaseRgb(new(std::nothrow) unsigned char[rgbBytes]);
+	std::unique_ptr<float[]> pLinear(new(std::nothrow) float[linearBytes / sizeof(float)]);
 	unsigned char* pOutBgr = NULL;
 	if (pBaseRgb != NULL && pLinear != NULL) {
 		const size_t baseStride = (size_t)TJPAD(width * 3);
 		for (int y = 0; y < height; ++y) {
 			const unsigned char* pSrcRow = pBaseBgr + (size_t)y * baseStride;
-			unsigned char* pDstRow = pBaseRgb + (size_t)y * (size_t)width * 3;
+			unsigned char* pDstRow = pBaseRgb.get() + (size_t)y * (size_t)width * 3;
 			for (int x = 0; x < width; ++x) {
 				pDstRow[x * 3 + 0] = pSrcRow[x * 3 + 2];
 				pDstRow[x * 3 + 1] = pSrcRow[x * 3 + 1];
 				pDstRow[x * 3 + 2] = pSrcRow[x * 3 + 0];
 			}
 		}
-		if (gainmap::ApplyGainMap(pBaseRgb, width, height, pGainGray, gainW, gainH, meta, 1.0, pLinear)) {
+		if (gainmap::ApplyGainMap(pBaseRgb.get(), width, height, pGainGray.get(), gainW, gainH, meta, 1.0, pLinear.get())) {
 			const size_t outStride = (size_t)TJPAD(width * 3);
 			size_t outBytes = 0;
 			if (IsImageBufferSizeOk(outStride, (size_t)height, &outBytes)) {
 				pOutBgr = new(std::nothrow) unsigned char[outBytes];
 				if (pOutBgr != NULL) {
-					HdrToneMap::ConvertLinearImage(pLinear, width, height,
+					HdrToneMap::ConvertLinearImage(pLinear.get(), width, height,
 						(size_t)width * 3, pOutBgr, outStride);
 				}
 			}
 		}
 	}
-	delete[] pBaseRgb;
-	delete[] pLinear;
-	delete[] pGainGray;
 	if (pOutBgr == NULL) {
 		return NULL;
 	}
