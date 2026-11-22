@@ -178,6 +178,35 @@ std::vector<uint8_t> BuildUhdrJpeg(const uint8_t* mpfSeg, size_t gainSize) {
     return buf;
 }
 
+// A copy of the REAL HLG MPF segment re-pointed at a gain map at
+// 8087, for a segment whose TIFF header starts at `tiffStart`
+// (segment start + 8). The size field (8277) is unchanged; only the
+// data_offset of MP entry 1 (segment bytes 82-85, big-endian) moves.
+std::vector<uint8_t> MakeSecondMpf(size_t tiffStart) {
+    std::vector<uint8_t> seg(kMpfSegmentHlg,
+                             kMpfSegmentHlg + sizeof(kMpfSegmentHlg));
+    uint32_t dataOff = (uint32_t)(8087 - tiffStart);
+    seg[82] = (uint8_t)(dataOff >> 24);
+    seg[83] = (uint8_t)(dataOff >> 16);
+    seg[84] = (uint8_t)(dataOff >> 8);
+    seg[85] = (uint8_t)dataOff;
+    return seg;
+}
+
+// Build a JPEG with TWO MPF segments: `firstMpf` at the real offset
+// 644 and `secondMpf` at `secondPos` (734, right after the first, in
+// the normal case), sharing one gain-map JPEG at 8087. Built on
+// BuildUhdrJpeg so the primary layout matches it. Used by the G3
+// tests: the first segment is mutated to be malformed, the second
+// stays valid.
+std::vector<uint8_t> BuildTwoMpfJpeg(const uint8_t* firstMpf,
+                                     const std::vector<uint8_t>& secondMpf,
+                                     size_t secondPos, size_t gainSize) {
+    std::vector<uint8_t> buf = BuildUhdrJpeg(firstMpf, gainSize);
+    std::memcpy(buf.data() + secondPos, secondMpf.data(), secondMpf.size());
+    return buf;
+}
+
 // Build a little-endian copy of the REAL big-endian MPF segment
 // (P3-A8 (1)): the TIFF header and all multi-byte TIFF fields are
 // byte-swapped; the JPEG APP2 length and the ASCII "0100" version
@@ -1057,6 +1086,139 @@ void TestFindGainMapJpeg() {
     uint8_t notJpeg[16] = {0};
     Check(!FindGainMapJpeg(notJpeg, sizeof(notJpeg), off, sz),
           "FindGainMapJpeg non-JPEG rejected");
+    // G3: a malformed first MPF segment must be skipped, not reject
+    // the whole file — a valid second MPF still yields the gain map
+    // (off 8087, sz 8277). One mutant per failure point in
+    // FindGainMapJpeg, each followed by a valid second MPF whose TIFF
+    // starts at 742 (data_offset 8087 - 742 = 7345). First-segment
+    // byte offsets below are 644 + the segment-relative offsets of
+    // the real HLG MPF (TIFF at 652, IFD at 660, entries at 662/674/
+    // 686, MP list at 702, entry 1 size at 722-725, data_offset at
+    // 726-729).
+    std::vector<uint8_t> secondMpf = MakeSecondMpf(742);
+    auto checkSecondFound = [&](std::vector<uint8_t> buf, const char* what) {
+        size_t o = 0, s = 0;
+        Check(FindGainMapJpeg(buf.data(), buf.size(), o, s) && o == 8087 &&
+                  s == 8277,
+              what);
+    };
+    {
+        // :371 tiffSize < 8: shorten the first segment's declared
+        // length to 10 (segSize 8, tiffSize 4). The scanner then
+        // resumes at 656, so the valid second MPF sits there instead
+        // of at 734 (its TIFF starts at 664, data_offset 7423).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, MakeSecondMpf(664), 656, 8277);
+        m[646] = 0x00;
+        m[647] = 0x0A;  // length 10
+        checkSecondFound(m, "G3 short first MPF (tiffSize<8) -> second MPF found");
+    }
+    {
+        // :379 bad TIFF byte order ("MM" -> "ZM" at 652).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[652] = 0x5A;
+        checkSecondFound(m, "G3 bad byte order first MPF -> second MPF found");
+    }
+    {
+        // :388 bad TIFF magic (42 -> 43).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[655] = 0x2B;
+        checkSecondFound(m, "G3 bad TIFF magic first MPF -> second MPF found");
+    }
+    {
+        // :394 IFD offset out of range (8 -> 0xFFFF).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[658] = 0xFF;
+        m[659] = 0xFF;
+        checkSecondFound(m, "G3 IFD offset past end first MPF -> second MPF found");
+    }
+    {
+        // :398 entry table out of range (entryCount 3 -> 100).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[661] = 100;
+        checkSecondFound(m, "G3 entryCount 100 first MPF -> second MPF found");
+    }
+    {
+        // :419 B002 count <= 4 (0x20 -> 4): the flag path — a bare
+        // `continue` inside the entry loop would not skip the segment.
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[693] = 0x04;
+        checkSecondFound(m, "G3 B002 count=4 first MPF -> second MPF found");
+    }
+    {
+        // :427 NumberOfImages < 2 (2 -> 1).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[685] = 0x01;
+        checkSecondFound(m, "G3 NumberOfImages=1 first MPF -> second MPF found");
+    }
+    {
+        // :430 MP list offset out of range (0x32 -> 0xFFFF).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[696] = 0xFF;
+        m[697] = 0xFF;
+        checkSecondFound(m, "G3 MP list offset past end first MPF -> second MPF found");
+    }
+    {
+        // :439 gain data offset out of range (7435 -> 0xFFFF).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[728] = 0xFF;
+        m[729] = 0xFF;
+        checkSecondFound(m, "G3 gain data offset past end first MPF -> second MPF found");
+    }
+    {
+        // :443 gain size out of range (8277 -> 0xFFFF).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[724] = 0xFF;
+        m[725] = 0xFF;
+        checkSecondFound(m, "G3 gain size past end first MPF -> second MPF found");
+    }
+    {
+        // :446 gain bytes are not a JPEG: point the first MPF's
+        // data_offset at 1000 (zero-filled, no SOI). The shared gain
+        // JPEG at 8087 itself is left intact for the second MPF.
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[726] = 0x00;
+        m[727] = 0x00;
+        m[728] = 0x03;
+        m[729] = 0xE8;  // data_offset 1000
+        checkSecondFound(m, "G3 first MPF gain without SOI -> second MPF found");
+    }
+    // G3 negative controls: malformed first MPF with NO valid second
+    // segment still returns false (a malformed-only file is covered
+    // by the single-segment bad-magic / NumberOfImages=1 / no-SOI
+    // checks above).
+    {
+        // Both MPFs with a bad TIFF byte order.
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[652] = 0x5A;
+        m[742] = 0x5A;  // second segment's TIFF byte order
+        Check(!FindGainMapJpeg(m.data(), m.size(), off, sz),
+              "G3 two malformed MPFs -> false");
+    }
+    {
+        // Valid first MPF skipped by a bad byte order, second MPF
+        // pointing at zeros (no SOI at 1000).
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
+        m[652] = 0x5A;
+        m[816] = 0x00;
+        m[817] = 0x00;
+        m[818] = 0x03;
+        m[819] = 0xE8;  // second data_offset 1000
+        Check(!FindGainMapJpeg(m.data(), m.size(), off, sz),
+              "G3 malformed first MPF + second without SOI -> false");
+    }
 }
 
 void TestFindIso21496Payload() {

@@ -368,7 +368,8 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
         size_t tiffSize = segSize - 4;
         size_t tiffStart = static_cast<size_t>(tiff - jpeg);
         if (tiffSize < 8) {
-            return false;
+            continue;  // G3: malformed MPF segment — skip it, a later
+                       // MPF segment may still be valid
         }
         bool bigEndian = false;
         if (tiff[0] == 'M' && tiff[1] == 'M') {
@@ -376,7 +377,7 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
         } else if (tiff[0] == 'I' && tiff[1] == 'I') {
             bigEndian = false;
         } else {
-            return false;  // not a TIFF header
+            continue;  // not a TIFF header
         }
         auto rd16 = [&](const uint8_t* p) -> uint16_t {
             return bigEndian ? ReadU16Be(p) : ReadU16Le(p);
@@ -385,22 +386,26 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
             return bigEndian ? ReadU32Be(p) : ReadU32Le(p);
         };
         if (rd16(tiff + 2) != 42) {
-            return false;  // bad TIFF magic
+            continue;  // bad TIFF magic
         }
         uint32_t ifdOff = rd32(tiff + 4);
         // Two-step bound check: ifdOff is untrusted u32, so check it
         // against tiffSize before adding (no wraparound on 32-bit).
         if (ifdOff > tiffSize || ifdOff + 2 > tiffSize) {
-            return false;
+            continue;
         }
         uint16_t entryCount = rd16(tiff + ifdOff);
         if (ifdOff + 2 + static_cast<size_t>(entryCount) * 12 > tiffSize) {
-            return false;
+            continue;
         }
         // Find 0xB001 (NumberOfImages, LONG x1) and 0xB002 (MP entry
         // list, UNDEFINED, 16 bytes per image).
         bool haveCount = false;
         bool haveList = false;
+        // G3: set when the B002 entry is unusable (count <= 4); the
+        // flag is checked after the loop because `continue` here
+        // would only continue the IFD-entry scan, not the segment scan.
+        bool badMpf = false;
         uint32_t numImages = 0;
         uint32_t listOff = 0;
         uint32_t listBytes = 0;
@@ -416,18 +421,22 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
                 // count <= 4 would be inline, but an entry list for
                 // >= 1 image is 16 bytes, so it is always an offset.
                 if (count <= 4) {
-                    return false;
+                    badMpf = true;
+                    break;
                 }
                 listOff = rd32(e + 8);
                 listBytes = count;
                 haveList = true;
             }
         }
+        if (badMpf) {
+            continue;
+        }
         if (!haveCount || !haveList || numImages < 2 || listBytes < 32) {
-            return false;
+            continue;
         }
         if (listOff > tiffSize || listOff + 32 > tiffSize) {
-            return false;
+            continue;
         }
         // Entry 1 is the gain map (entry 0 is the primary):
         // attr u32, size u32, data_offset u32 (relative to the TIFF
@@ -436,14 +445,14 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
         uint32_t imgSize = rd32(entry1 + 4);
         uint32_t dataOff = rd32(entry1 + 8);
         if (dataOff > size || tiffStart > size - dataOff) {
-            return false;
+            continue;
         }
         size_t absOff = tiffStart + dataOff;
         if (imgSize < 2 || imgSize > size - absOff) {
-            return false;
+            continue;
         }
         if (jpeg[absOff] != 0xFF || jpeg[absOff + 1] != 0xD8) {
-            return false;  // gain-map bytes are not a JPEG
+            continue;  // gain-map bytes are not a JPEG
         }
         gainOffset = absOff;
         gainSize = imgSize;
