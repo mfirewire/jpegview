@@ -1216,12 +1216,60 @@ void TestFindGainMapJpeg() {
         checkSecondFound(m, "G3 entryCount 100 first MPF -> second MPF found");
     }
     {
-        // :419 B002 count <= 4 (0x20 -> 4): the flag path — a bare
-        // `continue` inside the entry loop would not skip the segment.
+        // :419 B002 count <= 4 (0x20 -> 4): the flag path. This
+        // pins the rejection (first MPF skipped, second found) but
+        // does NOT discriminate flag+break from a bare `continue`:
+        // B002 is the last entry here, so a bare `continue` ends
+        // the loop with haveList false and the :537 check skips the
+        // segment anyway. The discriminating case is the next test.
         std::vector<uint8_t> m =
             BuildTwoMpfJpeg(kMpfSegmentHlg, secondMpf, 734, 8277);
         m[693] = 0x04;
         checkSecondFound(m, "G3 B002 count=4 first MPF -> second MPF found");
+    }
+    {
+        // :419 (discriminating): a bad B002 followed by a VALID B002
+        // in the SAME IFD. The first segment's IFD is rebuilt with
+        // the bad B002 first (count 4, entry 0 — replacing B000,
+        // which the finder never reads), B001 unchanged, and the
+        // valid B002 (count 32) last; the first segment's MP-list
+        // entry 1 is retargeted at a DIFFERENT gain image (off
+        // 10000, size 1000; SOI planted there) from the second
+        // MPF's (off 8087, size 8277). With flag+break the bad
+        // entry discards the whole first segment and the second
+        // MPF wins (8087, 8277); with a bare `continue` the entry
+        // loop reaches the valid B002 and returns the first MPF's
+        // gain (10000, 1000), so this assertion fails. IFD entry
+        // order is insignificant to the finder — only the
+        // bad-then-valid pairing matters. Segment-relative offsets:
+        // entries at 18/30/42, MP-list entry 1 size at 78-81,
+        // data_offset at 82-85 (TIFF starts at 652, so data_offset
+        // 9348 points at file offset 10000).
+        std::vector<uint8_t> firstSeg(
+            kMpfSegmentHlg, kMpfSegmentHlg + sizeof(kMpfSegmentHlg));
+        // Entry 0: B002, type 7, count 4 (bad), list offset 50.
+        static const uint8_t kBadB002[12] = {
+            0xb0, 0x02, 0x00, 0x07, 0x00, 0x00,
+            0x00, 0x04, 0x00, 0x00, 0x00, 0x32,
+        };
+        std::memcpy(firstSeg.data() + 18, kBadB002, sizeof(kBadB002));
+        // MP-list entry 1: size 1000, data_offset 9348.
+        firstSeg[78] = 0x00;
+        firstSeg[79] = 0x00;
+        firstSeg[80] = 0x03;
+        firstSeg[81] = 0xE8;  // size 1000
+        firstSeg[82] = 0x00;
+        firstSeg[83] = 0x00;
+        firstSeg[84] = 0x24;
+        firstSeg[85] = 0x84;  // data_offset 9348 -> absOff 10000
+        std::vector<uint8_t> m =
+            BuildTwoMpfJpeg(firstSeg.data(), secondMpf, 734, 8277);
+        m[10000] = 0xFF;  // SOI of the first MPF's gain image
+        m[10001] = 0xD8;
+        size_t o = 0, s = 0;
+        Check(FindGainMapJpeg(m.data(), m.size(), o, s) && o == 8087 &&
+                  s == 8277,
+              "G3 bad B002 then valid B002 in one IFD -> second MPF found, not first MPF's gain");
     }
     {
         // :427 NumberOfImages < 2 (2 -> 1).
