@@ -157,11 +157,35 @@ static const uint8_t kSdrJpegHeader[609] = {
     0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
 };
 
+// Emit a minimal primary SOS + fake scan + FFD9 at 8085 into `buf`:
+// FFDA at `sosPos`, an 8-byte SOS header (Ns=1), zero scan data, and
+// FFD9 at 8085. The scan data is all zeros, so the EOI scanner finds
+// the FFD9 without tripping on stuffing or restart markers. The gain
+// JPEG's FFD8 (at 8087, written by the builders) is then exactly
+// EOI + 2, as in the real files.
+void EmitPrimarySosEoi(std::vector<uint8_t>& buf, size_t sosPos) {
+    buf[sosPos + 0] = 0xFF;  // SOS
+    buf[sosPos + 1] = 0xDA;
+    buf[sosPos + 2] = 0x00;  // length 8
+    buf[sosPos + 3] = 0x08;
+    buf[sosPos + 4] = 0x01;  // Ns = 1
+    buf[sosPos + 5] = 0x01;  // Cs = 1
+    buf[sosPos + 6] = 0x00;  // Td/Ta
+    buf[sosPos + 7] = 0x00;  // Ss
+    buf[sosPos + 8] = 0x3F;  // Se
+    buf[sosPos + 9] = 0x00;  // Ah/Al
+    buf[8085] = 0xFF;        // primary EOI
+    buf[8086] = 0xD9;
+}
+
 // Build a synthetic UltraHDR JPEG around a REAL MPF segment: SOI, a
 // filler APP0 sized so the MPF marker lands at the real file offset
-// 644, the MPF segment, zeros up to 8087, an FFD8 at 8087, then zeros
-// to 8087+gainSize. Mirrors the real file layout (primary EOI 8085,
-// gain-map JPEG at 8087) without embedding the whole 16/45 KB file.
+// 644, the MPF segment, a minimal SOS + fake scan + FFD9 (primary
+// EOI 8085), an FFD8 at 8087, then zeros to 8087+gainSize. Mirrors
+// the real file layout (primary EOI 8085, gain-map JPEG at 8087)
+// without embedding the whole 16/45 KB file. G5: the SOS/EOI are
+// real — without them FindGainMapJpeg must reject the gain map (no
+// primary EOI), so the builder emits them.
 std::vector<uint8_t> BuildUhdrJpeg(const uint8_t* mpfSeg, size_t gainSize) {
     std::vector<uint8_t> buf(8087 + gainSize, 0);
     buf[0] = 0xFF;
@@ -173,6 +197,7 @@ std::vector<uint8_t> BuildUhdrJpeg(const uint8_t* mpfSeg, size_t gainSize) {
     buf[4] = 0x02;  // length 640 = 0x0280
     buf[5] = 0x80;
     std::memcpy(buf.data() + 644, mpfSeg, 90);
+    EmitPrimarySosEoi(buf, 734);
     buf[8087] = 0xFF;  // gain-map JPEG SOI
     buf[8088] = 0xD8;
     return buf;
@@ -204,6 +229,10 @@ std::vector<uint8_t> BuildTwoMpfJpeg(const uint8_t* firstMpf,
                                      size_t secondPos, size_t gainSize) {
     std::vector<uint8_t> buf = BuildUhdrJpeg(firstMpf, gainSize);
     std::memcpy(buf.data() + secondPos, secondMpf.data(), secondMpf.size());
+    // The second MPF overwrote the SOS BuildUhdrJpeg emitted at 734,
+    // so emit a fresh one right after it (scan data is zeros up to
+    // the FFD9 at 8085 either way).
+    EmitPrimarySosEoi(buf, secondPos + secondMpf.size());
     return buf;
 }
 
@@ -1218,6 +1247,82 @@ void TestFindGainMapJpeg() {
         m[819] = 0xE8;  // second data_offset 1000
         Check(!FindGainMapJpeg(m.data(), m.size(), off, sz),
               "G3 malformed first MPF + second without SOI -> false");
+    }
+    // G5: the gain image must start strictly after the primary
+    // image's EOI (8085, so the gain SOI at 8087 is the earliest
+    // legal position). The HLG/PQ checks above already pin the
+    // gain-after-EOI case (off 8087 = EOI + 2).
+    {
+        // Gain nominated inside the primary scan data: plant an
+        // FFD8 at 1000 and point the MPF data_offset at it (348 ->
+        // absOff 1000). The EOI scan skips the planted SOI as a
+        // standalone marker and still finds the real EOI at 8085,
+        // so this fails on the position check, not on the scan.
+        std::vector<uint8_t> m = hlg;
+        m[1000] = 0xFF;
+        m[1001] = 0xD8;
+        m[726] = 0x00;
+        m[727] = 0x00;
+        m[728] = 0x01;
+        m[729] = 0x5C;  // data_offset 348 -> absOff 1000
+        Check(!FindGainMapJpeg(m.data(), m.size(), off, sz),
+              "G5 gain inside primary scan data -> false");
+    }
+    {
+        // Gain nominated inside the MPF segment itself: plant an
+        // FFD8 at 700 (the next-IFD pointer bytes, never read by the
+        // MPF parser) and point the data_offset at it (48 -> absOff
+        // 700, before the primary EOI at 8085).
+        std::vector<uint8_t> m = hlg;
+        m[700] = 0xFF;
+        m[701] = 0xD8;
+        m[726] = 0x00;
+        m[727] = 0x00;
+        m[728] = 0x00;
+        m[729] = 0x30;  // data_offset 48 -> absOff 700
+        Check(!FindGainMapJpeg(m.data(), m.size(), off, sz),
+              "G5 gain inside MPF segment -> false");
+    }
+    {
+        // No EOI at all: the FFD9 at 8085 is erased. The MPF range
+        // checks still pass (gain 8087/8277 fits the buffer), but
+        // the EOI scan reaches the end of the buffer without finding
+        // FFD9.
+        std::vector<uint8_t> m = hlg;
+        m[8085] = 0x00;
+        m[8086] = 0x00;
+        Check(!FindGainMapJpeg(m.data(), m.size(), off, sz),
+              "G5 no primary EOI -> false");
+    }
+    {
+        // Scan-data markers must not confuse the EOI scan: stuffed
+        // FF00, RST0, a second SOS (progressive-style) and a DNL in
+        // the scan data are all skipped, the real EOI at 8085 is
+        // still found, and the gain at 8087 is still accepted.
+        std::vector<uint8_t> m = hlg;
+        m[1000] = 0xFF;
+        m[1001] = 0x00;  // stuffed 0xFF data byte
+        m[1002] = 0xFF;
+        m[1003] = 0xD0;  // RST0
+        m[1004] = 0xFF;
+        m[1005] = 0xDA;  // second SOS
+        m[1006] = 0x00;
+        m[1007] = 0x08;  // length 8
+        m[1008] = 0x01;
+        m[1009] = 0x01;
+        m[1010] = 0x00;
+        m[1011] = 0x00;
+        m[1012] = 0x3F;
+        m[1013] = 0x00;
+        m[1014] = 0xFF;
+        m[1015] = 0xDC;  // DNL
+        m[1016] = 0x00;
+        m[1017] = 0x04;  // length 4
+        m[1018] = 0x00;
+        m[1019] = 0x01;
+        Check(FindGainMapJpeg(m.data(), m.size(), off, sz) && off == 8087 &&
+                  sz == 8277,
+              "G5 scan-data markers skipped, EOI still found, gain at 8087");
     }
 }
 

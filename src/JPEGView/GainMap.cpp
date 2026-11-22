@@ -91,6 +91,74 @@ bool NextJpegSegment(const uint8_t* jpeg, size_t size, size_t& pos,
     return false;
 }
 
+// Find the offset of the 0xFF byte of the primary image's first EOI
+// (FFD9), or SIZE_MAX when the file has no SOS/EOI (truncated).
+// G5: the gain image must start strictly after the primary image's
+// EOI — a gain image nominated inside the primary scan data (or in a
+// file with no EOI at all) is not a real gain map. The scan walks the
+// header segments with NextJpegSegment (which stops at the first SOS),
+// skips the SOS header by its 2-byte length field, then scans the
+// entropy data: 0xFF00 is a stuffed data byte, repeated 0xFF are fill
+// bytes, RSTn (FFD0-FFD7), TEM (FF01) and SOI (FFD8) are standalone
+// 2-byte markers, and every other marker (a further SOS in a
+// progressive file, DNL, DHT/DQT/DRI/APPn/COM between scans) carries
+// a 2-byte length field and is skipped by it. The first FFD9 ends the
+// primary image. A length that runs past the buffer, or reaching the
+// end of the buffer, means no EOI.
+size_t FindPrimaryEoi(const uint8_t* jpeg, size_t size) {
+    size_t pos = 2;
+    uint8_t marker = 0;
+    const uint8_t* seg = nullptr;
+    size_t segSize = 0;
+    while (NextJpegSegment(jpeg, size, pos, marker, seg, segSize)) {
+        // Walk the header segments to the first SOS.
+    }
+    if (marker != 0xDA) {
+        return SIZE_MAX;  // stopped somewhere other than SOS: no scan data
+    }
+    // pos is just past the FFDA marker: skip the SOS header.
+    if (pos + 2 > size) {
+        return SIZE_MAX;
+    }
+    uint16_t sosLen = ReadU16Be(jpeg + pos);
+    if (sosLen < 2 || pos + sosLen > size) {
+        return SIZE_MAX;
+    }
+    size_t i = pos + sosLen;
+    while (i + 1 < size) {
+        if (jpeg[i] != 0xFF) {
+            ++i;
+            continue;
+        }
+        uint8_t m = jpeg[i + 1];
+        if (m == 0x00) {
+            i += 2;  // stuffed 0xFF data byte
+            continue;
+        }
+        if (m == 0xFF) {
+            ++i;  // fill byte before the marker code
+            continue;
+        }
+        if (m == 0xD9) {
+            return i;  // EOI: offset of its 0xFF byte
+        }
+        if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+            i += 2;  // standalone marker (SOI/TEM/RSTn)
+            continue;
+        }
+        // Any other marker carries a 2-byte length field.
+        if (i + 4 > size) {
+            return SIZE_MAX;
+        }
+        uint16_t len = ReadU16Be(jpeg + i + 2);
+        if (len < 2 || i + 2 + len > size) {
+            return SIZE_MAX;
+        }
+        i += 2 + len;
+    }
+    return SIZE_MAX;
+}
+
 // sRGB EOTF inverse in double (c is a normalised sRGB code, 0..1).
 double SrgbToLinearDouble(double c) {
     if (c <= 0.04045) {
@@ -358,6 +426,10 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
     uint8_t marker = 0;
     const uint8_t* seg = nullptr;
     size_t segSize = 0;
+    // G5: the primary image's EOI (offset of the FFD9's 0xFF byte),
+    // or SIZE_MAX when the file has no SOS/EOI. Computed once: it
+    // does not depend on which MPF segment is being examined.
+    const size_t eoiPos = FindPrimaryEoi(jpeg, size);
     while (NextJpegSegment(jpeg, size, pos, marker, seg, segSize)) {
         if (marker != 0xE2 || segSize < 4 || std::memcmp(seg, "MPF\0", 4) != 0) {
             continue;
@@ -453,6 +525,17 @@ bool FindGainMapJpeg(const uint8_t* jpeg, size_t size, size_t& gainOffset, size_
         }
         if (jpeg[absOff] != 0xFF || jpeg[absOff + 1] != 0xD8) {
             continue;  // gain-map bytes are not a JPEG
+        }
+        // G5: the gain image must start strictly after the primary
+        // image's EOI. eoiPos is the offset of the 0xFF byte of the
+        // first FFD9, so eoiPos + 2 is the earliest legal gain offset
+        // (real Apple files have EOI at 44819 and gain at 44821 =
+        // EOI + 2). A gain image nominated inside the primary scan
+        // data — or in a file with no EOI at all — is not a real
+        // gain map. `continue`, not `return false` (G3): a later
+        // MPF segment may still be valid.
+        if (eoiPos == SIZE_MAX || absOff < eoiPos + 2) {
+            continue;
         }
         gainOffset = absOff;
         gainSize = imgSize;
