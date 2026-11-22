@@ -15,6 +15,7 @@
 
 #include "PsdIcc.h"
 
+#include <cfloat>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -260,7 +261,8 @@ bool BuildColorSpaceImpl(const uint8_t* iccData, size_t iccSize,
                     bool finite = true;
                     for (int r = 0; r < 3; r++) {
                         for (int c = 0; c < 3; c++) {
-                            if (!std::isfinite(mat[r][c]) || !std::isfinite(s[c])) {
+                            if (!std::isfinite(mat[r][c]) || std::fabs(mat[r][c]) > (double)FLT_MAX ||
+    !std::isfinite(s[c])) {
                                 finite = false;
                             }
                         }
