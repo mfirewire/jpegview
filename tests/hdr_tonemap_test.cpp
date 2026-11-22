@@ -29,6 +29,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <cmath>
 #include <cstring>
 
@@ -533,6 +534,26 @@ void TestConvertLinearImage() {
     Check(out3[6] == 0xCD && out3[7] == 0xCD && out3[8] == 0xCD &&
           out3[15] == 0xCD && out3[16] == 0xCD && out3[17] == 0xCD,
           "ConvertLinearImage padded strides leave padding untouched");
+    // T3: strides so large the row arithmetic (size_t)y * stride +
+    // width*3 (y < height) would wrap size_t are rejected before
+    // any read or write; the sentinel output stays untouched.
+    // height must be >= 2 for the guard to trigger: with height 1
+    // only row 0 is touched and no wrap is possible.
+    float imgT[12] = { 1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f,
+                       1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    uint8_t outT[12];
+    std::memset(outT, 0xCD, sizeof(outT));
+    ConvertLinearImage(imgT, 2, 2, SIZE_MAX / 2, outT, 6);
+    Check(outT[0] == 0xCD && outT[5] == 0xCD && outT[11] == 0xCD,
+          "ConvertLinearImage huge src stride rejected");
+    std::memset(outT, 0xCD, sizeof(outT));
+    ConvertLinearImage(imgT, 2, 2, 6, outT, SIZE_MAX / 2);
+    Check(outT[0] == 0xCD && outT[5] == 0xCD && outT[11] == 0xCD,
+          "ConvertLinearImage huge dst stride rejected");
+    std::memset(outT, 0xCD, sizeof(outT));
+    ConvertLinearImage(imgT, 2, 2, SIZE_MAX, outT, 6);
+    Check(outT[0] == 0xCD && outT[5] == 0xCD && outT[11] == 0xCD,
+          "ConvertLinearImage SIZE_MAX src stride rejected");
 }
 
 void TestConvertLinearImageToBgra() {
@@ -606,6 +627,32 @@ void TestConvertLinearImageToBgra() {
     Check(outP[8] == 0xCD && outP[9] == 0xCD && outP[10] == 0xCD && outP[11] == 0xCD &&
           outP[20] == 0xCD && outP[21] == 0xCD && outP[22] == 0xCD && outP[23] == 0xCD,
           "ConvertLinearImageToBgra padded strides leave padding untouched");
+    // T3: overflow-proof row arithmetic, as in TestConvertLinearImage
+    // above: huge src/dst strides are rejected with no write. A
+    // non-NULL alpha plane with alphaStride 0 is an early return,
+    // not "treat alpha as missing and continue" - the sentinel
+    // must stay untouched, including the alpha bytes. A SIZE_MAX
+    // alpha stride is rejected the same way.
+    float imgQ[12] = { 1.0f, 1.0f, 1.0f, 0.18f, 0.18f, 0.18f,
+                       1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    uint8_t alphaQ[4] = { 128, 255, 64, 0 };
+    uint8_t outQ[16];
+    std::memset(outQ, 0xCD, sizeof(outQ));
+    ConvertLinearImageToBgra(imgQ, 2, 2, SIZE_MAX / 2, outQ, 8, alphaQ, 1);
+    Check(outQ[0] == 0xCD && outQ[7] == 0xCD && outQ[15] == 0xCD,
+          "ConvertLinearImageToBgra huge src stride rejected");
+    std::memset(outQ, 0xCD, sizeof(outQ));
+    ConvertLinearImageToBgra(imgQ, 2, 2, 6, outQ, SIZE_MAX / 2, alphaQ, 1);
+    Check(outQ[0] == 0xCD && outQ[7] == 0xCD && outQ[15] == 0xCD,
+          "ConvertLinearImageToBgra huge dst stride rejected");
+    std::memset(outQ, 0xCD, sizeof(outQ));
+    ConvertLinearImageToBgra(imgQ, 2, 2, 6, outQ, 8, alphaQ, 0);
+    Check(outQ[0] == 0xCD && outQ[3] == 0xCD && outQ[7] == 0xCD && outQ[15] == 0xCD,
+          "ConvertLinearImageToBgra zero alpha stride rejected");
+    std::memset(outQ, 0xCD, sizeof(outQ));
+    ConvertLinearImageToBgra(imgQ, 2, 2, 6, outQ, 8, alphaQ, SIZE_MAX);
+    Check(outQ[0] == 0xCD && outQ[3] == 0xCD && outQ[7] == 0xCD && outQ[15] == 0xCD,
+          "ConvertLinearImageToBgra SIZE_MAX alpha stride rejected");
 }
 
 }  // namespace

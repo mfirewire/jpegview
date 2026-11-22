@@ -489,6 +489,12 @@ void ConvertLinearImage(const float* srcRgb, int width, int height, size_t srcSt
     // today - pure hardening.
     if (srcRgb == NULL || dstBgr == NULL || width <= 0 || height <= 0 ||
         srcStrideFloats < (size_t)width * 3 || dstStrideBytes < (size_t)width * 3) return;
+    // T3: the row arithmetic below is (size_t)y * stride + width*3
+    // (y < height); reject strides so large that it could wrap
+    // size_t. This must come after the width/height rejection
+    // above: the guard divides by width and height.
+    if (srcStrideFloats > ((size_t)-1 - (size_t)width * 3) / (size_t)height ||
+        dstStrideBytes > ((size_t)-1 - (size_t)width * 3) / (size_t)height) return;
     double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
     // P2-C3: precompute the EETF parameters once per image (the
     // per-pixel ConvertLinearPixel call recomputed them every pixel).
@@ -517,6 +523,17 @@ void ConvertLinearImageToBgra(const float* srcRgb, int width, int height, size_t
     // width*4 here).
     if (srcRgb == NULL || dstBgra == NULL || width <= 0 || height <= 0 ||
         srcStrideFloats < (size_t)width * 3 || dstStrideBytes < (size_t)width * 4) return;
+    // T3: same overflow-proof row arithmetic as ConvertLinearImage
+    // (dst rows are width*4 here, src rows still width*3), plus an
+    // alpha check: alphaRow = planarAlphaOrNull + y*width*alphaStride
+    // must not wrap either, and a non-NULL plane with a zero stride
+    // is rejected outright (not treated as "no alpha").
+    if (srcStrideFloats > ((size_t)-1 - (size_t)width * 3) / (size_t)height ||
+        dstStrideBytes > ((size_t)-1 - (size_t)width * 4) / (size_t)height) return;
+    if (planarAlphaOrNull != NULL) {
+        if (alphaStride == 0 || alphaStride > (size_t)-1 / (size_t)width ||
+            (size_t)width * alphaStride > (size_t)-1 / (size_t)height) return;
+    }
     double peakLinear = ComputePeakLinear(srcRgb, width, height, srcStrideFloats);
     // P2-C3: precompute the EETF parameters once per image (see above).
     Bt2390Params params = Bt2390MakeParams(PeakNitsFromLinear(peakLinear));
