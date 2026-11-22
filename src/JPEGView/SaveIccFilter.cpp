@@ -79,7 +79,7 @@ bool ReadXyzTag(const uint8_t* pProfile, size_t nProfileSize, const char* pSig, 
     if (nSize < 20) {
         return false;
     }
-    if ((size_t)nOffset + 20 > nProfileSize) {
+    if (nOffset > nProfileSize || nProfileSize - (size_t)nOffset < 20) {
         return false;
     }
     const uint8_t* pData = pProfile + nOffset;

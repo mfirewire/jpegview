@@ -284,6 +284,73 @@ void TestClassifyMalformed() {
           "CMYK colour space is unknown to the classifier");
 }
 
+void TestClassifyWraparoundOffsets() {
+    // P2-3: ReadXyzTag's offset check used `(size_t)nOffset + 20 >
+    // nProfileSize`, which wraps on Win32 (32-bit size_t) for
+    // nOffset in [0xFFFFFFEC, 0xFFFFFFFF] and lets the tag read run
+    // off the end of the profile. The fix compares with subtraction
+    // instead, so those offsets are rejected on every architecture.
+    // wtpt is mutated because ClassifyIccProfile reads it first.
+    //
+    // HONEST NOTE: on Linux/x64 these checks pass against the OLD
+    // code too — the old expression is exact in 64-bit size_t — so
+    // they are regression guards, not reproducers. The bug itself is
+    // only demonstrable with a 32-bit model probe (see the plan) or
+    // a -m32 build, and this machine has no 32-bit multilib
+    // (Scrt1.o missing), so no -m32 build was attempted here.
+    auto WithWtptOffset = [](uint32_t off) {
+        std::vector<unsigned char> srgb = ReadFile("tests/samples/srgb_iec61966-2-1.icc");
+        long entry = FindTagEntry(srgb, "wtpt");
+        PutBe32(srgb, (size_t)entry + 4, off);
+        return srgb;
+    };
+    // (1) 0xFFFFFFF0: wraps to 4 on Win32, inside the profile.
+    std::vector<unsigned char> p = WithWtptOffset(0xFFFFFFF0u);
+    Check(ClassifyIccProfile(p.data(), p.size()) == IccSrgbVerdict::kUnknown,
+          "wtpt offset 0xFFFFFFF0 is unknown (P2-3 wraparound)");
+    // (2) 0xFFFFFFEC: the first wraparound value (wraps to exactly 0).
+    p = WithWtptOffset(0xFFFFFFECu);
+    Check(ClassifyIccProfile(p.data(), p.size()) == IccSrgbVerdict::kUnknown,
+          "wtpt offset 0xFFFFFFEC is unknown (first P2-3 wraparound value)");
+    // (3) 0xFFFFFFEB: already rejected by the old code (wraps to -1,
+    // i.e. 0xFFFFFFFF > size) — the boundary just below the window.
+    p = WithWtptOffset(0xFFFFFFEBu);
+    Check(ClassifyIccProfile(p.data(), p.size()) == IccSrgbVerdict::kUnknown,
+          "wtpt offset 0xFFFFFFEB is unknown (just below the P2-3 window)");
+    // (4) 0xFFFFFFFF: wraps to 19 on Win32, inside the profile.
+    p = WithWtptOffset(0xFFFFFFFFu);
+    Check(ClassifyIccProfile(p.data(), p.size()) == IccSrgbVerdict::kUnknown,
+          "wtpt offset 0xFFFFFFFF is unknown (P2-3 wraparound)");
+    // (5) Controls: the unmodified fixture and the synthetic
+    // profile still classify as sRGB.
+    std::vector<unsigned char> srgb = ReadFile("tests/samples/srgb_iec61966-2-1.icc");
+    Check(ClassifyIccProfile(srgb.data(), srgb.size()) == IccSrgbVerdict::kSrgb,
+          "unmodified real sRGB fixture is still sRGB (P2-3 control)");
+    std::vector<unsigned char> synth = BuildSrgbProfile();
+    Check(ClassifyIccProfile(synth.data(), synth.size()) == IccSrgbVerdict::kSrgb,
+          "synthetic sRGB profile is still sRGB (P2-3 control)");
+    // (6) Exact fit: wtpt laid out last, so its data starts at
+    // size-20 (offset 240 in a 260-byte profile) — the fix must not
+    // over-reject a tag that ends exactly at the profile end.
+    std::vector<unsigned char> exact =
+        BuildProfile("RGB ", { kSrgbRed, kSrgbGreen, kSrgbBlue, kSrgbWtptD65 });
+    long entry = FindTagEntry(exact, "wtpt");
+    Check(entry >= 0 && GetBe32(exact, (size_t)entry + 4) == exact.size() - 20,
+          "exact-fit fixture really places wtpt at size-20");
+    Check(ClassifyIccProfile(exact.data(), exact.size()) == IccSrgbVerdict::kSrgb,
+          "wtpt ending exactly at the profile end is sRGB (no over-rejection)");
+    // (7) One byte past exact fit: same profile, wtpt offset +1.
+    std::vector<unsigned char> past = exact;
+    PutBe32(past, (size_t)entry + 4, (uint32_t)(exact.size() - 19));
+    Check(ClassifyIccProfile(past.data(), past.size()) == IccSrgbVerdict::kUnknown,
+          "wtpt offset size-19 is unknown (one byte past exact fit)");
+    // (8) Plain huge offset (already covered for rXYZ by the
+    // existing badOffset case): wtpt at 99999 stays unknown.
+    p = WithWtptOffset(99999u);
+    Check(ClassifyIccProfile(p.data(), p.size()) == IccSrgbVerdict::kUnknown,
+          "wtpt offset 99999 is unknown (non-wraparound huge offset)");
+}
+
 // --- JPEG segment blobs ---
 
 std::vector<unsigned char> AppSegment(unsigned char marker, const std::vector<unsigned char>& payload) {
@@ -454,6 +521,7 @@ int main() {
     TestClassifyWtptBranches();
     TestClassifyToleranceAndPrimaries();
     TestClassifyMalformed();
+    TestClassifyWraparoundOffsets();
     TestFilterGateAndProfiles();
     TestFilterMultiChunkAndMalformed();
     TestFilterBeforeExifAndAllIcc();
