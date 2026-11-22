@@ -1316,7 +1316,7 @@ struct HeaderInfo {
   int tile_level_mode;
   int tile_rounding_mode;
 
-  unsigned int header_len;
+  size_t header_len;
 
   int compression_type;
 
@@ -6211,7 +6211,7 @@ static int ParseEXRHeader(HeaderInfo *info, bool *empty_header,
     }
   }
 
-  info->header_len = static_cast<unsigned int>(orig_size - size);
+  info->header_len = orig_size - size;
 
   return TINYEXR_SUCCESS;
 }
@@ -6345,7 +6345,10 @@ static bool ConvertHeader(EXRHeader *exr_header, const HeaderInfo &info, std::st
     exr_header->custom_attributes = NULL;
   }
 
-  exr_header->header_len = info.header_len;
+  // S2: info.header_len is size_t now; the public EXRHeader field
+  // stays unsigned int (ABI), so a true >4 GiB part header still
+  // truncates here. Accepted residual: it needs a >4 GiB file.
+  exr_header->header_len = static_cast<unsigned int>(info.header_len);
 
   return true;
 }
@@ -10624,6 +10627,12 @@ int ParseEXRMultipartHeaderFromMemory(EXRHeader ***exr_headers,
     // really did and ReadAttribute could memcpy past the end of the
     // input buffer. Reject a part whose header claims more bytes than
     // remain, so `marker_size` can never underflow or go stale.
+    // S2: HeaderInfo::header_len is size_t (not unsigned int), so a
+    // part header longer than 4 GiB cannot wrap to a small value
+    // here and defeat this check. The public EXRHeader::header_len
+    // stays unsigned int (ABI); a true >4 GiB part header still
+    // truncates there (see ConvertHeader), accepted - it needs a
+    // >4 GiB file, the same extreme premise as this check.
     if (info.header_len > marker_size) {
       // Free malloc-allocated memory here.
       for (size_t i = 0; i < info.attributes.size(); i++) {

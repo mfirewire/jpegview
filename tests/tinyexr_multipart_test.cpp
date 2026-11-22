@@ -62,6 +62,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #define TINYEXR_IMPLEMENTATION
@@ -175,6 +177,50 @@ void TestCvePoC() {
           "poc: error is the ReadAttribute guard, not a later failure");
     if (err) FreeEXRErrorMessage(err);
     FreeParsedHeaders(headers, num_headers);
+}
+
+// S2: HeaderInfo::header_len is size_t, so ParseEXRHeader reports the
+// true consumed byte count even for a part header longer than 4 GiB
+// (before, the static_cast<unsigned int> at the assignment wrapped
+// it and the CVE-2026-110597 check could be defeated by a wrapped
+// small value). A >4 GiB end-to-end repro is infeasible in CI - no
+// such file can be built or parsed there - so this pins the
+// accounting on a medium-sized real header instead of faking it:
+// part 0 of the CVE PoC above. Its attribute list ends with the
+// single 0x00 terminator at PoC offset 349 (byte 350 starts part
+// 1's "channels" attribute), so starting at offset 8 the parser
+// must consume 349 - 8 + 1 == 342 bytes.
+static_assert(std::is_same<decltype(std::declval<tinyexr::HeaderInfo>().header_len),
+                           size_t>::value,
+              "S2: HeaderInfo::header_len must be size_t");
+
+void TestHeaderLenAccounting() {
+    EXRVersion version;
+    Check(ParseEXRVersionFromMemory(&version, kCve2026110597Poc,
+                                    sizeof(kCve2026110597Poc)) ==
+              TINYEXR_SUCCESS,
+          "header_len: version parses");
+    tinyexr::HeaderInfo info;
+    std::string err;
+    int ret = tinyexr::ParseEXRHeader(
+        &info, NULL, &version, &err, kCve2026110597Poc + 8,
+        sizeof(kCve2026110597Poc) - 8);
+    Check(ret == TINYEXR_SUCCESS, "header_len: part 0 header parses");
+    Check(info.header_len == 342,
+          "header_len: part 0 consumed byte count is 342");
+    // The public EXRHeader still carries the value through
+    // ConvertHeader (narrowed with an explicit cast; see the S2
+    // note there).
+    EXRHeader hdr;
+    InitEXRHeader(&hdr);
+    std::string warn;
+    bool ok = tinyexr::ConvertHeader(&hdr, info, &warn, &err);
+    Check(ok, "header_len: ConvertHeader succeeds for part 0");
+    if (ok) {
+        Check(hdr.header_len == 342,
+              "header_len: public header carries 342");
+        FreeEXRHeader(&hdr);
+    }
 }
 
 void SetupPart(EXRHeader *hdr, EXRImage *img, const char *name, int w,
@@ -329,6 +375,7 @@ void TestSinglePartStillLoads() {
 
 int main() {
     TestCvePoC();
+    TestHeaderLenAccounting();
     TestValidMultipartRoundTrip();
     TestSinglePartStillLoads();
     std::printf("tinyexr_multipart_test: %d checks, %d failures\n",
