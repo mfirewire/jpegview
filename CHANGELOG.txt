@@ -66,6 +66,12 @@ Bugs fixed:
 - Saving a JPEG whose embedded ICC profile has a crafted tag offset could crash the Win32 build, because the offset check wrapped in 32-bit arithmetic; the check is now written so it cannot wrap
 - A 16/32-bit PSD with a crafted near-singular ICC colour space could produce an out-of-range colour matrix; the matrix is now rejected before the tone map if any element exceeds the float range, falling back to sRGB
 - The PSD ZIP decoder's allocator now checks the allocation size for overflow before allocating (defence in depth; unreachable through the decoder today)
+- A JPEG with a malformed first MPF segment no longer loses its gain map outright; the finder now skips the bad segment and keeps scanning for a valid one
+- A JPEG whose MPF entry points at an arbitrary FFD8 sequence inside the file instead of the gain image appended after the primary image no longer has that data applied as a gain map; the gain image must start after the primary image's end marker
+- An Apple gain-map JPEG whose HDRGainMapGamma field is present but unreadable no longer silently applies gamma 1.0; the packet is rejected and the SDR base is shown (a missing field still defaults to 1.0)
+- A JPEG gain map claiming dimensions far larger than its base image could force a multi-gigabyte allocation before any metadata was read; gain maps are now capped at 4x the base image per side, like the HEIF and AVIF paths
+- An AVIF gain map claiming absurd dimensions is now rejected by the image-size limit before its buffer is allocated, instead of attempting the allocation and catching the failure
+- The three temporary buffers used while applying a JPEG gain map are now scope-guarded, closing the small leak on the out-of-memory path (bad_alloc only)
 
 Investigated (no change):
 - E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
