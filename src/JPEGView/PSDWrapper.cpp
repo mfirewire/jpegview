@@ -791,11 +791,14 @@ CJPEGImage* PsdReader::ReadThumb(LPCTSTR strFileName, bool& bOutOfMemory, bool& 
 			switch (nResourceID) {
 				case 0x0409: // 0x0409 1033 (Photoshop 4.0) Thumbnail resource for Photoshop 4.0 only. See See Thumbnail resource format.
 				case 0x040C: // 0x040C 1036 (Photoshop 5.0) Thumbnail resource (supersedes resource 1033). See See Thumbnail resource format.
+					// P3-4: a thumbnail resource shorter than its 28-byte
+					// header is truncated/corrupt; plain throw, no flag.
+					if (nResourceSize < 28) { ThrowIf(true); }
 					// Skip thumbnail resource header
 					SeekFile(hFile, 28);
 
 					// Read embedded JPEG thumbnail
-					nJpegSize = nResourceSize - 28;
+					nJpegSize = (int)(nResourceSize - 28);
 					if (nJpegSize > MAX_JPEG_FILE_SIZE) {
 						bSizeLimitExceeded = true;
 						ThrowIf(true);
