@@ -260,8 +260,9 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 			}
 		} else if (status == JXL_DEC_FRAME) {
 			nFrameEvents++; // F-16: count frames as they are decoded
-			JxlFrameHeader header;
-			JxlDecoderGetFrameHeader(cache.decoder, &header);
+			JxlFrameHeader header = {};
+			if (JXL_DEC_SUCCESS != JxlDecoderGetFrameHeader(cache.decoder, &header))
+				return false;
 			JxlAnimationHeader animation = cache.info.animation;
 			if (animation.tps_numerator)
 				frame_time = (int)(1000.0 * header.duration * animation.tps_denominator / animation.tps_numerator);
