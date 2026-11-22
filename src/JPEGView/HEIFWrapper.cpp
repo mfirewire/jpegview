@@ -416,7 +416,7 @@ void * HeifReader::ReadImage(int &width,
 		isSizeLimitExceeded = true;
 		return NULL;
 	}
-	if (width < 1 || height < 1 || width * nchannels > stride)
+	if (width < 1 || height < 1 || width * (isHdr ? 8 : nchannels) > stride)
 		return NULL;
 
 	// int 乘法会在 32768x32768x4 这类尺寸下回绕成 0；用 64 位算并校验上限。
