@@ -78,6 +78,7 @@ Bugs fixed:
 - A failed JXL frame-header read is now checked instead of reading an uninitialised frame duration (the decoder reports success after a frame event, so this is defence in depth)
 - The tinyexr multipart header length is now tracked in size_t, so a part header over 4 GiB can no longer wrap the CVE-2026-110597 patch check (the public header struct is unchanged)
 - ThorVG version in the SVG wrapper header comment corrected to 1.1.4 (comment only)
+- Drag and drop: a dropped path of 511+ characters no longer reads from an uninitialised buffer; the drop is ignored (DragQueryFile returns the required length without writing to the buffer when it is too small)
 
 Changed behavior:
 - PSD files: the x64 file-size limit is raised from 500 MB to 1 GB (Win32 stays 100 MB), so large uncompressed PSDs up to 1 GB now open instead of being rejected at the file-size check; the decoded-output cap (4 GB on x64) and the 65535 dimension limit are unchanged, and the limit stays below 2^31 so the 32-bit offset arithmetic in the PSD reader stays safe

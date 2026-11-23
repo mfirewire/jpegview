@@ -1234,13 +1234,20 @@ LRESULT CMainDlg::OnDropFiles(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, B
 	HDROP hDrop = (HDROP) wParam;
 	if (hDrop != NULL && !m_pPanelMgr->IsModalPanelShown()) {
 		const int BUFF_SIZE = 512;
-		TCHAR buff[BUFF_SIZE];
-		if (::DragQueryFile(hDrop, 0, (LPTSTR) &buff, BUFF_SIZE - 1) > 0) {
+		TCHAR buff[BUFF_SIZE] = { 0 };
+		// DragQueryFile returns the required length (not 0) when the buffer is
+		// too small, without writing to it; only proceed when the name was
+		// actually copied (nLen < BUFF_SIZE - 1). A longer path is ignored:
+		// the app is not longPathAware, so it could not be opened downstream
+		// anyway. (P3: a dropped path of 511+ characters used to be read
+		// from this uninitialized buffer.)
+		UINT nLen = ::DragQueryFile(hDrop, 0, (LPTSTR) &buff, BUFF_SIZE - 1);
+		if (nLen > 0 && nLen < (UINT)(BUFF_SIZE - 1)) {
 			// INVALID_FILE_ATTRIBUTES has every bit set including DIRECTORY, so the
 			// old test treated a path that does not exist as a folder.
 			DWORD dwAttrib = ::GetFileAttributes(buff);
 			if (dwAttrib != INVALID_FILE_ATTRIBUTES && (dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
-				_tcsncat_s(buff, BUFF_SIZE, _T("\\"), BUFF_SIZE);
+				_tcsncat_s(buff, BUFF_SIZE, _T("\\"), 1);
 			}
 			OpenFile(buff, false);
 		}
