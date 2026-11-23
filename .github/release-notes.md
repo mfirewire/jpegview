@@ -21,6 +21,8 @@ HDR support: PQ (ST 2084) and HLG images now display tone-mapped to SDR, gain-ma
 - **PSD ZIP**: a 16/32-bit PSD with ZIP compression failed to open (inflateInit returned -2) because the bundled zlib.lib ships no default allocator; the decoder now provides explicit allocators. 32-bit ZIP-with-prediction files also decoded with wrong pixel values (prediction reversed as uint32 sums instead of byte-plane deltas); they now follow the byte-plane scheme.
 - **Apple gain-map JPEG**: an iPhone-shared HDR JPEG silently showed SDR because the headroom lives in the auxiliary image's XMP, which was never read; the auxiliary XMP is now tried as a second fallback (verified on real files).
 - **Saving**: a JPEG whose embedded ICC profile is not sRGB (e.g. Adobe RGB, Display P3) no longer keeps that profile on the output file after the pixels were converted to sRGB; the stale profile is stripped when embedded colour profiles are enabled.
+- **Hardening (crafted files)**: crafted PSD/PSB, ICC and gain-map files no longer hang or crash the viewer (21 hardening fixes, see CHANGELOG).
+- **Drag and drop**: dropping a file whose path is longer than 511 characters no longer reads from an uninitialised buffer; such a path is ignored instead (the app does not support long paths).
 
 ## Library updates
 
