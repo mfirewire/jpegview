@@ -98,10 +98,11 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 // deleter), so the raw handle must NOT be released manually. The aux
 // type string is released with heif_image_handle_release_auxiliary_type.
 //
-// TryApplyHeifGainMap returns a NEW 8-bit BGRA buffer with the gain map
-// applied and tone-mapped via HdrToneMap, or NULL when there is no gain
-// map or anything fails — the caller keeps the base BGRA unchanged in
-// that case. A broken gain map must never fail the whole load.
+// ExtractHeifGainMap fills the extracted gain map (grayscale +
+// metadata) without applying it, or returns false when there is no
+// gain map or anything fails -- the caller keeps the base BGRA
+// unchanged in that case. A broken gain map must never fail the
+// whole load.
 
 // Find the gain-map aux image of `handle`. Returns the aux handle (as a
 // heif::ImageHandle, which owns it) or an empty handle when there is
@@ -251,74 +252,52 @@ static bool TryParseGainMapXmp(const heif::ImageHandle& handle, gainmap::Metadat
 	return false;
 }
 
-// Apply the gain map of an SDR HEIF base image, if it has one. `baseBgra`
-// is the already-decoded 8-bit BGRA base (width x height). Returns a NEW
-// 8-bit BGRA buffer with the gain map applied and tone-mapped via
-// HdrToneMap::ConvertLinearImage, or NULL when there is no gain map or
-// anything fails — the caller keeps `baseBgra` unchanged in that case.
-// XMP is tried on the primary image first, then on the gain-map item
-// itself (the gain-map item may carry its own XMP). Any exception from
-// the libheif C++ wrapper (decode_image / get_metadata throw
-// heif::Error) is caught here and treated as "no gain map".
-static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
-                                          const unsigned char* baseBgra,
-                                          int width, int height)
+// Extract the gain map of an SDR HEIF base image, if it has one.
+// Fills `outGain` (grayscale + metadata) WITHOUT applying it; the
+// load thread attaches it to the image and applies it on demand, or
+// at load when GainMapDefault() is HDR. Returns false when there is
+// no gain map or anything fails -- the caller keeps the SDR base
+// unchanged in that case. XMP is tried on the primary image first,
+// then on the gain-map item itself (the gain-map item may carry its
+// own XMP). Any exception from the libheif C++ wrapper
+// (decode_image / get_metadata throw heif::Error) is caught here
+// and treated as "no gain map". The fused apply moved out of this
+// function; ApplyGainMapToBgra is now called from
+// CJPEGImage::ComputeHdrBuffer. The 2026-11-21 early-return disable
+// is gone: HEIF gain maps are re-enabled under the unified HDR
+// toggle (INI default HDR, Ctrl+H to flip to SDR).
+static bool ExtractHeifGainMap(const heif::ImageHandle& handle,
+	int width, int height, gainmap::ExtractedGainMap& outGain)
 {
-	// TEMPORARILY DISABLED by user decision 2026-11-21: all HEICs
-	// show SDR for now (see docs/HDR-HEIC-exploration-2026-11-21.md).
-	// Two reasons: (a) the highlights stayed too bright on one real
-	// sample (iPhone 15 Pro, iOS 18.0) even with the correct headroom
-	// (1.47 stops) - the cause is the bright base content, not the
-	// headroom value, and the investigation is parked; (b) gain-map
-	// opens are slow (about 7-9s against under 1s for SDR). The
-	// gain-map code below is kept intact - to re-enable, remove this
-	// early return. JPEG/AVIF gain maps are unaffected (their paths
-	// do not call this function).
-	return NULL;
-	unsigned char* outBgra = NULL;
 	try {
-		if (baseBgra == nullptr || width <= 0 || height <= 0)
-			return NULL;
+		if (width <= 0 || height <= 0)
+			return false;
 		heif::ImageHandle auxHandle = FindGainMapAuxHandle(handle);
 		if (auxHandle.empty())
-			return NULL;
+			return false;
 		std::vector<uint8_t> gainGray;
 		int gainW = 0, gainH = 0;
 		if (!DecodeGainMapGray(auxHandle, width, height, gainGray, gainW, gainH))
-			return NULL;
+			return false;
 		gainmap::Metadata meta;
 		// XMP on the primary image first, then on the gain-map item.
 		if (!TryParseGainMapXmp(handle, meta) && !TryParseGainMapXmp(auxHandle, meta)) {
 			// No headroom metadata on either handle: the gain map has
-			// no scale, so it cannot be applied — show the SDR base.
+			// no scale, so it cannot be applied -- show the SDR base.
 			// (The Batch 7 derive-from-pixels fallback was removed by
 			// user decision: without a scale the gain map is
 			// uninterpretable, and Apple Photos shows these files
 			// as SDR. Do not re-add a pixel-derived headroom.)
-			return NULL;
+			return false;
 		}
-		// Fused gain-map apply + tone map (variant B): the 8-bit BGRA
-		// base goes straight into gainmap::ApplyGainMapToBgra — no RGB
-		// temp, no float linear buffer. The fused function copies the
-		// base alpha (P2-B4: the old repack forced alpha opaque, so a
-		// transparent gain-map pixel rendered as a black block after
-		// the background blend).
-		size_t bgraSize = 0;
-		if (!IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
-			return NULL;
-		outBgra = new(std::nothrow) unsigned char[bgraSize];
-		if (outBgra == NULL)
-			return NULL;
-		if (!gainmap::ApplyGainMapToBgra(baseBgra, width, height, (size_t)width * 4,
-			gainGray.data(), gainW, gainH, meta, 1.0, outBgra, (size_t)width * 4)) {
-			delete[] outBgra;
-			outBgra = NULL;
-			return NULL;
-		}
-		return outBgra;
+		outGain.gray = std::move(gainGray);
+		outGain.width = gainW;
+		outGain.height = gainH;
+		outGain.meta = meta;
+		outGain.valid = true;
+		return true;
 	} catch (...) {
-		delete[] outBgra;
-		return NULL;
+		return false;
 	}
 }
 
@@ -331,7 +310,8 @@ void * HeifReader::ReadImage(int &width,
 					   bool &isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 					   int frame_index,
 					   const void *buffer,
-					   int sizebytes)
+					   int sizebytes,
+					   gainmap::ExtractedGainMap* pGainOut)
 {
 	outOfMemory = false;
 	width = height = 0;
@@ -354,8 +334,9 @@ void * HeifReader::ReadImage(int &width,
 	// means not HDR. Only PQ/HLG take the HDR path: decode to 16-bit
 	// and run the tone mapper. SDR keeps the 8-bit RGBA decode and
 	// the exact pre-existing path. Gain-map HEIFs (iPhone HDR photos)
-	// take the SDR path too, and TryApplyHeifGainMap (below) applies
-	// the gain map when one is present.
+	// take the SDR path too, and ExtractHeifGainMap (below) extracts
+	// the gain map when one is present; the load thread attaches it
+	// and applies it on demand, or at load when GainMapDefault() is HDR.
 	HdrToneMap::Cicp cicp;
 	bool isHdr = false;
 	{
@@ -466,14 +447,23 @@ void * HeifReader::ReadImage(int &width,
 		}
 		ICCProfileTransform::DeleteTransform(transform);
 		// Gain-map (Option D, Phase 3): an SDR HEIF with a gain-map aux
-		// image + XMP is an iPhone HDR photo -- reconstruct the HDR
-		// image and tone-map it. TryApplyHeifGainMap returns NULL when
-		// there is no gain map or anything fails; the SDR base is kept
-		// unchanged in that case.
-		unsigned char* gainMapped = TryApplyHeifGainMap(handle, pPixelData, width, height);
-		if (gainMapped != NULL) {
-			delete[] pPixelData;
-			pPixelData = gainMapped;
+		// image + XMP is an iPhone HDR photo -- extract the gain map
+		// (grayscale + metadata, NOT applied); the load thread
+		// attaches it to the image and applies it on demand, or at
+		// load when GainMapDefault() is HDR. ExtractHeifGainMap
+		// returns false when there is no gain map or anything fails;
+		// the SDR base is kept unchanged in that case. The
+		// extraction is skipped entirely when the caller does not
+		// want the gain map (pGainOut == NULL).
+		if (pGainOut != NULL) {
+			try {
+				gainmap::ExtractedGainMap gain;
+				if (ExtractHeifGainMap(handle, width, height, gain)) {
+					*pGainOut = std::move(gain);
+				}
+			} catch (...) {
+				// Keep the SDR base image; the gain map is optional.
+			}
 		}
 	}
 
