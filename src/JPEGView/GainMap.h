@@ -54,6 +54,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gainmap {
 
@@ -222,5 +223,38 @@ void BilinearUpsampleGray(const uint8_t* src, int srcW, int srcH,
 // c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4, c = v/255).
 // Exposed for tests; ApplyGainMap uses the same formula in double.
 float SrgbToLinear(uint8_t v);
+
+// Extracted (not yet applied) gain map: the native-resolution gray gain
+// plus its metadata, as produced by a format reader's Extract step. The
+// load thread attaches it to the CJPEGImage; the image applies it on
+// demand (ToggleHDR) or at load when GainMapDefault() is HDR. `valid` is
+// false until a reader has filled the struct in.
+struct ExtractedGainMap {
+    std::vector<uint8_t> gray;
+    int width = 0;
+    int height = 0;
+    Metadata meta;
+    bool valid = false;
+};
+
+// Rotate a single-channel gray image by `quarterTurns` clockwise
+// 90-degree steps (exact permutation, same direction as
+// CBasicProcessing::Rotate32bpp: 1 = 90 deg clockwise). `quarterTurns`
+// is normalized mod 4; 0 copies the input. Returns false on bad input
+// or allocation failure; never throws.
+bool RotateGrayQuarterTurns(const uint8_t* src, int srcW, int srcH, int quarterTurns,
+                            std::vector<uint8_t>& dst, int& dstW, int& dstH);
+
+// Rotate a single-channel gray image by an arbitrary angle (radians,
+// same direction and sampling convention as CBasicProcessing::RotateHQ:
+// the target pixel (i,j) samples the source at center + R(-angle) *
+// ((i+offsetX, j+offsetY) - center)). Bilinear sampling with edge
+// clamping (out-of-image areas take the nearest edge value: a gain map
+// has no background colour). `offsetX/Y` and `dstW/H` come from the
+// caller's GetSizeAfterFreeRotation at gain resolution. Returns false on
+// bad input or allocation failure; never throws.
+bool RotateGrayFree(const uint8_t* src, int srcW, int srcH, double angleRad,
+                    int offsetX, int offsetY, int dstW, int dstH,
+                    std::vector<uint8_t>& dst);
 
 }  // namespace gainmap

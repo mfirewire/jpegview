@@ -981,4 +981,141 @@ float SrgbToLinear(uint8_t v) {
         SrgbToLinearDouble(static_cast<double>(v) / 255.0));
 }
 
+// Upper bound for a rotated gain-map buffer (bytes). Gain maps are
+// capped at 4x the base per side by the extractors, so a rotated gain
+// is far below this in practice; the cap only stops a hostile geometry
+// from attempting a multi-GB allocation (the helpers never throw).
+static const size_t kMaxRotatedGainBytes = (size_t)1 << 31;
+
+bool RotateGrayQuarterTurns(const uint8_t* src, int srcW, int srcH, int quarterTurns,
+                            std::vector<uint8_t>& dst, int& dstW, int& dstH) {
+    dstW = 0;
+    dstH = 0;
+    if (src == nullptr || srcW <= 0 || srcH <= 0) {
+        return false;
+    }
+    int q = ((quarterTurns % 4) + 4) % 4;
+    int outW = (q % 2 == 1) ? srcH : srcW;
+    int outH = (q % 2 == 1) ? srcW : srcH;
+    size_t bytes = static_cast<size_t>(outW) * static_cast<size_t>(outH);
+    if (bytes == 0 || bytes > kMaxRotatedGainBytes) {
+        return false;
+    }
+    std::vector<uint8_t> out;
+    try {
+        out.assign(bytes, 0);
+    } catch (...) {
+        return false;
+    }
+    if (q == 0) {
+        std::memcpy(out.data(), src, bytes);
+    } else if (q == 2) {
+        // 180 deg: dst(x, y) = src(srcW-1-x, srcH-1-y).
+        for (int y = 0; y < srcH; ++y) {
+            for (int x = 0; x < srcW; ++x) {
+                out[static_cast<size_t>(srcH - 1 - y) * static_cast<size_t>(srcW) +
+                    static_cast<size_t>(srcW - 1 - x)] =
+                    src[static_cast<size_t>(y) * static_cast<size_t>(srcW) + static_cast<size_t>(x)];
+            }
+        }
+    } else if (q == 1) {
+        // 90 deg clockwise: dst(tx = srcH-1-y, ty = x) = src(x, y).
+        for (int y = 0; y < srcH; ++y) {
+            for (int x = 0; x < srcW; ++x) {
+                out[static_cast<size_t>(x) * static_cast<size_t>(srcH) +
+                    static_cast<size_t>(srcH - 1 - y)] =
+                    src[static_cast<size_t>(y) * static_cast<size_t>(srcW) + static_cast<size_t>(x)];
+            }
+        }
+    } else {
+        // 270 deg clockwise: dst(tx = y, ty = srcW-1-x) = src(x, y).
+        for (int y = 0; y < srcH; ++y) {
+            for (int x = 0; x < srcW; ++x) {
+                out[static_cast<size_t>(srcW - 1 - x) * static_cast<size_t>(srcH) +
+                    static_cast<size_t>(y)] =
+                    src[static_cast<size_t>(y) * static_cast<size_t>(srcW) + static_cast<size_t>(x)];
+            }
+        }
+    }
+    dst.swap(out);
+    dstW = outW;
+    dstH = outH;
+    return true;
+}
+
+bool RotateGrayFree(const uint8_t* src, int srcW, int srcH, double angleRad,
+                    int offsetX, int offsetY, int dstW, int dstH,
+                    std::vector<uint8_t>& dst) {
+    if (src == nullptr || srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) {
+        return false;
+    }
+    if (!std::isfinite(angleRad)) {
+        return false;
+    }
+    size_t bytes = static_cast<size_t>(dstW) * static_cast<size_t>(dstH);
+    if (bytes == 0 || bytes > kMaxRotatedGainBytes) {
+        return false;
+    }
+    std::vector<uint8_t> out;
+    try {
+        out.assign(bytes, 0);
+    } catch (...) {
+        return false;
+    }
+    // Same convention as CBasicProcessing::RotateHQ_Core: the target
+    // pixel (i,j) samples the source at center + R(-angle) *
+    // ((i+offsetX, j+offsetY) - center), where center is the source
+    // centre ((srcW-1)/2, (srcH-1)/2). Bilinear with edge clamping.
+    const double cx = (static_cast<double>(srcW) - 1.0) * 0.5;
+    const double cy = (static_cast<double>(srcH) - 1.0) * 0.5;
+    const double ca = std::cos(angleRad);
+    const double sa = std::sin(angleRad);
+    for (int j = 0; j < dstH; ++j) {
+        for (int i = 0; i < dstW; ++i) {
+            double dx = (static_cast<double>(i) + static_cast<double>(offsetX)) - cx;
+            double dy = (static_cast<double>(j) + static_cast<double>(offsetY)) - cy;
+            double sx = cx + ca * dx + sa * dy;
+            double sy = cy - sa * dx + ca * dy;
+            int x0 = static_cast<int>(std::floor(sx));
+            int y0 = static_cast<int>(std::floor(sy));
+            double fx = sx - static_cast<double>(x0);
+            double fy = sy - static_cast<double>(y0);
+            int x1 = x0 + 1;
+            int y1 = y0 + 1;
+            if (x0 < 0) {
+                x0 = 0;
+            }
+            if (y0 < 0) {
+                y0 = 0;
+            }
+            if (x1 > srcW - 1) {
+                x1 = srcW - 1;
+            }
+            if (y1 > srcH - 1) {
+                y1 = srcH - 1;
+            }
+            // When a coordinate was clamped, both samples are the same
+            // source pixel, so the weight is harmless (same as
+            // BilinearUpsampleGray).
+            double v00 = src[static_cast<size_t>(y0) * static_cast<size_t>(srcW) + static_cast<size_t>(x0)];
+            double v10 = src[static_cast<size_t>(y0) * static_cast<size_t>(srcW) + static_cast<size_t>(x1)];
+            double v01 = src[static_cast<size_t>(y1) * static_cast<size_t>(srcW) + static_cast<size_t>(x0)];
+            double v11 = src[static_cast<size_t>(y1) * static_cast<size_t>(srcW) + static_cast<size_t>(x1)];
+            double v = (v00 * (1.0 - fx) + v10 * fx) * (1.0 - fy) +
+                       (v01 * (1.0 - fx) + v11 * fx) * fy;
+            int rounded = static_cast<int>(std::floor(v + 0.5));
+            if (rounded < 0) {
+                rounded = 0;
+            }
+            if (rounded > 255) {
+                rounded = 255;
+            }
+            out[static_cast<size_t>(j) * static_cast<size_t>(dstW) + static_cast<size_t>(i)] =
+                static_cast<uint8_t>(rounded);
+        }
+    }
+    dst.swap(out);
+    return true;
+}
+
 }  // namespace gainmap

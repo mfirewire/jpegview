@@ -14,6 +14,8 @@
 #include <math.h>
 #include <assert.h>
 #include <new> // std::nothrow
+#include <memory> // std::unique_ptr
+#include <utility> // std::move
 
 // Hacky workaround.  Look at comment block in CJPEGImage::Resample()
 // undefine this flag to investigate which optimization might cause that particular failure (TODO)
@@ -81,6 +83,14 @@ CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, 
 		m_pOrigPixels = NULL;
 		m_nOriginalChannels = 0;
 	}
+
+	// Gain-map (HDR) toggle state: SDR view active, no HDR buffer and
+	// no retained gain map yet (attached by the load thread after the
+	// format reader extracts it).
+	m_pHdrPixels = NULL;
+	m_nHdrChannels = 0;
+	m_bShowingHDR = false;
+	m_bGainMapLoadRotationApplied = false;
 
 	if (pEXIFData != NULL) {
 		unsigned char * pEXIF = (unsigned char *)pEXIFData;
@@ -167,6 +177,8 @@ CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, 
 CJPEGImage::~CJPEGImage(void) {
 	delete[] m_pOrigPixels;
 	m_pOrigPixels = NULL;
+	delete[] m_pHdrPixels;
+	m_pHdrPixels = NULL;
 	delete[] m_pDIBPixels;
 	m_pDIBPixels = NULL;
 	delete[] m_pDIBPixelsLUTProcessed;
@@ -200,6 +212,167 @@ CJPEGImage::~CJPEGImage(void) {
 	m_pCachedProcessedHistogram = NULL;
 	delete m_pRawMetadata;
 	m_pRawMetadata = NULL;
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+// Gain-map (HDR) toggle support
+///////////////////////////////////////////////////////////////////////////////////
+
+void CJPEGImage::SetRetainedGainMap(gainmap::ExtractedGainMap&& gain) {
+	if (!gain.valid) {
+		return;
+	}
+	m_gainMap = std::move(gain);
+}
+
+bool CJPEGImage::ComputeHdrBuffer() {
+	if (!HasGainMap() || m_pHdrPixels != NULL || m_bShowingHDR) {
+		return false;
+	}
+	if (m_pOrigPixels == NULL || m_nOriginalChannels == 0 || m_gainMap.gray.empty()) {
+		return false;
+	}
+	// Stride follows the active buffer's layout: 3-channel bases come
+	// from TurboJPEG with a TJPAD(width*3) stride; 4-channel bases are
+	// packed width*4 (AVIF/HEIF, or a 3-channel base converted in place
+	// by ConvertSrcTo4Channels, e.g. by the load-time rotation).
+	const size_t baseStride = (m_nOriginalChannels == 4) ?
+		(size_t)m_nOrigWidth * 4 : (size_t)TJPAD(m_nOrigWidth * 3);
+	size_t outBytes = 0;
+	if (!IsImageBufferSizeOk(baseStride, (size_t)m_nOrigHeight, &outBytes)) {
+		return false;
+	}
+	std::unique_ptr<unsigned char[]> pOut(new(std::nothrow) unsigned char[outBytes]);
+	if (pOut == NULL) {
+		return false;
+	}
+	bool bOk = false;
+	if (m_nOriginalChannels == 4) {
+		bOk = gainmap::ApplyGainMapToBgra((const uint8_t*)m_pOrigPixels,
+			m_nOrigWidth, m_nOrigHeight, baseStride,
+			m_gainMap.gray.data(), m_gainMap.width, m_gainMap.height,
+			m_gainMap.meta, 1.0, pOut.get(), baseStride);
+	} else if (m_nOriginalChannels == 3) {
+		// Zero the row padding so no uninitialised bytes reach the DIB
+		// (same as TurboJpeg's immediate-apply path).
+		memset(pOut.get(), 0, outBytes);
+		bOk = gainmap::ApplyGainMapToBgr((const uint8_t*)m_pOrigPixels,
+			m_nOrigWidth, m_nOrigHeight, baseStride,
+			m_gainMap.gray.data(), m_gainMap.width, m_gainMap.height,
+			m_gainMap.meta, 1.0, pOut.get(), baseStride);
+	} else {
+		return false;
+	}
+	if (!bOk) {
+		return false;
+	}
+	m_pHdrPixels = pOut.release();
+	m_nHdrChannels = m_nOriginalChannels;
+	return true;
+}
+
+bool CJPEGImage::ToggleHDR() {
+	if (!HasGainMap()) {
+		return false;
+	}
+	if (m_pHdrPixels == NULL && !ComputeHdrBuffer()) {
+		return false;
+	}
+	unsigned char* pTmpPixels = (unsigned char*)m_pOrigPixels;
+	m_pOrigPixels = m_pHdrPixels;
+	m_pHdrPixels = pTmpPixels;
+	int nTmpChannels = m_nOriginalChannels;
+	m_nOriginalChannels = m_nHdrChannels;
+	m_nHdrChannels = nTmpChannels;
+	m_bShowingHDR = !m_bShowingHDR;
+	InvalidateAllCachedPixelData();
+	return true;
+}
+
+void CJPEGImage::EnsureSdrBaseActive() {
+	if (!m_bShowingHDR || m_pHdrPixels == NULL) {
+		return;
+	}
+	unsigned char* pTmpPixels = (unsigned char*)m_pOrigPixels;
+	m_pOrigPixels = m_pHdrPixels;
+	m_pHdrPixels = pTmpPixels;
+	int nTmpChannels = m_nOriginalChannels;
+	m_nOriginalChannels = m_nHdrChannels;
+	m_nHdrChannels = nTmpChannels;
+	m_bShowingHDR = false;
+	InvalidateAllCachedPixelData();
+}
+
+void CJPEGImage::DropHdrBuffer() {
+	delete[] m_pHdrPixels;
+	m_pHdrPixels = NULL;
+	m_nHdrChannels = 0;
+}
+
+void CJPEGImage::DropRetainedGainMap() {
+	m_gainMap = gainmap::ExtractedGainMap();
+}
+
+bool CJPEGImage::RotateRetainedGainMapAfterLoad() {
+	// From here on the load-time rotation is done: geometric edits
+	// drop the gain map (H3).
+	m_bGainMapLoadRotationApplied = true;
+	if (!HasGainMap()) {
+		return true;
+	}
+	try {
+		// Quarter turns first (exact permutation), then the free
+		// rotation (bilinear resample) — the same order
+		// VerifyRotationAfterLoad applies them to the base.
+		int nQuarterDeg = ((m_rotationParams.Rotation % 360) + 360) % 360;
+		if ((nQuarterDeg % 90) != 0) {
+			// Cannot happen: Rotate() only accepts 90/180/270, so a
+			// load with any other value already failed. Drop defensively.
+			DropRetainedGainMap();
+			return false;
+		}
+		std::vector<uint8_t> rotatedGray;
+		int nRotatedW = m_gainMap.width;
+		int nRotatedH = m_gainMap.height;
+		const uint8_t* pGraySrc = m_gainMap.gray.data();
+		if (nQuarterDeg != 0) {
+			if (!gainmap::RotateGrayQuarterTurns(m_gainMap.gray.data(),
+					m_gainMap.width, m_gainMap.height, nQuarterDeg / 90,
+					rotatedGray, nRotatedW, nRotatedH)) {
+				DropRetainedGainMap();
+				return false;
+			}
+			pGraySrc = rotatedGray.data();
+		}
+		if (fabs(m_rotationParams.FreeRotation) >= 0.009) {
+			double dAngleRad = 2 * 3.141592653 * m_rotationParams.FreeRotation / 360;
+			CPoint offset;
+			CSize newSize = GetSizeAfterFreeRotation(CSize(nRotatedW, nRotatedH), dAngleRad,
+				GetRotationFlag(m_rotationParams.Flags, RFLAG_AutoCrop),
+				GetRotationFlag(m_rotationParams.Flags, RFLAG_KeepAspectRatio), offset);
+			std::vector<uint8_t> freeRotatedGray;
+			if (!gainmap::RotateGrayFree(pGraySrc, nRotatedW, nRotatedH,
+					dAngleRad, offset.x, offset.y, newSize.cx, newSize.cy, freeRotatedGray)) {
+				DropRetainedGainMap();
+				return false;
+			}
+			rotatedGray.swap(freeRotatedGray);
+			nRotatedW = newSize.cx;
+			nRotatedH = newSize.cy;
+		}
+		if (rotatedGray.empty()) {
+			// No rotation was applied; nothing to store.
+			return true;
+		}
+		m_gainMap.gray.swap(rotatedGray);
+		m_gainMap.width = nRotatedW;
+		m_gainMap.height = nRotatedH;
+	} catch (...) {
+		// A gain map must never fail the load: drop it, stay SDR.
+		DropRetainedGainMap();
+		return false;
+	}
+	return true;
 }
 
 void CJPEGImage::SetJPEGChromoSampling(TJSAMP eSampling) {
@@ -328,6 +501,7 @@ void CJPEGImage::FreeUnsharpMaskResources() {
 }
 
 bool CJPEGImage::ApplyUnsharpMaskToOriginalPixels(const CUnsharpMaskParams & unsharpMaskParams) {
+	EnsureSdrBaseActive();
 	InvalidateAllCachedPixelData();
 
 	double dStartTime = Helpers::GetExactTickCount();
@@ -350,10 +524,17 @@ bool CJPEGImage::ApplyUnsharpMaskToOriginalPixels(const CUnsharpMaskParams & uns
 	MarkAsDestructivelyProcessed();
 	m_bIsProcessedNoParamDB = true;
 
+	if (bSuccess && m_bGainMapLoadRotationApplied) {
+		// Value-only edit: the HDR buffer is stale (it was computed
+		// from the pre-mask base), but the gain map still aligns, so
+		// keep it for the next toggle.
+		DropHdrBuffer();
+	}
 	return bSuccess;
 }
 
 bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKeepAspectRatio) {
+	EnsureSdrBaseActive();
 	InvalidateAllCachedPixelData();
 
 	CPoint offset;
@@ -373,10 +554,15 @@ bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKe
 	m_rotationParams.Flags = SetRotationFlag(m_rotationParams.Flags, RFLAG_AutoCrop, bAutoCrop);
 	m_rotationParams.Flags = SetRotationFlag(m_rotationParams.Flags, RFLAG_KeepAspectRatio, bKeepAspectRatio);
 
+	if (m_bGainMapLoadRotationApplied) {
+		DropHdrBuffer();
+		DropRetainedGainMap();
+	}
 	return true;
 }
 
 bool CJPEGImage::TrapezoidOriginalPixels(const CTrapezoid& trapezoid, bool bAutoCrop, bool bKeepAspectRatio) {
+	EnsureSdrBaseActive();
 	InvalidateAllCachedPixelData();
 
 	int nXStart, nXEnd;
@@ -414,10 +600,15 @@ bool CJPEGImage::TrapezoidOriginalPixels(const CTrapezoid& trapezoid, bool bAuto
 	MarkAsDestructivelyProcessed();
 	m_bIsProcessedNoParamDB = true;
 
+	if (m_bGainMapLoadRotationApplied) {
+		DropHdrBuffer();
+		DropRetainedGainMap();
+	}
 	return true;
 }
 
 bool CJPEGImage::ResizeOriginalPixels(EResizeFilter filter, CSize newSize) {
+	EnsureSdrBaseActive();
 	int newWidth = newSize.cx, newHeight = newSize.cy;
 	if (newWidth <= 0 || newHeight <= 0) {
 		return false;
@@ -482,6 +673,10 @@ bool CJPEGImage::ResizeOriginalPixels(EResizeFilter filter, CSize newSize) {
 	MarkAsDestructivelyProcessed();
 	m_bIsProcessedNoParamDB = true;
 
+	if (m_bGainMapLoadRotationApplied) {
+		DropHdrBuffer();
+		DropRetainedGainMap();
+	}
 	return true;
 }
 
@@ -747,6 +942,7 @@ bool CJPEGImage::VerifyRotationAfterLoad(const CRotationParams& rotationParams) 
 }
 
 bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
+	EnsureSdrBaseActive();
 	double dStartTickCount = Helpers::GetExactTickCount();
 
 	// Rotation can only be done in 32 bpp
@@ -783,11 +979,19 @@ bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
 		m_bIsDestructivelyProcessed = true;
 	}
 
+	if (m_bGainMapLoadRotationApplied) {
+		// Geometric edit: the HDR buffer and the gain map no longer
+		// align with the base — drop both (H3). Suppressed during
+		// load, where VerifyRotationAfterLoad calls this itself.
+		DropHdrBuffer();
+		DropRetainedGainMap();
+	}
 	m_dLastOpTickCount = Helpers::GetExactTickCount() - dStartTickCount;
 	return true;
 }
 
 bool CJPEGImage::Mirror(bool bHorizontally) {
+	EnsureSdrBaseActive();
 	double dStartTickCount = Helpers::GetExactTickCount();
 
 	// Rotation can only be done in 32 bpp
@@ -803,11 +1007,16 @@ bool CJPEGImage::Mirror(bool bHorizontally) {
 	MarkAsDestructivelyProcessed();
 	m_bIsProcessedNoParamDB = true;
 
+	if (m_bGainMapLoadRotationApplied) {
+		DropHdrBuffer();
+		DropRetainedGainMap();
+	}
 	m_dLastOpTickCount = Helpers::GetExactTickCount() - dStartTickCount;
 	return true;
 }
 
 bool CJPEGImage::Crop(CRect cropRect) {
+	EnsureSdrBaseActive();
 	// Cropping can only be done in 32 bpp
 	if (!ConvertSrcTo4Channels()) {
 		return false;
@@ -826,6 +1035,10 @@ bool CJPEGImage::Crop(CRect cropRect) {
 	MarkAsDestructivelyProcessed();
 	m_bIsProcessedNoParamDB = true;
 
+	if (m_bGainMapLoadRotationApplied) {
+		DropHdrBuffer();
+		DropRetainedGainMap();
+	}
 	return true;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProcessParams.h"
+#include "GainMap.h"
 
 class CHistogram;
 class CLocalDensityCorr;
@@ -351,6 +352,29 @@ public:
 	// Gets the metadata for RAW camera images, NULL if none
 	CRawMetadata* GetRawMetadata() { return m_pRawMetadata; }
 
+	// Gain-map (HDR) toggle support. The retained gain map is the
+	// native-resolution gray gain + metadata extracted at load; the HDR
+	// buffer is the tone-mapped reconstruction, computed on demand (or
+	// at load when GainMapDefault() is HDR). Both views share one pixel
+	// hash (fixed at construction from the SDR base) and one set of
+	// processing parameters; every consumer (display, save, copy, OCR,
+	// histogram) sees the currently active view.
+	bool HasGainMap() const { return m_gainMap.valid; }
+	bool IsShowingHDR() const { return m_bShowingHDR; }
+	// Takes ownership of an extracted gain map (move). No-op when !gain.valid.
+	void SetRetainedGainMap(gainmap::ExtractedGainMap&& gain);
+	// Flips between the SDR base and the HDR reconstruction. Computes
+	// the HDR buffer on first use; returns false when there is no gain
+	// map or the computation fails (the SDR view is kept then).
+	bool ToggleHDR();
+	// Rotates the retained gain map by the rotation applied at load
+	// (m_rotationParams, set by VerifyRotationAfterLoad), so the gain
+	// aligns with the rotated base. Called from ProcessImageAfterLoad
+	// right after VerifyRotationAfterLoad(). No-op when there is no
+	// gain map. On failure the gain map is dropped and the image stays
+	// SDR; returns false in that case.
+	bool RotateRetainedGainMapAfterLoad();
+
 	// Converts the target offset from 'center of image' based format to pixel coordinate format 
 	static CPoint ConvertOffset(CSize fullTargetSize, CSize clippingSize, CPoint targetOffset);
 
@@ -393,6 +417,25 @@ private:
 	int m_nOrigWidth, m_nOrigHeight; // these may changes by rotation
 	int m_nInitOrigWidth, m_nInitOrigHeight; // original width of image when constructed (before any rotation and crop)
 	int m_nOriginalChannels;
+	// Gain-map (HDR) toggle state. m_pOrigPixels always holds the ACTIVE
+	// view; m_pHdrPixels holds the other view (NULL until the HDR buffer
+	// is computed). m_nHdrChannels is the channel count of m_pHdrPixels:
+	// each buffer keeps its own count, because GetDIBInternal may
+	// convert the displayed buffer 3->4ch in place (ConvertSrcTo4Channels)
+	// while the other buffer stays 3ch — a pointer-only swap would then
+	// misread it (M1). m_bShowingHDR tells which view is active.
+	unsigned char* m_pHdrPixels;
+	int m_nHdrChannels;
+	bool m_bShowingHDR;
+	// Retained gain map (native resolution) + metadata, extracted at
+	// load. Dropped by geometric edits (H3) and freed in the destructor (m1).
+	gainmap::ExtractedGainMap m_gainMap;
+	// True once the load-time rotation has been applied to the retained
+	// gain map (set by RotateRetainedGainMapAfterLoad). Geometric
+	// mutators drop the gain map only after this point: during load,
+	// VerifyRotationAfterLoad itself calls the mutators, and dropping
+	// there would lose the gain.
+	bool m_bGainMapLoadRotationApplied;
 	__int64 m_nPixelHash;
 	EImageFormat m_eImageFormat;
 	TJSAMP m_eJPEGChromoSampling;
@@ -539,6 +582,20 @@ private:
 
 	// Called when the original pixels have changed (rotate, crop, unsharp mask), all cached pixel data gets invalid
 	void InvalidateAllCachedPixelData();
+
+	// Gain-map helpers (see JPEGImage.cpp).
+	// Computes the HDR buffer from the active SDR base + retained gain
+	// map into m_pHdrPixels. Requires HasGainMap(), no HDR buffer yet,
+	// and the SDR view active. False on any failure (no HDR buffer then).
+	bool ComputeHdrBuffer();
+	// Swaps the active view back to the SDR base (pointer + channel
+	// count), so a following original-pixel edit applies to the SDR
+	// base. No-op when already showing SDR.
+	void EnsureSdrBaseActive();
+	// Frees the alternate (HDR) buffer, if any.
+	void DropHdrBuffer();
+	// Frees the retained gain map (HasGainMap() goes false).
+	void DropRetainedGainMap();
 
 	// Create a thumbnail image of this image
 	CJPEGImage* CreateThumbnailImage();
