@@ -210,28 +210,27 @@ jobs:
 
   jxl-frame-header-test:
     name: JXL frame-header API semantics test (S1)
-    # Pinned to ubuntu-24.04 on purpose: the harness links the system
-    # libjxl 0.7 (-l:libjxl.so.0.7), which is what 24.04 ships and what
-    # the harness was verified against locally (13/0). ubuntu-latest is
-    # now 26.04, whose image does not install libjxl at all, so the
-    # same link line would fail there. The exercised symbols are
-    # ABI-stable across 0.7/0.11/0.13; only the link target differs.
-    # Note: the 24.04 runner image itself does not ship libjxl either
-    # (run 45095688917 failed with "cannot find -l:libjxl.so.0.7"),
-    # so the job installs the runtime package libjxl0.7 first.
-    runs-on: ubuntu-24.04
+    # Runs on ubuntu-latest (26.04). The runner image does not install
+    # libjxl, so the job installs libjxl-dev (26.04's repo has 0.11.1)
+    # and links plain -ljxl. The harness only reads `duration` (offset
+    # 0) and `is_last` (offset 12) through a padded buffer, and those
+    # fields match between the vendored 0.13 headers and upstream
+    # 0.11.1, so linking a different minor version is safe. The local
+    # build line in the harness header still uses -l:libjxl.so.0.7
+    # (this box has no dev symlink); CI uses -ljxl instead.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout (no submodules needed)
         uses: actions/checkout@v5
         with:
           submodules: false
 
-      - name: Install system libjxl 0.7 (link target)
+      - name: Install libjxl dev package (link target)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libjxl0.7
+          sudo apt-get install -y --no-install-recommends libjxl-dev
 
       - name: JXL frame-header harness test
         run: |
-          g++ -std=c++17 -Wall -Wextra -O2 -DJXL_STATIC_DEFINE -I src/JPEGView/libjxl/include tests/jxl_frame_header_test.cpp -l:libjxl.so.0.7 -o /tmp/jxl_frame_header_test
+          g++ -std=c++17 -Wall -Wextra -O2 -DJXL_STATIC_DEFINE -I src/JPEGView/libjxl/include tests/jxl_frame_header_test.cpp -ljxl -o /tmp/jxl_frame_header_test
           /tmp/jxl_frame_header_test
