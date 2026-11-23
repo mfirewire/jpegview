@@ -285,6 +285,7 @@ BEGIN
         MENUITEM "Save processed image...\t0x5de", IDM_SAVE
         MENUITEM "Reload image",                IDM_RELOAD
         MENUITEM "Reload image in full size",     IDM_RELOAD_FULLSIZE
+        MENUITEM "Show HDR",                      IDM_TOGGLE_HDR
         MENUITEM "Open containing folder in Explorer", IDM_EXPLORE
         MENUITEM "Print image...",              IDM_PRINT
         MENUITEM "Batch rename/copy...",        IDM_BATCH_COPY

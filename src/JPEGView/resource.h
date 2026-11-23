@@ -148,6 +148,7 @@
 #define IDM_SAVE_ALLOW_NO_PROMPT	1502		// :KeyMap: save to file in original size, allow overwrite without prompt when option 'OverwriteOriginalFileWithoutSaveDialog=true' is enabled in INI
 #define IDM_RELOAD			1600		// :KeyMap: reload image
 #define IDM_RELOAD_FULLSIZE		1601		// :KeyMap: reload image in full size
+#define IDM_TOGGLE_HDR			1602		// :KeyMap: toggle HDR view
 #define IDM_PRINT			1700		// :KeyMap: print image
 #define IDM_COPY			2000		// :KeyMap: copy image to clipboard in screen size
 #define IDM_COPY_FULL		2500		// :KeyMap: copy image to clipboard in original size
@@ -328,17 +329,17 @@
 // "Recognize text (OCR)" 之后，它后面所有子菜单的索引整体 +1 —— 用户命令为空时
 // MainDlg 会按位置删除三项，索引错了就会把 Settings/Admin 子菜单一起删掉。
 #define SUBMENU_POS_OPENWITH 3
-#define SUBMENU_POS_MODDATE 10
-#define SUBMENU_POS_WALLPAPER 11
-#define SUBMENU_POS_NAVIGATION 24
-#define SUBMENU_POS_DISPLAY_ORDER 25
-#define SUBMENU_POS_MOVIE 26
-#define SUBMENU_POS_TRANSFORM 28
-#define SUBMENU_POS_TRANSFORM_LOSSLESS 29
-#define SUBMENU_POS_ZOOM 38
-#define SUBMENU_POS_AUTOZOOMMODE 39
-#define SUBMENU_POS_SETTINGS 41
-#define SUBMENU_POS_USER_COMMANDS 43
+#define SUBMENU_POS_MODDATE 11
+#define SUBMENU_POS_WALLPAPER 12
+#define SUBMENU_POS_NAVIGATION 25
+#define SUBMENU_POS_DISPLAY_ORDER 26
+#define SUBMENU_POS_MOVIE 27
+#define SUBMENU_POS_TRANSFORM 29
+#define SUBMENU_POS_TRANSFORM_LOSSLESS 30
+#define SUBMENU_POS_ZOOM 39
+#define SUBMENU_POS_AUTOZOOMMODE 40
+#define SUBMENU_POS_SETTINGS 42
+#define SUBMENU_POS_USER_COMMANDS 44
 
 // in the crop menu
 #define SUBMENU_POS_CROPMODE 3

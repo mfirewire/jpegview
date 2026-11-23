@@ -1342,6 +1342,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	if (m_bAutoContrast) ::CheckMenuItem(hMenuTrackPopup, IDM_AUTO_CORRECTION, MF_CHECKED);
 	if (m_bLDC) ::CheckMenuItem(hMenuTrackPopup, IDM_LDC, MF_CHECKED);
 	if (m_bKeepParams) ::CheckMenuItem(hMenuTrackPopup, IDM_KEEP_PARAMETERS, MF_CHECKED);
+	if (m_pCurrentImage != NULL && m_pCurrentImage->IsShowingHDR()) ::CheckMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_CHECKED);
 	HMENU hMenuNavigation = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_NAVIGATION);
 	::CheckMenuItem(hMenuNavigation,  m_pFileList->GetNavigationMode()*10 + IDM_LOOP_FOLDER, MF_CHECKED);
 	HMENU hMenuOrdering = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_DISPLAY_ORDER);
@@ -1429,6 +1430,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_BYCOMMAND | MF_GRAYED);
+		::EnableMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_BYCOMMAND | MF_GRAYED);
 		//::EnableMenuItem(hMenuTrackPopup, IDM_EXPLORE, MF_BYCOMMAND | MF_GRAYED);  // can still show path to an image which could not be loaded.  If file doesn't exist, nothing happens anyways
 		::EnableMenuItem(hMenuTrackPopup, IDM_PRINT, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_COPY, MF_BYCOMMAND | MF_GRAYED);
@@ -1442,6 +1444,8 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 		::EnableMenuItem(hMenuTrackPopup, SUBMENU_POS_TRANSFORM, MF_BYPOSITION  | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, SUBMENU_POS_WALLPAPER, MF_BYPOSITION | MF_GRAYED);
 	} else {
+		if (!m_pCurrentImage->HasGainMap())
+			::EnableMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_BYCOMMAND | MF_GRAYED);
 		if (m_bKeepParams || m_pCurrentImage->IsClipboardImage() ||
 			CParameterDB::This().FindEntry(m_pCurrentImage->GetPixelHash()) == NULL)
 			::EnableMenuItem(hMenuTrackPopup, IDM_CLEAR_PARAM_DB, MF_BYCOMMAND | MF_GRAYED);
@@ -1470,6 +1474,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_BYCOMMAND | MF_GRAYED);
+		::EnableMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_PRINT, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_BATCH_COPY, MF_BYCOMMAND | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, IDM_SAVE_PARAMETERS, MF_BYCOMMAND | MF_GRAYED);
@@ -1603,6 +1608,20 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			// reaches here; ReloadImageFullSize itself has no NULL guard.
 			if (m_pCurrentImage != NULL) {
 				ReloadImageFullSize();
+			}
+			break;
+		case IDM_TOGGLE_HDR:
+			// HDR toggle (Ctrl+H): flip between the SDR base and the
+			// tone-mapped HDR view. The menu already grays this item
+			// when there is no image or no gain map, but the Ctrl+H
+			// shortcut still reaches here; ToggleHDR itself returns
+			// false when there is no gain map to show. No geometry
+			// change, so no window adjustment; the DIB caches were
+			// already invalidated by the toggle, a repaint is enough.
+			if (m_pCurrentImage != NULL) {
+				if (m_pCurrentImage->ToggleHDR()) {
+					this->Invalidate(FALSE);
+				}
 			}
 			break;
 		case IDM_PRINT:

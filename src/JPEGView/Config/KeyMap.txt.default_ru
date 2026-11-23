@@ -80,6 +80,7 @@ Ctrl+O                  IDM_OPEN
 Ctrl+P                  IDM_PRINT
 Ctrl+R                  IDM_RELOAD
 Ctrl+Shift+R            IDM_RELOAD_FULLSIZE
+Ctrl+H                  IDM_TOGGLE_HDR
 Alt+R                   IDM_SLIDESHOW_RESUME
 Ctrl+X                  IDM_COPY_FULL
 Ctrl+V                  IDM_PASTE
