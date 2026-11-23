@@ -1726,7 +1726,11 @@ void TestFusedGainMapExact() {
     // clamp (alternateOffset 0.5), and a dedicated saturated-red case
     // (a channel above 1 in a peak<=1 image — the (2,0,0) pixel the
     // EETF clamps to 1.0; an image-level identity table would render
-    // it (255,142,142) instead of (255,0,0)). The comparison is
+    // it (255,142,142) instead of (255,0,0)). Two more targeted cases:
+    // peak<=1 with boost!=1 (dark base, gain 255, gainMapMax 3 — the
+    // old P2-C3 fast path skips the PQ round-trip the fused table
+    // runs) and upsampled gain (2x2 gain onto a 4x4 base — the fused
+    // loop indexes the upsampled gain at base resolution). The comparison is
     // byte-exact (==), not a tolerance band. The BGR variant is also
     // run with padded (TJPAD-style) strides, and the BGRA variant
     // with a non-opaque alpha plane.
@@ -1905,6 +1909,132 @@ void TestFusedGainMapExact() {
               "old path saturated red -> (255,0,0)");
         Check(ranNew && newRed[0] == oldRed[0] && newRed[1] == oldRed[1] && newRed[2] == oldRed[2],
               "fused saturated red matches old path (not 142)");
+    }
+    // Peak<=1 with boost!=1 (dark image + strong gain): base bytes are
+    // all <= 32 and the gain is 255 with gainMapMax 3 (boost 8), so the
+    // brightest linear value is srgb(32)*8 ~= 0.12 and the peak stays
+    // <= 1 while the boost is not 1. The old path takes the P2-C3 fast
+    // path (peak <= 1 and every channel <= 1, so the PQ round-trip is
+    // skipped); the fused table runs the round-trip for the same pixels
+    // and must still come out byte-identical.
+    {
+        Metadata m;
+        m.gainMapMin = 0.0; m.gainMapMax = 3.0; m.gamma = 1.0;
+        m.baseOffset = 0.0; m.alternateOffset = 0.0; m.valid = true;
+        const int w = 8, h = 2;
+        // RGB base (old path order): grey ramp, then mixed dark channels.
+        uint8_t rgbDark[8 * 2 * 3] = {
+            0, 0, 0,  1, 1, 1,  4, 4, 4,  8, 8, 8,
+            16, 16, 16,  24, 24, 24,  28, 28, 28,  32, 32, 32,
+            32, 0, 0,  0, 32, 0,  0, 0, 32,  32, 16, 8,
+            8, 16, 32,  32, 32, 32,  1, 1, 1,  0, 0, 0
+        };
+        uint8_t gainDark[8 * 2];
+        for (size_t i = 0; i < sizeof(gainDark); ++i) gainDark[i] = 255;
+        std::vector<uint8_t> bgrDark((size_t)w * h * 3);
+        std::vector<uint8_t> bgraDark((size_t)w * h * 4);
+        for (size_t i = 0; i < (size_t)w * h; ++i) {
+            bgrDark[i * 3 + 0] = rgbDark[i * 3 + 2];
+            bgrDark[i * 3 + 1] = rgbDark[i * 3 + 1];
+            bgrDark[i * 3 + 2] = rgbDark[i * 3 + 0];
+            bgraDark[i * 4 + 0] = rgbDark[i * 3 + 2];
+            bgraDark[i * 4 + 1] = rgbDark[i * 3 + 1];
+            bgraDark[i * 4 + 2] = rgbDark[i * 3 + 0];
+            bgraDark[i * 4 + 3] = 255;
+        }
+        std::vector<float> linDark((size_t)w * h * 3);
+        std::vector<uint8_t> oldDark((size_t)w * h * 3);
+        std::vector<uint8_t> newDark((size_t)w * h * 3);
+        std::vector<uint8_t> oldDarkA((size_t)w * h * 4);
+        std::vector<uint8_t> newDarkA((size_t)w * h * 4);
+        bool ranOld = ApplyGainMap(rgbDark, w, h, gainDark, w, h, m, 1.0, linDark.data());
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linDark.data(), w, h, (size_t)w * 3,
+                                           oldDark.data(), (size_t)w * 3);
+            HdrToneMap::ConvertLinearImageToBgra(linDark.data(), w, h, (size_t)w * 3,
+                                                 oldDarkA.data(), (size_t)w * 4,
+                                                 bgraDark.data() + 3, 4);
+        }
+        bool ranNew = ApplyGainMapToBgr(bgrDark.data(), w, h, (size_t)w * 3,
+                                        gainDark, w, h, m, 1.0, newDark.data(), (size_t)w * 3);
+        bool exact = ranOld && ranNew;
+        if (exact) {
+            for (size_t i = 0; i < oldDark.size(); ++i) {
+                if (oldDark[i] != newDark[i]) { exact = false; break; }
+            }
+        }
+        Check(exact, "fused BGR peak<=1/boost!=1 bit-identical to old path");
+        bool ranNewA = ApplyGainMapToBgra(bgraDark.data(), w, h, (size_t)w * 4,
+                                          gainDark, w, h, m, 1.0, newDarkA.data(), (size_t)w * 4);
+        exact = ranOld && ranNewA;
+        if (exact) {
+            for (size_t i = 0; i < oldDarkA.size(); ++i) {
+                if (oldDarkA[i] != newDarkA[i]) { exact = false; break; }
+            }
+        }
+        Check(exact, "fused BGRA peak<=1/boost!=1 bit-identical to old path");
+    }
+    // Upsampled gain: a 2x2 gain map onto a 4x4 base. Upsampling is
+    // shared code (BilinearUpsampleGray, covered by the HEIF/AVIF
+    // tests); what is fused-specific is the fused loop indexing the
+    // upsampled gain at base resolution (gain + y*width). Distinct
+    // corner gains make every upsampled pixel differ.
+    {
+        Metadata m;
+        m.gainMapMin = 0.0; m.gainMapMax = 2.0; m.gamma = 1.0;
+        m.baseOffset = 0.0; m.alternateOffset = 0.0; m.valid = true;
+        const int w = 4, h = 4, gw = 2, gh = 2;
+        uint8_t gainUp[4] = {0, 85, 170, 255};
+        uint8_t rgbUp[4 * 4 * 3];
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                size_t i = (size_t)y * w + x;
+                rgbUp[i * 3 + 0] = (uint8_t)((i * 37) & 0xff);
+                rgbUp[i * 3 + 1] = (uint8_t)((i * 91 + 13) & 0xff);
+                rgbUp[i * 3 + 2] = (uint8_t)((i * 53 + 7) & 0xff);
+            }
+        std::vector<uint8_t> bgrUp((size_t)w * h * 3);
+        std::vector<uint8_t> bgraUp((size_t)w * h * 4);
+        for (size_t i = 0; i < (size_t)w * h; ++i) {
+            bgrUp[i * 3 + 0] = rgbUp[i * 3 + 2];
+            bgrUp[i * 3 + 1] = rgbUp[i * 3 + 1];
+            bgrUp[i * 3 + 2] = rgbUp[i * 3 + 0];
+            bgraUp[i * 4 + 0] = rgbUp[i * 3 + 2];
+            bgraUp[i * 4 + 1] = rgbUp[i * 3 + 1];
+            bgraUp[i * 4 + 2] = rgbUp[i * 3 + 0];
+            bgraUp[i * 4 + 3] = (uint8_t)((i * 11) & 0xff);
+        }
+        std::vector<float> linUp((size_t)w * h * 3);
+        std::vector<uint8_t> oldUp((size_t)w * h * 3);
+        std::vector<uint8_t> newUp((size_t)w * h * 3);
+        std::vector<uint8_t> oldUpA((size_t)w * h * 4);
+        std::vector<uint8_t> newUpA((size_t)w * h * 4);
+        bool ranOld = ApplyGainMap(rgbUp, w, h, gainUp, gw, gh, m, 1.0, linUp.data());
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linUp.data(), w, h, (size_t)w * 3,
+                                           oldUp.data(), (size_t)w * 3);
+            HdrToneMap::ConvertLinearImageToBgra(linUp.data(), w, h, (size_t)w * 3,
+                                                 oldUpA.data(), (size_t)w * 4,
+                                                 bgraUp.data() + 3, 4);
+        }
+        bool ranNew = ApplyGainMapToBgr(bgrUp.data(), w, h, (size_t)w * 3,
+                                        gainUp, gw, gh, m, 1.0, newUp.data(), (size_t)w * 3);
+        bool exact = ranOld && ranNew;
+        if (exact) {
+            for (size_t i = 0; i < oldUp.size(); ++i) {
+                if (oldUp[i] != newUp[i]) { exact = false; break; }
+            }
+        }
+        Check(exact, "fused BGR upsampled gain bit-identical to old path");
+        bool ranNewA = ApplyGainMapToBgra(bgraUp.data(), w, h, (size_t)w * 4,
+                                          gainUp, gw, gh, m, 1.0, newUpA.data(), (size_t)w * 4);
+        exact = ranOld && ranNewA;
+        if (exact) {
+            for (size_t i = 0; i < oldUpA.size(); ++i) {
+                if (oldUpA[i] != newUpA[i]) { exact = false; break; }
+            }
+        }
+        Check(exact, "fused BGRA upsampled gain bit-identical to old path");
     }
     // Bad inputs -> false (BGR variant; BGRA shares the core).
     {
