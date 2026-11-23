@@ -70,7 +70,7 @@ CJPEGProvider::~CJPEGProvider(void) {
 
 CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirection eDirection,
                                         LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams,
-                                        bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW, bool* pbSizeLimitExceeded) {
+                                        bool& bOutOfMemory, bool& bExceptionError, ERawLoadMode eRawLoadMode, bool* pbSizeLimitExceeded) {
 	if (strFileName == NULL) {
 		bOutOfMemory = false;
 		bExceptionError = false;
@@ -79,7 +79,7 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 	}
 
 	// Search if we have the requested image already present or in progress
-	CImageRequest* pRequest = FindRequest(strFileName, nFrameIndex);
+	CImageRequest* pRequest = FindRequest(strFileName, nFrameIndex, eRawLoadMode);
 	bool bDirectionChanged = eDirection != m_eOldDirection || eDirection == TOGGLE;
 	bool bRemoveAlsoActiveRequests = bDirectionChanged; // if direction changed, all read-ahead requests are wrongly guessed
 	bool bWasOutOfMemory = false;
@@ -87,7 +87,7 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 
 	if (pRequest == NULL) {
 		// no request pending for this file, add to request queue and start async
-		pRequest = StartNewRequest(strFileName, nFrameIndex, processParams, forceFullSizeRAW);
+		pRequest = StartNewRequest(strFileName, nFrameIndex, processParams, eRawLoadMode);
 		if (pRequest == NULL) {
 			// A2-9: the request object (or its load request) could not be
 			// allocated. Report out-of-memory like any other failed load:
@@ -146,7 +146,7 @@ CJPEGImage* CJPEGProvider::RequestImage(CFileList* pFileList, EReadAheadDirectio
 		bWasOutOfMemory = true;
 		if (FreeAllPossibleMemory()) {
 			DeleteElement(pRequest);
-			pRequest = StartRequestAndWaitUntilReady(strFileName, nFrameIndex, processParams, forceFullSizeRAW);
+			pRequest = StartRequestAndWaitUntilReady(strFileName, nFrameIndex, processParams, eRawLoadMode);
 			if (pRequest == NULL) {
 				// ST-08: the retry's wait failed; do not touch the (possibly
 				// already deleted) retried request.
@@ -277,18 +277,18 @@ void CJPEGProvider::OnImageLoadCompleted(int nHandle) {
 	}
 }
 
-CJPEGProvider::CImageRequest* CJPEGProvider::FindRequest(LPCTSTR strFileName, int nFrameIndex) {
+CJPEGProvider::CImageRequest* CJPEGProvider::FindRequest(LPCTSTR strFileName, int nFrameIndex, ERawLoadMode eRawLoadMode) {
 	std::list<CImageRequest*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
-		if (_tcsicmp((*iter)->FileName, strFileName) == 0 && (*iter)->FrameIndex == nFrameIndex && !(*iter)->Deleted) {
+		if (_tcsicmp((*iter)->FileName, strFileName) == 0 && (*iter)->FrameIndex == nFrameIndex && (*iter)->RawLoadMode == eRawLoadMode && !(*iter)->Deleted) {
 			return *iter;
 		}
 	}
 	return NULL;
 }
 
-CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
-	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams, forceFullSizeRAW);
+CJPEGProvider::CImageRequest* CJPEGProvider::StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, ERawLoadMode eRawLoadMode) {
+	CImageRequest* pRequest = StartNewRequest(sFileName, nFrameIndex, processParams, eRawLoadMode);
 	// A2-9: NULL when the request could not be allocated; the caller (the
 	// OOM retry in RequestImage) already checks for NULL before touching
 	// pRequest.
@@ -313,20 +313,20 @@ void CJPEGProvider::StartNewRequestBundle(CFileList* pFileList, EReadAheadDirect
 		bool bSwitchImage = true;
 		int nFrameIndex = (pLastReadyRequest != NULL) ? Helpers::GetFrameIndex(pLastReadyRequest->Image, eDirection == FORWARD, true, bSwitchImage) : 0;
 		LPCTSTR sFileName = bSwitchImage ? pFileList->PeekNextPrev(i + 1, eDirection == FORWARD, eDirection == TOGGLE) : pFileList->Current();
-		if (sFileName != NULL && FindRequest(sFileName, nFrameIndex) == NULL) {
+		if (sFileName != NULL && FindRequest(sFileName, nFrameIndex, RawLoad_Configured) == NULL) {
 			if (GetProcessingFlag(PFLAG_NoProcessingAfterLoad, processParams.ProcFlags)) {
 				// The read ahead threads need this flag to be deleted - we can speculatively process the image with good hit rate
 				CProcessParams paramsCopied = processParams;
 				paramsCopied.ProcFlags = SetProcessingFlag(paramsCopied.ProcFlags, PFLAG_NoProcessingAfterLoad, false);
-				StartNewRequest(sFileName, nFrameIndex, paramsCopied);
+				StartNewRequest(sFileName, nFrameIndex, paramsCopied, RawLoad_Configured);
 			} else {
-				StartNewRequest(sFileName, nFrameIndex, processParams);
+				StartNewRequest(sFileName, nFrameIndex, processParams, RawLoad_Configured);
 			}
 		}
 	}
 }
 
-CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW) {
+CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, ERawLoadMode eRawLoadMode) {
 #ifdef DEBUG
 	::OutputDebugString(_T("Start new request: ")); ::OutputDebugString(sFileName); ::OutputDebugString(_T("\n"));
 #endif
@@ -335,7 +335,7 @@ CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, 
 	// no try/catch above. Use nothrow and report NULL instead -- both
 	// callers already handle a NULL request (RequestImage above,
 	// StartRequestAndWaitUntilReady's wait-failure path).
-	CImageRequest* pRequest = new(std::nothrow) CImageRequest(sFileName, nFrameIndex);
+	CImageRequest* pRequest = new(std::nothrow) CImageRequest(sFileName, nFrameIndex, eRawLoadMode);
 	if (pRequest == NULL) {
 		return NULL;
 	}
@@ -352,7 +352,7 @@ CJPEGProvider::CImageRequest* CJPEGProvider::StartNewRequest(LPCTSTR sFileName, 
 	// would never fire and RequestImage would wait forever. Drop the
 	// request and report NULL instead of leaving a dead entry behind.
 	pRequest->Handle = pRequest->HandlingThread->AsyncLoad(pRequest->FileName, nFrameIndex,
-		processParams, m_hHandlerWnd, pRequest->EventFinished, forceFullSizeRAW);
+		processParams, m_hHandlerWnd, pRequest->EventFinished, eRawLoadMode);
 	if (pRequest->Handle < 0) {
 		m_requestList.remove(pRequest);
 		delete pRequest;

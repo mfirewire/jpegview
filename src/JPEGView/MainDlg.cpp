@@ -431,7 +431,7 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 	// create JPEG provider and request first image - do no processing yet if not in fullscreen mode (as we do not know the size yet)
 	m_pJPEGProvider = new CJPEGProvider(m_hWnd, NUM_THREADS, READ_AHEAD_BUFFERS);	
 	m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
-		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode), m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, false, &m_bSizeLimitExceededLastImage);
+		m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode), m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, RawLoad_Configured, &m_bSizeLimitExceededLastImage);
 	if (m_pCurrentImage != NULL && m_pCurrentImage->IsAnimation()) {
 		StartAnimation();
 	}
@@ -2547,7 +2547,7 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 		m_pJPEGProvider->ClearAllRequests(true);
 		m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, CJPEGProvider::FORWARD,
 			m_pFileList->Current(), 0, CreateProcessParams(!m_bFullScreenMode && (bAfterStartup || IsAdjustWindowToImage())),
-			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, false, &m_bSizeLimitExceededLastImage);
+			m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, RawLoad_Configured, &m_bSizeLimitExceededLastImage);
 	}
 	m_nLastLoadError = GetLoadErrorAfterOpenFile();
 	if (bAfterStartup) CheckIfApplyAutoFitWndToImage(false);
@@ -3029,7 +3029,7 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 			CWaitingForImageGuard waitingGuard(m_bWaitingForImage);
 			m_pCurrentImage = m_pJPEGProvider->RequestImage(m_pFileList, (ePos == POS_AwayFromCurrent) ? CJPEGProvider::NONE : eDirection,  
 				m_pFileList->Current(), nFrameIndex, procParams,
-				m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, (nFlags & FORCE_FULLSIZE_RAW) != 0, &m_bSizeLimitExceededLastImage);
+				m_bOutOfMemoryLastImage, m_bExceptionErrorLastImage, ((nFlags & FORCE_FULLSIZE_RAW) != 0) ? RawLoad_ForceFull : RawLoad_Configured, &m_bSizeLimitExceededLastImage);
 		}
 		if (m_pCurrentImage != NULL) {
 			m_nLastLoadError = HelpersGUI::FileLoad_Ok;

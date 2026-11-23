@@ -519,13 +519,13 @@ CImageLoadThread::~CImageLoadThread(void) {
 	}
 }
 
-int CImageLoadThread::AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, bool forceFullSizeRAW) {
+int CImageLoadThread::AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, ERawLoadMode eRawLoadMode) {
 	// A2-9: 'new CRequest' can throw on allocation failure; AsyncLoad is
 	// reached from the UI thread via StartNewRequest with no try/catch
 	// above. Use nothrow and report -1 (never a valid handle: handles come
 	// from InterlockedIncrement on m_curHandle, starting at 0, so the first
 	// real handle is 1); StartNewRequest drops the request on -1.
-	CRequest* pRequest = new(std::nothrow) CRequest(strFileName, nFrameIndex, targetWnd, processParams, eventFinished, forceFullSizeRAW);
+	CRequest* pRequest = new(std::nothrow) CRequest(strFileName, nFrameIndex, targetWnd, processParams, eventFinished, eRawLoadMode);
 	if (pRequest == NULL) {
 		return -1;
 	}
@@ -3047,16 +3047,20 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 			request->GateRejected = true;
 			return;
 		}
-		// One-shot full-size reload (IDM_RELOAD_FULLSIZE): this request ignores
-		// DisplayFullSizeRAW and uses mode 3 semantics (full size first, thumb
-		// fallback), so a thumbnail-mode user can view the current image in
-		// full size without changing the configured DisplayFullSizeRAW setting.
-		// The flag lives on the request, so navigation and read-ahead requests
-		// keep the configured mode. "Settings" here means the configured mode
-		// only: the per-image processing parameters (gamma, rotation, etc.)
-		// are intentionally reset for this view, because the full-size reload
-		// shows the RAW original as-is (see CMainDlg::ReloadImageFullSize).
-		int fullsize = request->ForceFullSizeRAW ? 3 : CSettingsProvider::This().DisplayFullSizeRAW();
+		// One-shot RAW mode override (RAW toggle): this request ignores
+		// DisplayFullSizeRAW and uses mode 3 semantics (full size first,
+		// thumb fallback) for a forced full-size load, or mode 2 semantics
+		// (thumbnail first, full fallback) for a forced thumbnail load, so
+		// the user can flip representations without changing the configured
+		// DisplayFullSizeRAW setting. The mode lives on the request, so
+		// navigation and read-ahead requests keep the configured mode.
+		// "Settings" here means the configured mode only: the per-image
+		// processing parameters (gamma, rotation, etc.) are intentionally
+		// reset for the full-size view, because it shows the RAW original
+		// as-is (see CMainDlg::ReloadImageFullSize).
+		int fullsize = (request->RawLoadMode == RawLoad_ForceFull) ? 3 :
+			(request->RawLoadMode == RawLoad_ForceThumb) ? 2 :
+			CSettingsProvider::This().DisplayFullSizeRAW();
 		// E6 (investigated, no change): the fallbacks below are not redundant
 		// retries of one full decode. dcraw_mod never fully decodes
 		// (dcraw_main hardcodes write_fun = write_thumb and only extracts the

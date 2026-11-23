@@ -70,6 +70,16 @@ enum EImageProvenance {
 	RawFullSize   // the fully decoded RAW file
 };
 
+// How a RAW file is loaded: the configured DisplayFullSizeRAW mode, or a
+// one-shot override to full size / thumbnail. Replaces the old bool
+// forceFullSizeRAW (two bools could express the illegal "force full AND
+// force thumb" combination). Non-RAW files ignore it.
+enum ERawLoadMode {
+	RawLoad_Configured, // use DisplayFullSizeRAW
+	RawLoad_ForceFull,  // one-shot: full size, ignoring DisplayFullSizeRAW
+	RawLoad_ForceThumb  // one-shot: thumbnail, ignoring DisplayFullSizeRAW
+};
+
 // Horizontal trapezoid
 /*
  (x1s, y1)----------(x1e, y1)

@@ -51,7 +51,7 @@ public:
 	// The file to load is given by its filename (with path) and the frame index (for multiframe images). The
 	// frame index needs to be zero when the image only has one frame.
 	// Returns -1 when the load request itself could not be allocated (A2-9).
-	int AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, bool forceFullSizeRAW = false);
+	int AsyncLoad(LPCTSTR strFileName, int nFrameIndex, const CProcessParams & processParams, HWND targetWnd, HANDLE eventFinished, ERawLoadMode eRawLoadMode = RawLoad_Configured);
 
 	// Get loaded image, CImageData::Image is null if not (yet) available - use handle returned by AsyncLoad().
 	// Call after having received the WM_IMAGE_LOAD_COMPLETED message to retrieve the loaded image.
@@ -69,7 +69,7 @@ private:
 	// Request for loading an image
 	class CRequest : public CRequestBase {
 	public:
-		CRequest(LPCTSTR strFileName, int nFrameIndex, HWND wndTarget, const CProcessParams& processParams, HANDLE eventFinished, bool forceFullSizeRAW = false) 
+		CRequest(LPCTSTR strFileName, int nFrameIndex, HWND wndTarget, const CProcessParams& processParams, HANDLE eventFinished, ERawLoadMode eRawLoadMode = RawLoad_Configured)
 			: CRequestBase(eventFinished), ProcessParams(processParams) {
 			FileName = strFileName;
 			FrameIndex = nFrameIndex;
@@ -80,7 +80,7 @@ private:
 			ExceptionError = false;
 			SizeLimitExceeded = false;
 			GateRejected = false;
-			ForceFullSizeRAW = forceFullSizeRAW;
+			RawLoadMode = eRawLoadMode;
 		}
 
 		CString FileName;
@@ -93,7 +93,7 @@ private:
 		bool ExceptionError;  // an unhandled exception caused the load to fail
 		bool SizeLimitExceeded;  // P2-5: image exceeded the pixel cap (not OOM)
 		bool GateRejected;  // TIFF gate rejected the file (not a decode failure: never memoized)
-		bool ForceFullSizeRAW;  // one-shot: load this request in full size, ignoring DisplayFullSizeRAW
+		ERawLoadMode RawLoadMode;  // one-shot RAW load mode (ForceFull/ForceThumb) or Configured (use DisplayFullSizeRAW)
 	};
 
 	// Request to release image file

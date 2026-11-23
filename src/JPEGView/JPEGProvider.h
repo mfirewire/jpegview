@@ -45,7 +45,7 @@ public:
 	// error, not as "not enough memory". The on-screen text for it lives
 	// with the MainDlg/HelpersGUI error display (not this class).
 	CJPEGImage* RequestImage(CFileList* pFileList, EReadAheadDirection eDirection, LPCTSTR strFileName, int nFrameIndex,
-		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError, bool forceFullSizeRAW = false, bool* pbSizeLimitExceeded = NULL);
+		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError, ERawLoadMode eRawLoadMode = RawLoad_Configured, bool* pbSizeLimitExceeded = NULL);
 
 	// Notifies that the specified image is no longer used and its memory can be freed.
 	// The CJPEGProvider class may decide to keep the image cached.
@@ -79,6 +79,7 @@ private:
 	struct CImageRequest {
 		CString FileName; // file name with path of image
 		int FrameIndex; // zero based frame index for multiframe images
+		ERawLoadMode RawLoadMode; // requested RAW load mode (part of the cache key: thumbnail and full-size are two cached representations)
 		CJPEGImage* Image; // loaded image
 		bool Ready; // true if the request has finished loading and the image is ready (if NULL, loading failed)
 		int Handle; // request handle used for that request in ImageLoadThread
@@ -92,9 +93,10 @@ private:
 		CImageLoadThread* HandlingThread; // thread that is loading the image, NULL when image is ready
 		HANDLE EventFinished; // event fired when image has finished loading
 
-		CImageRequest(LPCTSTR fileName, int nFrameIndex) {
+		CImageRequest(LPCTSTR fileName, int nFrameIndex, ERawLoadMode eRawLoadMode = RawLoad_Configured) {
 			FileName = fileName;
 			FrameIndex = nFrameIndex;
+			RawLoadMode = eRawLoadMode;
 			Image = NULL;
 			Ready = false;
 			Handle = -1;
@@ -129,10 +131,10 @@ private:
 	void RemoveUnusedImages(bool bRemoveAlsoReadAhead);
 	// Returns NULL if the wait fails (WAIT_FAILED, ST-08) - the request must
 	// then not be touched by the caller.
-	CImageRequest* StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW = false);
-	CImageRequest* StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, bool forceFullSizeRAW = false);
+	CImageRequest* StartRequestAndWaitUntilReady(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, ERawLoadMode eRawLoadMode = RawLoad_Configured);
+	CImageRequest* StartNewRequest(LPCTSTR sFileName, int nFrameIndex, const CProcessParams & processParams, ERawLoadMode eRawLoadMode = RawLoad_Configured);
 	void StartNewRequestBundle(CFileList* pFileList, EReadAheadDirection eDirection, const CProcessParams & processParams, int nNumRequests, CImageRequest* pLastReadyRequest);
-	CImageRequest* FindRequest(LPCTSTR strFileName, int nFrameIndex);
+	CImageRequest* FindRequest(LPCTSTR strFileName, int nFrameIndex, ERawLoadMode eRawLoadMode);
 	void ClearOldestInactiveRequest();
 	void DeleteElementAt(std::list<CImageRequest*>::iterator iteratorAt); // also deletes the request and the image in the request
 	void DeleteElement(CImageRequest* pRequest);
