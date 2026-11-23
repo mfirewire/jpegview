@@ -37,6 +37,12 @@ void CRotationPanelCtl::OnPostPaintMainDlg(HDC hPaintDC) {
 
 void* CRotationPanelCtl::GetDIBForPreview(CSize fullTargetSize, CSize clippingSize, CPoint targetOffset,
 												 const CImageProcessingParams & imageProcParams, EProcessingFlags eProcFlags) {
+	// P3 defense-in-depth (audit Bug A): the only caller runs this
+	// inside the m_pCurrentImage != NULL branch, so CurrentImage()
+	// cannot be NULL here today; guard anyway.
+	if (CurrentImage() == NULL) {
+		return NULL;
+	}
 	return CurrentImage()->GetDIBRotated(fullTargetSize, clippingSize, targetOffset, imageProcParams, 
 		SetProcessingFlag(eProcFlags, PFLAG_LDC, false), m_dRotationLQ, m_bShowGrid);
 }
@@ -118,6 +124,11 @@ void CRotationPanelCtl::EndTransforming() {
 }
 
 void CRotationPanelCtl::ApplyTransformation() {
+	// P3 defense-in-depth (audit Bug A): Apply() NULL-checks first,
+	// so CurrentImage() cannot be NULL here today; guard anyway.
+	if (CurrentImage() == NULL) {
+		return;
+	}
 	double rotation = m_dRotationLQ;
 	if (!CurrentImage()->IsClipboardImage() && !CurrentImage()->IsProcessedNoParamDB() && fabs(CurrentImage()->GetRotationParams().FreeRotation) > 0.009) {
 		rotation += 2 * 3.141592653 * CurrentImage()->GetRotationParams().FreeRotation / 360;

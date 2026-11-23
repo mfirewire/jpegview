@@ -45,6 +45,11 @@ CTrapezoid CTiltCorrectionPanelCtl::GetCurrentTrapezoid(CSize targetSize) {
 
 void* CTiltCorrectionPanelCtl::GetDIBForPreview(CSize fullTargetSize, CSize clippingSize, CPoint targetOffset,
 												 const CImageProcessingParams & imageProcParams, EProcessingFlags eProcFlags) {
+	// P3 defense-in-depth (same as RotationPanelCtl): callers
+	// guarantee an image today; guard anyway.
+	if (CurrentImage() == NULL) {
+		return NULL;
+	}
 	CTrapezoid trapezoid = GetCurrentTrapezoid(fullTargetSize);
 	return CurrentImage()->GetDIBTrapezoid(fullTargetSize, clippingSize, targetOffset, imageProcParams, 
 		SetProcessingFlag(eProcFlags, PFLAG_LDC, false), 
@@ -101,6 +106,11 @@ void CTiltCorrectionPanelCtl::EndTransforming() {
 }
 
 void CTiltCorrectionPanelCtl::ApplyTransformation() {
+	// P3 defense-in-depth (same as RotationPanelCtl): Apply()
+	// NULL-checks first; guard anyway.
+	if (CurrentImage() == NULL) {
+		return;
+	}
 	if (!CurrentImage()->TrapezoidOriginalPixels(GetCurrentTrapezoid(CurrentImage()->OrigSize()), m_bAutoCrop, m_bKeepAspectRatio)) {
 		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("The operation failed because not enough memory is available!")),
 			_T("JPEGView"), MB_ICONSTOP | MB_OK);
