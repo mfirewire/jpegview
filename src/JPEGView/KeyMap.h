@@ -3,6 +3,8 @@
 #include <hash_map>
 #include <vector>
 
+#include "HashCompareLPCTSTR.h"
+
 #define VK_LBUTTONDBLCLK 7
 
 // KeyMap
@@ -62,6 +64,10 @@ private:
 	void CommentOutRejectedLines(LPCTSTR sPath);
 
 	void AddDefaultEscapeHandling();
+	// Merges bindings from the shipped KeyMap.txt.default that are missing
+	// from a loaded user KeyMap.txt (new defaults for old user files).
+	// Only genuinely missing entries are added; user rebindings win.
+	void MergeMissingDefaultBindings(LPCTSTR sExePath, stdext::hash_map<LPCTSTR, int, CHashCompareLPCTSTR>& symbolMap);
 	// 应用 INI 中的快捷键覆盖（见 SettingsProvider::OcrShortcut）
 	void ApplyIniOverrides();
 	// 把某个命令绑定到指定快捷键字符串（如 "Ctrl+Q"），替换它原有的映射

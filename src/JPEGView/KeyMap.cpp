@@ -349,6 +349,14 @@ CKeyMap::CKeyMap() {
 		CommentOutRejectedLines(sLoadedKeyMapPath);
 	}
 
+	// A user KeyMap.txt predates any bindings added to the shipped
+	// default since (e.g. Ctrl+H for the HDR toggle): merge the ones
+	// that are genuinely missing. In-memory only; the user file is
+	// never rewritten for merged entries.
+	if (bLoadedKeyMapIsUserFile) {
+		MergeMissingDefaultBindings(exe_path, m_symbolMap);
+	}
+
 	AddDefaultEscapeHandling();
 }
 
@@ -378,6 +386,53 @@ CString CKeyMap::GetShortcutKey(int combinedKeyCode) {
 		return CString(_T(""));
 	}
 	return _GetKeyShortcutName(combinedKeyCode);
+}
+
+// Merges bindings from the shipped KeyMap.txt.default that are missing
+// from a user KeyMap.txt (a user file predates any bindings added to the
+// shipped default since, e.g. Ctrl+H for the HDR toggle). A default entry
+// is added only when NEITHER its key NOR its command is already bound:
+// a user rebinding of either side wins, and a key the user removed while
+// the command keeps another key stays removed. In-memory only: the user
+// file is never rewritten for merged entries and merged entries are never
+// recorded as rejected. Runs before AddDefaultEscapeHandling so the INI
+// overrides (ApplyIniOverrides) still win over a merged binding.
+void CKeyMap::MergeMissingDefaultBindings(LPCTSTR sExePath, stdext::hash_map<LPCTSTR, int, CHashCompareLPCTSTR>& symbolMap) {
+	FILE* fdefault_ptr = _tfopen(CString(sExePath) + KEYMAP_DEFAULT_FILE_NAME, _T("r"));
+	if (fdefault_ptr == NULL) {
+		return; // shipped default missing: nothing to merge
+	}
+	const int BUFF_LEN = 256;
+	TCHAR lineBuff[BUFF_LEN];
+	while (_fgetts(lineBuff, BUFF_LEN, fdefault_ptr) != NULL) {
+		LPTSTR sLine = _SkipWhiteSpace(lineBuff);
+		if (*sLine == 0) continue;
+		if (_IsComment(sLine)) continue;
+		if (_tcsncmp(sLine, _T("#define"), 7) == 0) continue;
+		LPTSTR sCommandId = _Parse(sLine);
+		if (sCommandId == NULL || *sCommandId == 0) continue;
+		int nCommandId = _FindCommandId(symbolMap, sCommandId);
+		if (nCommandId < 0) continue;
+		int nKeyCode = _ParseKeys(sLine);
+		if (nKeyCode <= 0) continue;
+		// Same basic-interaction guard as the user-file loop: Esc and the
+		// left mouse button cannot be rebound.
+		int nBaseKeyCode = nKeyCode & 0xFF;
+		if (nBaseKeyCode == VK_ESCAPE || nBaseKeyCode == VK_LBUTTON || nBaseKeyCode == VK_LBUTTONDBLCLK) continue;
+		// Merge rule: add only when neither the key nor the command is
+		// already bound; a user rebinding of either side wins.
+		if (m_keyMap.find(nKeyCode) != m_keyMap.end()) continue;
+		bool bCommandBound = false;
+		for (stdext::hash_map<int, int>::const_iterator it = m_keyMap.begin(); it != m_keyMap.end(); ++it) {
+			if (it->second == nCommandId) {
+				bCommandBound = true;
+				break;
+			}
+		}
+		if (bCommandBound) continue;
+		m_keyMap[nKeyCode] = nCommandId;
+	}
+	fclose(fdefault_ptr);
 }
 
 void CKeyMap::AddDefaultEscapeHandling() {

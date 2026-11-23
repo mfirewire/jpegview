@@ -2071,7 +2071,10 @@ void TestRetainedGainMapExact() {
     // entry points, reading the gray bytes and metadata out of the
     // struct -- exactly what CJPEGImage::ComputeHdrBuffer does. The
     // retained apply must be bit-identical to the immediate apply
-    // (ApplyGainMap + ConvertLinearImage[/ToBgra]) on the same inputs.
+    // (the fused ApplyGainMapToBgr/ToBgra) on the same inputs. The
+    // oracle below is the unfused ApplyGainMap +
+    // ConvertLinearImage[/ToBgra] instead, valid by transitivity
+    // with TestFusedGainMapExact (which pins fused == unfused).
     // Metadata shapes are the ones the readers actually produce:
     //   * ISO: parsed from the real HLG APP2 payload (kIsoPayloadHlg)
     //     -- gainMapMax ~0.1, tiny offsets;
