@@ -10,6 +10,7 @@
 #include "GainMap.h"
 #include <cmath>
 #include <vector>
+#include <memory>
 
 // HDR (Option A): convert the 16-bit BGRA pixels libavif wrote (depth 16,
 // values scaled to [0, 65535]) to 8-bit BGRA via the HdrToneMap helper.
@@ -231,7 +232,6 @@ static bool DecodeAvifGainMapGray(const avifGainMap* gainMap, int baseWidth, int
 static unsigned char* TryApplyAvifGainMap(const avifImage* image,
 	const unsigned char* baseBgra, int width, int height)
 {
-	unsigned char* outBgra = NULL;
 	if (image == NULL || baseBgra == NULL || width <= 0 || height <= 0)
 		return NULL;
 	const avifGainMap* gainMap = image->gainMap;
@@ -244,33 +244,24 @@ static unsigned char* TryApplyAvifGainMap(const avifImage* image,
 	int gainW = 0, gainH = 0;
 	if (!DecodeAvifGainMapGray(gainMap, width, height, gainGray, gainW, gainH))
 		return NULL;
-	// Base BGRA -> RGB temp buffer (drop alpha), then reconstruct
-	// linear HDR floats and tone-map straight to BGRA with
-	// ConvertLinearImageToBgra, which copies the base alpha
-	// (interleaved: baseBgra+3, stride 4). P2-B4: the old repack
-	// forced alpha opaque, so a transparent gain-map pixel rendered
-	// as a black block after the background blend.
-	size_t rgbSize = 0, floatSize = 0, bgraSize = 0;
-	if (!IsImageBufferSizeOk((size_t)width * 3, (size_t)height, &rgbSize)
-		|| !IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &floatSize)
-		|| !IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
+	// Fused gain-map apply + tone map (variant B): the 8-bit BGRA
+	// base goes straight into gainmap::ApplyGainMapToBgra — no RGB
+	// temp, no float linear buffer. The fused function copies the
+	// base alpha (P2-B4: the old repack forced alpha opaque, so a
+	// transparent gain-map pixel rendered as a black block after
+	// the background blend). outBgra is a unique_ptr (released
+	// only on success) so a bad_alloc unwind from the fused call
+	// cannot leak it.
+	size_t bgraSize = 0;
+	if (!IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
 		return NULL;
-	std::vector<uint8_t> rgb(rgbSize);
-	std::vector<float> linear(floatSize / sizeof(float));
-	for (size_t i = 0; i < (size_t)width * height; i++) {
-		rgb[i * 3 + 0] = baseBgra[i * 4 + 2];
-		rgb[i * 3 + 1] = baseBgra[i * 4 + 1];
-		rgb[i * 3 + 2] = baseBgra[i * 4 + 0];
-	}
-	if (!gainmap::ApplyGainMap(rgb.data(), width, height, gainGray.data(), gainW, gainH, meta, 1.0, linear.data()))
-		return NULL;
-	outBgra = new(std::nothrow) unsigned char[bgraSize];
+	std::unique_ptr<unsigned char[]> outBgra(new(std::nothrow) unsigned char[bgraSize]);
 	if (outBgra == NULL)
 		return NULL;
-	// P2-B4: tone-map to BGRA in place, copying the base alpha.
-	HdrToneMap::ConvertLinearImageToBgra(linear.data(), width, height, (size_t)width * 3,
-		outBgra, (size_t)width * 4, baseBgra + 3, 4);
-	return outBgra;
+	if (!gainmap::ApplyGainMapToBgra(baseBgra, width, height, (size_t)width * 4,
+		gainGray.data(), gainW, gainH, meta, 1.0, outBgra.get(), (size_t)width * 4))
+		return NULL;
+	return outBgra.release();
 }
 
 void* AvifReader::ReadImage(int& width,

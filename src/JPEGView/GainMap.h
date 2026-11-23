@@ -179,6 +179,35 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
                   const uint8_t* gainMap, int gainW, int gainH,
                   const Metadata& meta, double weightFactor, float* outLinear);
 
+// Fused gain-map apply + tone map (variant B: 2D LUT + exact OETF).
+// Same reconstruction as ApplyGainMap, but the BT.2390 tone mapping is
+// fused in: instead of writing a float linear buffer and running
+// HdrToneMap::ConvertLinearImage over it (~27 pow per pixel), the
+// per-pixel curve collapses to a 256x256 double table built once per
+// image (gain byte x base byte), because the only inputs are two
+// bytes. The main loop is table lookup -> GamutMap -> exact SrgbOetf
+// -> ToByte, with no pow and no float buffer. Bit-identical to
+// ApplyGainMap + ConvertLinearImage(/ToBgra) on the same inputs (see
+// TestFusedGainMapExact); the table is double, not float, so the
+// fused loop feeds GamutMap the exact double the old code computes.
+// `baseBgr`/`baseBgra` is the 8-bit sRGB base in JPEGView order
+// (B,G,R[,A]); `baseStride`/`outStride` are the byte strides between
+// rows (BGR: width*3 padded, e.g. TJPAD; BGRA: width*4). The BGRA
+// variant copies the base alpha byte to the output (P2-B4). The gain
+// map is upsampled as in ApplyGainMap. Returns false on bad input
+// (same contract as ApplyGainMap, plus stride checks: a stride
+// narrower than a row, or so large the row arithmetic could wrap
+// size_t, is rejected). On false the output buffer is untouched and
+// the caller keeps the SDR base, exactly as with ApplyGainMap.
+bool ApplyGainMapToBgr(const uint8_t* baseBgr, int width, int height, size_t baseStride,
+                       const uint8_t* gainMap, int gainW, int gainH,
+                       const Metadata& meta, double weightFactor,
+                       uint8_t* outBgr, size_t outStride);
+bool ApplyGainMapToBgra(const uint8_t* baseBgra, int width, int height, size_t baseStride,
+                        const uint8_t* gainMap, int gainW, int gainH,
+                        const Metadata& meta, double weightFactor,
+                        uint8_t* outBgra, size_t outStride);
+
 // Single-channel bilinear upsample. If src and dst are the same size
 // the buffer is copied. Source coordinates use centre alignment:
 // sx = (dx + 0.5) * srcW / dstW - 0.5 (same for y); edge pixels are

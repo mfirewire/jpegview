@@ -79,6 +79,12 @@ bool IsHdr(const Cicp& cicp);
 const double kSdrWhiteNits = 203.0;
 const double kHdrPeakNits = 1000.0;
 
+// sRGB luma coefficients (Y row of the RGB-to-XYZ matrix). These are
+// the weights ComputePeakLinear uses for the content peak, and the
+// gain-map fused path (GainMap.cpp) replicates that peak from byte
+// inputs, so the weights live here, not in HdrToneMap.cpp.
+const double kSrgbLuma[3] = {0.2126, 0.7152, 0.0722};
+
 // PQ (SMPTE ST 2084) EOTF inverse: PQ signal [0,1] -> absolute nits.
 // Clamps the signal to [0,1] and the intermediate fraction to >= 0, so
 // out-of-range or NaN inputs cannot produce NaN (they map to 0 nits).
@@ -116,6 +122,25 @@ struct Bt2390Params {
 // Precompute the BT.2390 parameters for a content peak (nits). This is
 // the preamble of Bt2390EetfPq, hoisted out of the per-pixel loop.
 Bt2390Params Bt2390MakeParams(double peakNits);
+
+// Inner BT.2390 EETF with precomputed parameters. Bit-identical to
+// Bt2390EetfPq(signal, peakNits) when params ==
+// Bt2390MakeParams(peakNits). Public so the gain-map fused path
+// (GainMap.cpp) can build its table with the same function the
+// per-pixel loop uses, with the parameters built once.
+double Bt2390EetfPqWithParams(double signal, const Bt2390Params& params);
+
+// Gamut mapping: if the linear sRGB colour is out of [0,1]^3,
+// desaturate it toward its luminance (grey) until it is in gamut
+// (preserves hue and luminance; never hard-clips a single channel).
+// Public so the gain-map fused path can run the same step the
+// per-pixel loop runs, after its table lookup.
+void GamutMap(double* r, double* g, double* b);
+
+// Linear sRGB code -> 8-bit byte: Clamp01 * 255 + 0.5, round to
+// nearest. Public so the gain-map fused path can finish pixels
+// exactly the way the per-pixel loop does.
+uint8_t ToByte(double srgb01);
 
 // sRGB OETF: linear [0,1] -> sRGB code [0,1] (piecewise).
 double SrgbOetf(double linear);

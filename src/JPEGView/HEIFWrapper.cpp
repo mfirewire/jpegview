@@ -297,32 +297,24 @@ static unsigned char* TryApplyHeifGainMap(const heif::ImageHandle& handle,
 			// as SDR. Do not re-add a pixel-derived headroom.)
 			return NULL;
 		}
-		// Base BGRA -> RGB temp buffer (drop alpha), then reconstruct
-		// linear HDR floats and tone-map straight to BGRA with
-		// ConvertLinearImageToBgra, which copies the base alpha
-		// (interleaved: baseBgra+3, stride 4). P2-B4: the old repack
-		// forced alpha opaque, so a transparent gain-map pixel rendered
-		// as a black block after the background blend.
-		size_t rgbSize = 0, floatSize = 0, bgraSize = 0;
-		if (!IsImageBufferSizeOk((size_t)width * 3, (size_t)height, &rgbSize)
-			|| !IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &floatSize)
-			|| !IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
-			return NULL;
-		std::vector<uint8_t> rgb(rgbSize);
-		std::vector<float> linear(floatSize / sizeof(float));
-		for (size_t i = 0; i < (size_t)width * height; i++) {
-			rgb[i * 3 + 0] = baseBgra[i * 4 + 2];
-			rgb[i * 3 + 1] = baseBgra[i * 4 + 1];
-			rgb[i * 3 + 2] = baseBgra[i * 4 + 0];
-		}
-		if (!gainmap::ApplyGainMap(rgb.data(), width, height, gainGray.data(), gainW, gainH, meta, 1.0, linear.data()))
+		// Fused gain-map apply + tone map (variant B): the 8-bit BGRA
+		// base goes straight into gainmap::ApplyGainMapToBgra — no RGB
+		// temp, no float linear buffer. The fused function copies the
+		// base alpha (P2-B4: the old repack forced alpha opaque, so a
+		// transparent gain-map pixel rendered as a black block after
+		// the background blend).
+		size_t bgraSize = 0;
+		if (!IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
 			return NULL;
 		outBgra = new(std::nothrow) unsigned char[bgraSize];
 		if (outBgra == NULL)
 			return NULL;
-		// P2-B4: tone-map to BGRA in place, copying the base alpha.
-		HdrToneMap::ConvertLinearImageToBgra(linear.data(), width, height, (size_t)width * 3,
-			outBgra, (size_t)width * 4, baseBgra + 3, 4);
+		if (!gainmap::ApplyGainMapToBgra(baseBgra, width, height, (size_t)width * 4,
+			gainGray.data(), gainW, gainH, meta, 1.0, outBgra, (size_t)width * 4)) {
+			delete[] outBgra;
+			outBgra = NULL;
+			return NULL;
+		}
 		return outBgra;
 	} catch (...) {
 		delete[] outBgra;

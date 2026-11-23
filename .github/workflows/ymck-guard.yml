@@ -162,7 +162,7 @@ jobs:
 
       - name: Gain-map unit test
         run: |
-          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_test.cpp src/JPEGView/GainMap.cpp -o /tmp/gainmap_test
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/gainmap_test
           /tmp/gainmap_test
 
       - name: HEIF gain-map apply test

@@ -25,7 +25,7 @@
 // Build and run (Linux, no Windows toolchain needed):
 //   g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView
 //       tests/gainmap_test.cpp src/JPEGView/GainMap.cpp
-//       -o /tmp/gainmap_test
+//       src/JPEGView/HdrToneMap.cpp -o /tmp/gainmap_test
 //   /tmp/gainmap_test
 
 #include <algorithm>
@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "GainMap.h"
+#include "HdrToneMap.h"
 
 namespace {
 
@@ -1713,6 +1714,225 @@ void TestFindXmpPacketAppleJpegAux() {
 
 }  // namespace
 
+
+void TestFusedGainMapExact() {
+    using namespace gainmap;
+    // The fused entry points (ApplyGainMapToBgr/ToBgra) must be
+    // bit-identical to the old two-step path (ApplyGainMap +
+    // ConvertLinearImage/ToBgra) on the same inputs: same 256x256
+    // sweep as TestApplyGainMapLutExact (every (gain, base) pair per
+    // channel), the same parameter sets, plus sets that exercise the
+    // fast path (peak <= 1: zero gain range, weight 0), the negative
+    // clamp (alternateOffset 0.5), and a dedicated saturated-red case
+    // (a channel above 1 in a peak<=1 image — the (2,0,0) pixel the
+    // EETF clamps to 1.0; an image-level identity table would render
+    // it (255,142,142) instead of (255,0,0)). The comparison is
+    // byte-exact (==), not a tolerance band. The BGR variant is also
+    // run with padded (TJPAD-style) strides, and the BGRA variant
+    // with a non-opaque alpha plane.
+    struct Params {
+        double gainMapMin, gainMapMax, gamma, baseOffset, alternateOffset;
+        double weightFactor;
+    };
+    const Params kSets[] = {
+        {0.0, 3.0, 1.0, 0.0, 0.0, 1.0},        // derived iPhone headroom
+        {0.0, 0.09999992698431015, 1.0, 1.0000000116883119e-07,
+         1.0000000116883119e-07, 1.0},          // real HLG metadata
+        {0.0, 1.329, 2.2, 0.0, 0.0, 1.0},       // gamma 2.2, mid headroom
+        {-1.5, 2.5, 0.45, 0.01, -0.02, 0.5},    // negative min, partial weight
+        {0.0, 0.0, 1.0, 0.0, 0.0, 1.0},         // zero gain range (peak <= 1)
+        {0.0, 3.0, 1.0, 0.0, 0.0, 0.0},         // weight 0 -> SDR unchanged (peak <= 1)
+        {0.0, 2.0, 1.8, 0.001, 0.002, 2.0},     // weight 2.0 clamps to 1.0
+        {0.0, 0.0, 1.0, 0.0, 0.5, 1.0},         // negative hdr (clamp path)
+    };
+    const int kW = 256, kH = 256;
+    std::vector<uint8_t> baseRgb((size_t)kW * kH * 3);
+    std::vector<uint8_t> gain((size_t)kW * kH);
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            size_t i = (size_t)y * kW + x;
+            gain[i] = (uint8_t)x;
+            baseRgb[i * 3 + 0] = (uint8_t)y;
+            baseRgb[i * 3 + 1] = (uint8_t)((x + y) & 0xff);
+            baseRgb[i * 3 + 2] = (uint8_t)((7 * x + 13 * y) & 0xff);
+        }
+    }
+    // BGR base (swapped) + BGRA base (swapped + alpha pattern).
+    std::vector<uint8_t> baseBgr((size_t)kW * kH * 3);
+    std::vector<uint8_t> baseBgra((size_t)kW * kH * 4);
+    for (size_t i = 0; i < (size_t)kW * kH; ++i) {
+        baseBgr[i * 3 + 0] = baseRgb[i * 3 + 2];
+        baseBgr[i * 3 + 1] = baseRgb[i * 3 + 1];
+        baseBgr[i * 3 + 2] = baseRgb[i * 3 + 0];
+        baseBgra[i * 4 + 0] = baseRgb[i * 3 + 2];
+        baseBgra[i * 4 + 1] = baseRgb[i * 3 + 1];
+        baseBgra[i * 4 + 2] = baseRgb[i * 3 + 0];
+        baseBgra[i * 4 + 3] = (uint8_t)((i * 7) & 0xff);
+    }
+    std::vector<float> linear((size_t)kW * kH * 3);
+    std::vector<uint8_t> oldBgr((size_t)kW * kH * 3);
+    std::vector<uint8_t> newBgr((size_t)kW * kH * 3);
+    std::vector<uint8_t> oldBgra((size_t)kW * kH * 4);
+    std::vector<uint8_t> newBgra((size_t)kW * kH * 4);
+    for (size_t s = 0; s < sizeof(kSets) / sizeof(kSets[0]); ++s) {
+        const Params& p = kSets[s];
+        Metadata m;
+        m.gainMapMin = p.gainMapMin;
+        m.gainMapMax = p.gainMapMax;
+        m.gamma = p.gamma;
+        m.baseOffset = p.baseOffset;
+        m.alternateOffset = p.alternateOffset;
+        m.valid = true;
+        // Old path, BGR.
+        bool ranOld = ApplyGainMap(baseRgb.data(), kW, kH, gain.data(), kW, kH, m,
+                                   p.weightFactor, linear.data());
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linear.data(), kW, kH, (size_t)kW * 3,
+                                           oldBgr.data(), (size_t)kW * 3);
+        }
+        // New path, BGR (tight stride).
+        bool ranNew = ApplyGainMapToBgr(baseBgr.data(), kW, kH, (size_t)kW * 3,
+                                        gain.data(), kW, kH, m, p.weightFactor,
+                                        newBgr.data(), (size_t)kW * 3);
+        char what[160];
+        std::snprintf(what, sizeof(what), "fused BGR param set %u runs iff old runs", (unsigned)s);
+        Check(ranOld == ranNew, what);
+        bool exact = ranOld && ranNew;
+        if (exact) {
+            for (size_t i = 0; i < oldBgr.size(); ++i) {
+                if (oldBgr[i] != newBgr[i]) { exact = false; break; }
+            }
+        }
+        std::snprintf(what, sizeof(what), "fused BGR bit-identical to old path, param set %u", (unsigned)s);
+        Check(exact, what);
+        // Old path, BGRA (alpha from baseBgra+3, stride 4).
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImageToBgra(linear.data(), kW, kH, (size_t)kW * 3,
+                                                 oldBgra.data(), (size_t)kW * 4,
+                                                 baseBgra.data() + 3, 4);
+        }
+        bool ranNewA = ApplyGainMapToBgra(baseBgra.data(), kW, kH, (size_t)kW * 4,
+                                          gain.data(), kW, kH, m, p.weightFactor,
+                                          newBgra.data(), (size_t)kW * 4);
+        std::snprintf(what, sizeof(what), "fused BGRA param set %u runs iff old runs", (unsigned)s);
+        Check(ranOld == ranNewA, what);
+        exact = ranOld && ranNewA;
+        if (exact) {
+            for (size_t i = 0; i < oldBgra.size(); ++i) {
+                if (oldBgra[i] != newBgra[i]) { exact = false; break; }
+            }
+        }
+        std::snprintf(what, sizeof(what), "fused BGRA bit-identical to old path, param set %u", (unsigned)s);
+        Check(exact, what);
+    }
+    // Padded strides (TJPAD-style): BGR with a 4-byte-aligned stride.
+    // Pixel bytes must match the tight-stride run; padding untouched.
+    {
+        Metadata m;
+        m.gainMapMin = 0.0; m.gainMapMax = 2.0; m.gamma = 1.0;
+        m.baseOffset = 0.0; m.alternateOffset = 0.0; m.valid = true;
+        const int w = 5, h = 3;
+        const size_t stride = ((size_t)w * 3 + 3) & ~(size_t)3;  // TJPAD
+        std::vector<uint8_t> bgrPad((size_t)h * stride, 0xA5);
+        std::vector<uint8_t> outPad((size_t)h * stride, 0x5A);
+        std::vector<uint8_t> gSmall((size_t)w * h);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                size_t i = (size_t)y * w + x;
+                gSmall[i] = (uint8_t)(i * 37);
+                bgrPad[(size_t)y * stride + (size_t)x * 3 + 0] = (uint8_t)(x * 51);
+                bgrPad[(size_t)y * stride + (size_t)x * 3 + 1] = (uint8_t)(y * 85);
+                bgrPad[(size_t)y * stride + (size_t)x * 3 + 2] = (uint8_t)((x + y) * 43);
+            }
+        // Old path on the tight equivalent.
+        std::vector<uint8_t> rgbTight((size_t)w * h * 3);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                size_t i = (size_t)y * w + x;
+                rgbTight[i * 3 + 0] = bgrPad[(size_t)y * stride + (size_t)x * 3 + 2];
+                rgbTight[i * 3 + 1] = bgrPad[(size_t)y * stride + (size_t)x * 3 + 1];
+                rgbTight[i * 3 + 2] = bgrPad[(size_t)y * stride + (size_t)x * 3 + 0];
+            }
+        std::vector<float> linTight((size_t)w * h * 3);
+        std::vector<uint8_t> oldTight((size_t)w * h * 3);
+        bool ranOld = ApplyGainMap(rgbTight.data(), w, h, gSmall.data(), w, h, m, 1.0, linTight.data());
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linTight.data(), w, h, (size_t)w * 3,
+                                           oldTight.data(), (size_t)w * 3);
+        }
+        bool ranNew = ApplyGainMapToBgr(bgrPad.data(), w, h, stride,
+                                        gSmall.data(), w, h, m, 1.0,
+                                        outPad.data(), stride);
+        Check(ranOld && ranNew, "fused BGR padded stride runs");
+        bool exact = ranOld && ranNew;
+        if (exact) {
+            for (int y = 0; y < h && exact; ++y)
+                for (int x = 0; x < w; ++x)
+                    for (int c = 0; c < 3; ++c)
+                        if (outPad[(size_t)y * stride + (size_t)x * 3 + (size_t)c] !=
+                            oldTight[((size_t)y * w + (size_t)x) * 3 + (size_t)c]) exact = false;
+        }
+        Check(exact, "fused BGR padded stride bit-identical to tight old path");
+        // Padding bytes untouched (0x5A sentinel).
+        bool padOk = true;
+        for (int y = 0; y < h; ++y)
+            for (size_t k = (size_t)w * 3; k < stride; ++k)
+                if (outPad[(size_t)y * stride + k] != 0x5A) padOk = false;
+        Check(padOk, "fused BGR padded stride leaves padding untouched");
+    }
+    // Saturated red in a peak<=1 image: pixel (2,0,0), luminance 0.425.
+    // Old path takes the slow path for it (channel > 1) and the EETF
+    // clamps it to 1.0 -> (255,0,0). The fused table must do the same.
+    {
+        Metadata m;
+        m.gainMapMin = 0.0; m.gainMapMax = 1.0; m.gamma = 1.0;
+        m.baseOffset = 0.0; m.alternateOffset = 0.0; m.valid = true;
+        // 2x1: red pixel (gain 255 -> boost 2) + dark pixel.
+        uint8_t rgbRed[6] = {255, 0, 0, 16, 16, 16};
+        uint8_t bgrRed[6] = {0, 0, 255, 16, 16, 16};
+        uint8_t gainRed[2] = {255, 0};
+        float linRed[6] = {0};
+        uint8_t oldRed[6] = {0}, newRed[6] = {0};
+        bool ranOld = ApplyGainMap(rgbRed, 2, 1, gainRed, 2, 1, m, 1.0, linRed);
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linRed, 2, 1, (size_t)2 * 3, oldRed, (size_t)2 * 3);
+        }
+        bool ranNew = ApplyGainMapToBgr(bgrRed, 2, 1, (size_t)2 * 3,
+                                        gainRed, 2, 1, m, 1.0, newRed, (size_t)2 * 3);
+        Check(ranOld && ranNew, "fused saturated-red case runs");
+        // BGR order: red pixel is (B=0, G=0, R=255).
+        Check(ranOld && oldRed[0] == 0 && oldRed[1] == 0 && oldRed[2] == 255,
+              "old path saturated red -> (255,0,0)");
+        Check(ranNew && newRed[0] == oldRed[0] && newRed[1] == oldRed[1] && newRed[2] == oldRed[2],
+              "fused saturated red matches old path (not 142)");
+    }
+    // Bad inputs -> false (BGR variant; BGRA shares the core).
+    {
+        Metadata m;
+        m.gainMapMin = 0.0; m.gainMapMax = 1.0; m.gamma = 1.0; m.valid = true;
+        uint8_t base[3] = {128, 128, 128};
+        uint8_t gainB[1] = {255};
+        uint8_t out[3] = {0};
+        Check(!ApplyGainMapToBgr(nullptr, 1, 1, 3, gainB, 1, 1, m, 1.0, out, 3),
+              "fused BGR null base rejected");
+        Check(!ApplyGainMapToBgr(base, 1, 1, 3, nullptr, 1, 1, m, 1.0, out, 3),
+              "fused BGR null gain rejected");
+        Check(!ApplyGainMapToBgr(base, 1, 1, 3, gainB, 1, 1, m, 1.0, nullptr, 3),
+              "fused BGR null output rejected");
+        Check(!ApplyGainMapToBgr(base, 0, 1, 3, gainB, 1, 1, m, 1.0, out, 3),
+              "fused BGR zero width rejected");
+        Check(!ApplyGainMapToBgr(base, 1, 1, 2, gainB, 1, 1, m, 1.0, out, 3),
+              "fused BGR narrow base stride rejected");
+        Check(!ApplyGainMapToBgr(base, 1, 1, 3, gainB, 1, 1, m, 1.0, out, 2),
+              "fused BGR narrow out stride rejected");
+        Metadata bad = m; bad.valid = false;
+        Check(!ApplyGainMapToBgr(base, 1, 1, 3, gainB, 1, 1, bad, 1.0, out, 3),
+              "fused BGR invalid metadata rejected");
+        Check(!ApplyGainMapToBgr(base, 1, 1, 3, gainB, 1, 1, m, std::nan(""), out, 3),
+              "fused BGR NaN weightFactor rejected");
+    }
+}
+
 int main() {
     TestParseIsoReal();
     TestParseIsoNegative();
@@ -1726,6 +1946,7 @@ int main() {
     TestApplyGainMap();
     TestApplyGainMapRealMeta();
     TestApplyGainMapLutExact();
+    TestFusedGainMapExact();
     std::printf("gainmap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

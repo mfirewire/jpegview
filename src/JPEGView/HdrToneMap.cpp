@@ -73,7 +73,6 @@ const double kP3DciToSrgb[3][3] = {
 const double kRec2020Luma[3] = {0.2627, 0.6780, 0.0593};
 const double kP3Luma[3] = {0.2290, 0.6917, 0.0793};
 const double kP3DciLuma[3] = {0.2095, 0.7216, 0.0689};
-const double kSrgbLuma[3] = {0.2126, 0.7152, 0.0722};
 
 const double (*GamutInverse(Primaries primaries))[3] {
     switch (primaries) {
@@ -122,6 +121,12 @@ void HlgOotfForward(double sceneR, double sceneG, double sceneB, const double lu
     *outB = sceneB * scale;
 }
 
+}  // namespace
+
+// Gamut mapping and byte conversion, moved out of the anonymous
+// namespace so the gain-map fused path (GainMap.cpp) can use them
+// (see HdrToneMap.h). They still see the anonymous-namespace
+// helpers (Clamp01) because those are visible in this file.
 // Gamut mapping: if the linear sRGB colour is out of [0,1]^3, desaturate
 // it toward its luminance (grey) until it is in gamut. This preserves
 // hue and luminance and never hard-clips a single channel (which would
@@ -164,8 +169,6 @@ uint8_t ToByte(double srgb01) {
     if (v > 255.0) return 255;
     return (uint8_t)(int)v;
 }
-
-}  // namespace
 
 Transfer TransferFromCode(int code) {
     switch (code) {
@@ -252,9 +255,10 @@ Bt2390Params Bt2390MakeParams(double peakNits) {
 
 // Inner BT.2390 EETF with precomputed parameters (P2-C3 hoisting).
 // Bit-identical to Bt2390EetfPq(signal, peakNits) when
-// params == Bt2390MakeParams(peakNits). Internal to this file; the
-// public Bt2390EetfPq is a thin wrapper over it.
-static double Bt2390EetfPqWithParams(double signal, const Bt2390Params& params) {
+// params == Bt2390MakeParams(peakNits). The public Bt2390EetfPq is
+// a thin wrapper over it; the function itself is public so the
+// gain-map fused path can reuse it with precomputed parameters.
+double Bt2390EetfPqWithParams(double signal, const Bt2390Params& params) {
     // Identity fast path: ks == 1 (peak <= SDR white, so maxLum == 1)
     // means the EETF is min(Clamp01(signal), pqLw). This is the same
     // fast path Bt2390EetfPq had, now pow-free (pqLw is precomputed).

@@ -4,11 +4,14 @@
 // See GainMap.h for the format notes and the reconstruction formula.
 
 #include "GainMap.h"
+#include "HdrToneMap.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <memory>
+#include <new>
 
 namespace gainmap {
 namespace {
@@ -165,6 +168,209 @@ double SrgbToLinearDouble(double c) {
         return c / 12.92;
     }
     return std::pow((c + 0.055) / 1.055, 2.4);
+}
+
+// Shared validation + table building for ApplyGainMap and the fused
+// entry points. Validates the metadata and weightFactor (same contract
+// as ApplyGainMap), clamps the gain range to [-16, +16] stops
+// (P3-A2+P3-B3) and weightFactor to [0,1], and builds the two
+// 256-entry tables. Returns false on bad input (tables untouched).
+// The clamp comment from ApplyGainMap applies: a corrupt/hostile file
+// could carry gainMapMin/Max of +/-1e308; logBoost is a convex
+// combination of the two, so it would overflow to +/-Inf and boost =
+// 2^(logBoost) would be Inf (or 0). Real files carry logBoost <=
+// ~2.3, so this changes nothing on real files.
+bool BuildGainTables(const Metadata& meta, double weightFactor,
+                     double (&boostTable)[256], double (&srgbTable)[256]) {
+    if (!meta.valid) {
+        return false;
+    }
+    if (!(meta.gamma > 0.0) || !std::isfinite(meta.gamma) ||
+        !std::isfinite(meta.gainMapMin) || !std::isfinite(meta.gainMapMax) ||
+        !std::isfinite(meta.baseOffset) || !std::isfinite(meta.alternateOffset)) {
+        return false;
+    }
+    const double gainMapMin = std::min(16.0, std::max(-16.0, meta.gainMapMin));
+    const double gainMapMax = std::min(16.0, std::max(-16.0, meta.gainMapMax));
+    if (std::isnan(weightFactor)) {
+        return false;
+    }
+    if (weightFactor < 0.0) {
+        weightFactor = 0.0;
+    }
+    if (weightFactor > 1.0) {
+        weightFactor = 1.0;
+    }
+    // N1-A (perf): the per-pixel pow calls are replaced by two 256-entry
+    // tables, built once per call from the fixed per-image parameters.
+    // This is EXACT, not approximate: every input to both functions is
+    // a byte (gain byte, sRGB byte) plus parameters that are constant
+    // for the whole image, so each table entry is the bit-identical
+    // double the direct computation would produce for that byte.
+    //   boostTable[g]  = 2^(logBoost(g) * weightFactor),
+    //     logBoost(g)  = gainMapMin*(1-g^(1/gamma)) + gainMapMax*g^(1/gamma)
+    //   srgbTable[v]   = SrgbToLinearDouble(v / 255)
+    // Cost: 757 pow calls per image instead of up to 5 per pixel
+    // (~61M at 4032x3024): 512 for the boost table (2 per entry) plus
+    // 245 for the sRGB table (the 11 darkest bytes take the linear
+    // branch of SrgbToLinearDouble, which calls no pow).
+    const double invGamma = 1.0 / meta.gamma;
+    for (int b = 0; b < 256; ++b) {
+        double g = static_cast<double>(b) / 255.0;
+        double logRecovery = std::pow(g, invGamma);
+        double logBoost =
+            gainMapMin * (1.0 - logRecovery) + gainMapMax * logRecovery;
+        boostTable[b] = std::pow(2.0, logBoost * weightFactor);
+    }
+    for (int v = 0; v < 256; ++v) {
+        srgbTable[v] = SrgbToLinearDouble(static_cast<double>(v) / 255.0);
+    }
+    return true;
+}
+
+// Content peak in scene-linear units from byte base + upsampled gain,
+// replicating HdrToneMap::ComputePeakLinear on the float buffer
+// ApplyGainMap would produce: per channel, hdr = (float)((sdr +
+// baseOffset) * boost - alternateOffset), negatives/NaN clamped to 0,
+// then the max sRGB luminance (kSrgbLuma). A non-finite peak falls
+// back to 1.0 (P2-C2), same as ComputePeakLinear. NOTE: the peak is
+// the max LUMINANCE, not the max channel — a saturated pixel can have
+// a channel above the peak. `base` is BGR (bytesPerPixel 3) or BGRA
+// (bytesPerPixel 4); `gain` is the upsampled gain, width*height bytes.
+double PeakLinearFromBytes(const uint8_t* base, size_t baseStride,
+                           const uint8_t* gain, int width, int height,
+                           const double (&srgbTable)[256],
+                           const double (&boostTable)[256],
+                           const Metadata& meta, int bytesPerPixel) {
+    double peak = 0.0;
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* baseRow = base + (size_t)y * baseStride;
+        const uint8_t* gainRow = gain + (size_t)y * (size_t)width;
+        for (int x = 0; x < width; ++x) {
+            const uint8_t* bp = baseRow + (size_t)x * (size_t)bytesPerPixel;
+            double boost = boostTable[gainRow[x]];
+            double r = (double)(float)((srgbTable[bp[2]] + meta.baseOffset) * boost - meta.alternateOffset);
+            double g = (double)(float)((srgbTable[bp[1]] + meta.baseOffset) * boost - meta.alternateOffset);
+            double b = (double)(float)((srgbTable[bp[0]] + meta.baseOffset) * boost - meta.alternateOffset);
+            if (!(r >= 0.0)) r = 0.0;
+            if (!(g >= 0.0)) g = 0.0;
+            if (!(b >= 0.0)) b = 0.0;
+            double yLum = r * HdrToneMap::kSrgbLuma[0] + g * HdrToneMap::kSrgbLuma[1] +
+                          b * HdrToneMap::kSrgbLuma[2];
+            if (yLum > peak) peak = yLum;
+        }
+    }
+    if (!std::isfinite(peak)) return 1.0;
+    return peak;
+}
+
+// Core of ApplyGainMapToBgr/ToBgra: gain-map apply + tone map fused
+// through a 256x256 table (variant B). `base`/`out` are BGR
+// (bytesPerPixel 3) or BGRA (bytesPerPixel 4), JPEGView order; the
+// BGRA variant copies the base alpha byte to the output. The table
+// holds, per (gain byte, base byte), the display-linear double the
+// old per-pixel code feeds GamutMap — built from the same functions,
+// in the same order (PqNitsToSignal -> Bt2390EetfPqWithParams ->
+// PqSignalToNits -> /203) — so the fused loop is bit-identical to
+// ApplyGainMap + ConvertLinearImage(/ToBgra). There is deliberately
+// NO fast-path branch in the table build: the old code skips the PQ
+// round-trip only when the content peak is <= 1 AND every channel of
+// the pixel is <= 1, and a pixel with a channel above 1 in a peak<=1
+// image takes the slow path, where the EETF (ks == 1) clamps that
+// channel to exactly 1.0. An image-level identity table would feed
+// 2.0 to GamutMap for such a pixel and render (255,142,142) instead
+// of (255,0,0). The chain table reproduces the slow path for those
+// channels; for sub-1.0 channels it differs from the identity only
+// by a double pow round-trip (~1e-16), covered by the byte-exact test.
+bool FusedApply(const uint8_t* base, int width, int height, size_t baseStride,
+                const uint8_t* gainMap, int gainW, int gainH,
+                const Metadata& meta, double weightFactor,
+                uint8_t* out, size_t outStride, int bytesPerPixel) {
+    if (base == nullptr || gainMap == nullptr || out == nullptr) {
+        return false;
+    }
+    if (width <= 0 || height <= 0 || gainW <= 0 || gainH <= 0) {
+        return false;
+    }
+    if (bytesPerPixel != 3 && bytesPerPixel != 4) {
+        return false;
+    }
+    // Stride guards (P2-C5/T3, same shape as ConvertLinearImage):
+    // a row must hold width*bytesPerPixel, and y*stride + rowBytes
+    // must not wrap size_t for y < height.
+    const size_t rowBytes = (size_t)width * (size_t)bytesPerPixel;
+    if (baseStride < rowBytes || outStride < rowBytes) {
+        return false;
+    }
+    if (baseStride > ((size_t)-1 - rowBytes) / (size_t)height ||
+        outStride > ((size_t)-1 - rowBytes) / (size_t)height) {
+        return false;
+    }
+    double boostTable[256], srgbTable[256];
+    if (!BuildGainTables(meta, weightFactor, boostTable, srgbTable)) {
+        return false;
+    }
+    // Upsample the gain map to base resolution when it differs.
+    const uint8_t* gain = gainMap;
+    std::vector<uint8_t> upsampled;
+    if (gainW != width || gainH != height) {
+        upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+        BilinearUpsampleGray(gainMap, gainW, gainH, upsampled.data(), width, height);
+        gain = upsampled.data();
+    }
+    // Content peak (max luminance), replicating ComputePeakLinear.
+    double peakLinear = PeakLinearFromBytes(base, baseStride, gain, width, height,
+                                            srgbTable, boostTable, meta, bytesPerPixel);
+    // The 256x256 table, stored as double (512 KB, heap — too large
+    // for the stack). See GainMap.h for why double, not float.
+    std::unique_ptr<double[]> table(new(std::nothrow) double[256 * 256]);
+    if (table == nullptr) {
+        return false;
+    }
+    // EETF parameters, built once (P2-C3). PeakNitsFromLinear is
+    // replicated here (it is static in HdrToneMap.cpp): peak nits =
+    // peakLinear * kSdrWhiteNits, clamped to >= SDR white.
+    double peakNits = peakLinear * HdrToneMap::kSdrWhiteNits;
+    if (!(peakNits > 0.0)) peakNits = HdrToneMap::kSdrWhiteNits;
+    HdrToneMap::Bt2390Params params = HdrToneMap::Bt2390MakeParams(peakNits);
+    for (int g = 0; g < 256; ++g) {
+        double boost = boostTable[g];
+        for (int b = 0; b < 256; ++b) {
+            // Same per-channel value ApplyGainMap stores as a float.
+            float hdrF = (float)((srgbTable[b] + meta.baseOffset) * boost - meta.alternateOffset);
+            // Same chain ConvertLinearPixelWithParams runs per channel
+            // in the slow path: nits -> PQ signal -> EETF -> nits ->
+            // display-linear (SDR white = 1.0).
+            double sig = HdrToneMap::PqNitsToSignal((double)hdrF * HdrToneMap::kSdrWhiteNits);
+            double e = HdrToneMap::Bt2390EetfPqWithParams(sig, params);
+            table[(size_t)g * 256 + (size_t)b] =
+                HdrToneMap::PqSignalToNits(e) / HdrToneMap::kSdrWhiteNits;
+        }
+    }
+    // Main loop: table lookup -> negative/NaN clamp -> GamutMap ->
+    // exact SrgbOetf -> ToByte. No pow, no float linear buffer.
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* baseRow = base + (size_t)y * baseStride;
+        const uint8_t* gainRow = gain + (size_t)y * (size_t)width;
+        uint8_t* outRow = out + (size_t)y * outStride;
+        for (int x = 0; x < width; ++x) {
+            const uint8_t* bp = baseRow + (size_t)x * (size_t)bytesPerPixel;
+            const size_t t = (size_t)gainRow[x] * 256;
+            double r = table[t + bp[2]];
+            double g = table[t + bp[1]];
+            double b = table[t + bp[0]];
+            if (!(r >= 0.0)) r = 0.0;
+            if (!(g >= 0.0)) g = 0.0;
+            if (!(b >= 0.0)) b = 0.0;
+            HdrToneMap::GamutMap(&r, &g, &b);
+            uint8_t* op = outRow + (size_t)x * (size_t)bytesPerPixel;
+            op[0] = HdrToneMap::ToByte(HdrToneMap::SrgbOetf(b));
+            op[1] = HdrToneMap::ToByte(HdrToneMap::SrgbOetf(g));
+            op[2] = HdrToneMap::ToByte(HdrToneMap::SrgbOetf(r));
+            if (bytesPerPixel == 4) op[3] = bp[3];
+        }
+    }
+    return true;
 }
 
 // Parse the first number (or "num/den" rational) in `s` in the range
@@ -660,35 +866,9 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
     if (width <= 0 || height <= 0 || gainW <= 0 || gainH <= 0) {
         return false;
     }
-    if (!meta.valid) {
+    double boostTable[256], srgbTable[256];
+    if (!BuildGainTables(meta, weightFactor, boostTable, srgbTable)) {
         return false;
-    }
-    if (!(meta.gamma > 0.0) || !std::isfinite(meta.gamma) ||
-        !std::isfinite(meta.gainMapMin) || !std::isfinite(meta.gainMapMax) ||
-        !std::isfinite(meta.baseOffset) || !std::isfinite(meta.alternateOffset)) {
-        return false;
-    }
-
-    // P3-A2+P3-B3: clamp the metadata gain range to [-16, +16] stops.
-    // A corrupt/hostile file could carry gainMapMin/Max of +/-1e308;
-    // logBoost is a convex combination of the two, so it would overflow
-    // to +/-Inf and boost = 2^(logBoost) would be Inf (or 0), making
-    // every output pixel Inf/NaN. Real files carry logBoost <= ~2.3
-    // (two real iPhone HEICs), so this changes nothing on real files.
-    // The clamp bounds `boost` only, not the final hdr value: a huge
-    // finite offset can still push hdr to +/-Inf, which
-    // ConvertLinearPixel maps to white (C1+C2) — worst case one white
-    // pixel, no crash.
-    const double gainMapMin = std::min(16.0, std::max(-16.0, meta.gainMapMin));
-    const double gainMapMax = std::min(16.0, std::max(-16.0, meta.gainMapMax));
-    if (std::isnan(weightFactor)) {
-        return false;
-    }
-    if (weightFactor < 0.0) {
-        weightFactor = 0.0;
-    }
-    if (weightFactor > 1.0) {
-        weightFactor = 1.0;
     }
 
     // Upsample the gain map to base resolution when it differs.
@@ -698,34 +878,6 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
         upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
         BilinearUpsampleGray(gainMap, gainW, gainH, upsampled.data(), width, height);
         gain = upsampled.data();
-    }
-
-    const double invGamma = 1.0 / meta.gamma;
-
-    // N1-A (perf): the per-pixel pow calls are replaced by two 256-entry
-    // tables, built once per call from the fixed per-image parameters.
-    // This is EXACT, not approximate: every input to both functions is
-    // a byte (gain byte, sRGB byte) plus parameters that are constant
-    // for the whole image, so each table entry is the bit-identical
-    // double the direct computation would produce for that byte.
-    //   boostTable[g]  = 2^(logBoost(g) * weightFactor),
-    //     logBoost(g)  = gainMapMin*(1-g^(1/gamma)) + gainMapMax*g^(1/gamma)
-    //   srgbTable[v]   = SrgbToLinearDouble(v / 255)
-    // Cost: 757 pow calls per image instead of up to 5 per pixel
-    // (~61M at 4032x3024): 512 for the boost table (2 per entry) plus
-    // 245 for the sRGB table (the 11 darkest bytes take the linear
-    // branch of SrgbToLinearDouble, which calls no pow).
-    double boostTable[256];
-    for (int b = 0; b < 256; ++b) {
-        double g = static_cast<double>(b) / 255.0;
-        double logRecovery = std::pow(g, invGamma);
-        double logBoost =
-            gainMapMin * (1.0 - logRecovery) + gainMapMax * logRecovery;
-        boostTable[b] = std::pow(2.0, logBoost * weightFactor);
-    }
-    double srgbTable[256];
-    for (int v = 0; v < 256; ++v) {
-        srgbTable[v] = SrgbToLinearDouble(static_cast<double>(v) / 255.0);
     }
 
     const size_t pixelCount =
@@ -741,6 +893,22 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
         }
     }
     return true;
+}
+
+bool ApplyGainMapToBgr(const uint8_t* baseBgr, int width, int height, size_t baseStride,
+                       const uint8_t* gainMap, int gainW, int gainH,
+                       const Metadata& meta, double weightFactor,
+                       uint8_t* outBgr, size_t outStride) {
+    return FusedApply(baseBgr, width, height, baseStride, gainMap, gainW, gainH,
+                      meta, weightFactor, outBgr, outStride, 3);
+}
+
+bool ApplyGainMapToBgra(const uint8_t* baseBgra, int width, int height, size_t baseStride,
+                        const uint8_t* gainMap, int gainW, int gainH,
+                        const Metadata& meta, double weightFactor,
+                        uint8_t* outBgra, size_t outStride) {
+    return FusedApply(baseBgra, width, height, baseStride, gainMap, gainW, gainH,
+                      meta, weightFactor, outBgra, outStride, 4);
 }
 
 void BilinearUpsampleGray(const uint8_t* src, int srcW, int srcH,
