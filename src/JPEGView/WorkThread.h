@@ -40,9 +40,6 @@ public:
 	// was still running (the caller must then not touch the thread's resources).
 	bool Terminate();
 
-	// Aborts the thread immediately. Leaves an undefined state - only call on process termination.
-	void Abort();
-
 	// Waits for hEvent while pumping window messages, so the UI does not
 	// freeze when a decode is very slow. Only repaint messages (WM_PAINT)
 	// are dispatched: keys, timers, commands and close messages stay queued

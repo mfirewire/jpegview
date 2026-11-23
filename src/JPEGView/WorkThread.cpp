@@ -118,20 +118,6 @@ bool CWorkThread::Terminate() {
 	return m_bStopped;
 }
 
-void CWorkThread::Abort() {
-	try {
-		if (m_hThread != NULL) {
-			::SetEvent(m_wakeUp);
-			if (WAIT_TIMEOUT == ::WaitForSingleObject(m_hThread, 100)) {
-				::TerminateThread(m_hThread, 1);
-				::WaitForSingleObject(m_hThread, 100);
-			}
-			m_hThread = NULL;
-		}
-	} catch (...) {
-		// do not crash
-	}
-}
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 // Private
