@@ -6,6 +6,7 @@
 #include "NLS.h"
 #include <math.h>
 #include <shlobj.h>
+#include <mutex>
 
 const TCHAR PARAM_DB_NAME[] = _T("ParamDB.db");
 const uint32 MAGIC_HEADER_1 = 0xe8d2862a;
@@ -362,16 +363,18 @@ bool CParameterDBEntry::HasZoomOffsetStored() const {
 
 CParameterDB* CParameterDB::sm_instance = NULL;
 
-// P0-3: lock-free lazy init. This is only safe because the first call is
-// made on the UI thread, before any worker exists: CMainDlg::OnInitDialog
-// constructs the singleton before it starts the directory watcher, the
-// processing pool and the two image load threads. Without that ordering two
-// load threads could both see NULL, construct two databases (one leaks) and
-// race on ParamDB.db. Do not call this from a worker during startup.
+// P0-3: lazy init guarded by std::call_once (audit Bug D). The old
+// lock-free init was only safe because the first call was made on
+// the UI thread, before any worker existed (CMainDlg::OnInitDialog
+// constructs the singleton before it starts the directory watcher,
+// the processing pool and the two image load threads); two threads
+// racing the first call could both see NULL, construct two
+// databases (one leaks) and race on ParamDB.db. call_once makes
+// the init thread-safe regardless of call order; the instance is
+// still intentionally leaked (no reset hook exists).
 CParameterDB& CParameterDB::This() {
-	if (sm_instance == NULL) {
-		sm_instance = new CParameterDB();
-	}
+	static std::once_flag flag;
+	std::call_once(flag, []() { sm_instance = new CParameterDB(); });
 	return *sm_instance;
 }
 

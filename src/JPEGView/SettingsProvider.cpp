@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <shlobj.h>
 #include <algorithm>
+#include <mutex>
 
 static const TCHAR* DEFAULT_INI_FILE_NAME = _T("JPEGView.ini");
 static const TCHAR* SECTION_NAME = _T("JPEGView");
@@ -28,9 +29,13 @@ static CString ParseCommandLineForIniName(LPCTSTR sCommandLine) {
 }
 
 CSettingsProvider& CSettingsProvider::This() {
-	if (sm_instance == NULL) {
-		sm_instance = new CSettingsProvider();
-	}
+	// P3 defense-in-depth (audit Bug D): the lazy init was
+	// unchecked, so two threads racing the first call could
+	// construct two instances (one leaks). std::call_once
+	// makes the init thread-safe; the instance is still
+	// intentionally leaked (no reset hook exists).
+	static std::once_flag flag;
+	std::call_once(flag, []() { sm_instance = new CSettingsProvider(); });
 	return *sm_instance;
 }
 
