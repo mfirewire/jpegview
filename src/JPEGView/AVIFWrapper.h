@@ -4,6 +4,11 @@
 #include <vector>
 #include "avif/avif.h"
 
+// Gain-map retention (HDR toggle): the extracted gain map travels via
+// an out-parameter on ReadImage; forward declaration avoids pulling
+// GainMap.h into this header.
+namespace gainmap { struct ExtractedGainMap; }
+
 class AvifReader
 {
 public:
@@ -19,7 +24,8 @@ public:
 		bool& outOfMemory, // set to true when no memory to read image
 		bool& isSizeLimitExceeded, // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 		const void* buffer, // memory address containing jxl compressed data.
-		int sizebytes); // size of jxl compressed data
+		int sizebytes, // size of jxl compressed data
+		gainmap::ExtractedGainMap* pGainOut = NULL); // optional: receives the extracted (not applied) gain map; NULL skips extraction.
 
 	// R-01: instance method now - the cache below is one per load thread
 	// (owned by CImageLoadThread), not a process-wide static.

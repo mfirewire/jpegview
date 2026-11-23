@@ -109,11 +109,12 @@ static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, in
 // headroom and bakes in its own tone mapping, while JPEGView wants
 // the full reconstruction (weight 1.0) plus its own BT.2390 path.
 //
-// TryApplyAvifGainMap runs only on the SDR path (a gain-map AVIF is
-// SDR base + gain map, never PQ/HLG) and returns a NEW 8-bit BGRA
-// buffer, or NULL when there is no gain map or anything fails — the
-// caller keeps the base BGRA unchanged in that case. A broken gain
-// map must never fail the whole load.
+// ExtractAvifGainMap runs only on the SDR path (a gain-map AVIF is
+// SDR base + gain map, never PQ/HLG) and fills the extracted gain
+// map (grayscale + metadata) without applying it, or returns false
+// when there is no gain map or anything fails -- the caller keeps
+// the base BGRA unchanged in that case. A broken gain map must
+// never fail the whole load.
 
 // avifSignedFraction/avifUnsignedFraction -> double. Returns false
 // when the denominator is 0 or the value is non-finite.
@@ -222,46 +223,35 @@ static bool DecodeAvifGainMapGray(const avifGainMap* gainMap, int baseWidth, int
 	return true;
 }
 
-// Apply the gain map of an SDR AVIF base image, if it has one.
-// `baseBgra` is the already-decoded 8-bit BGRA base (width x height,
-// after the ICC transform, so it is sRGB — the shared helper's input
-// format). Returns a NEW 8-bit BGRA buffer with the gain map applied
-// and tone-mapped via HdrToneMap::ConvertLinearImage, or NULL when
-// there is no gain map or anything fails — the caller keeps `baseBgra`
-// unchanged in that case.
-static unsigned char* TryApplyAvifGainMap(const avifImage* image,
-	const unsigned char* baseBgra, int width, int height)
+// Extract the gain map of an SDR AVIF base image, if it has one.
+// Fills `outGain` (grayscale + metadata) WITHOUT applying it; the
+// load thread attaches it to the image and applies it on demand, or
+// at load when GainMapDefault() is HDR. Returns false when there is
+// no gain map or anything fails -- the caller keeps the SDR base
+// unchanged in that case. A broken gain map must never fail the load.
+// The fused apply moved out of this function; ApplyGainMapToBgra is
+// now called from CJPEGImage::ComputeHdrBuffer.
+static bool ExtractAvifGainMap(const avifImage* image,
+	int width, int height, gainmap::ExtractedGainMap& outGain)
 {
-	if (image == NULL || baseBgra == NULL || width <= 0 || height <= 0)
-		return NULL;
+	if (image == NULL || width <= 0 || height <= 0)
+		return false;
 	const avifGainMap* gainMap = image->gainMap;
 	if (gainMap == NULL)
-		return NULL;
+		return false;
 	gainmap::Metadata meta;
 	if (!AvifGainMapToMetadata(gainMap, meta))
-		return NULL;
+		return false;
 	std::vector<uint8_t> gainGray;
 	int gainW = 0, gainH = 0;
 	if (!DecodeAvifGainMapGray(gainMap, width, height, gainGray, gainW, gainH))
-		return NULL;
-	// Fused gain-map apply + tone map (variant B): the 8-bit BGRA
-	// base goes straight into gainmap::ApplyGainMapToBgra — no RGB
-	// temp, no float linear buffer. The fused function copies the
-	// base alpha (P2-B4: the old repack forced alpha opaque, so a
-	// transparent gain-map pixel rendered as a black block after
-	// the background blend). outBgra is a unique_ptr (released
-	// only on success) so a bad_alloc unwind from the fused call
-	// cannot leak it.
-	size_t bgraSize = 0;
-	if (!IsImageBufferSizeOk((size_t)width * 4, (size_t)height, &bgraSize))
-		return NULL;
-	std::unique_ptr<unsigned char[]> outBgra(new(std::nothrow) unsigned char[bgraSize]);
-	if (outBgra == NULL)
-		return NULL;
-	if (!gainmap::ApplyGainMapToBgra(baseBgra, width, height, (size_t)width * 4,
-		gainGray.data(), gainW, gainH, meta, 1.0, outBgra.get(), (size_t)width * 4))
-		return NULL;
-	return outBgra.release();
+		return false;
+	outGain.gray = std::move(gainGray);
+	outGain.width = gainW;
+	outGain.height = gainH;
+	outGain.meta = meta;
+	outGain.valid = true;
+	return true;
 }
 
 void* AvifReader::ReadImage(int& width,
@@ -275,7 +265,8 @@ void* AvifReader::ReadImage(int& width,
 	bool& outOfMemory,
 	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
-	int sizebytes)
+	int sizebytes,
+	gainmap::ExtractedGainMap* pGainOut)
 {
 	outOfMemory = false;
 	width = height = 0;
@@ -519,25 +510,25 @@ void* AvifReader::ReadImage(int& width,
 			cache.transform = ICCProfileTransform::CreateTransform(icc.data, icc.size, ICCProfileTransform::FORMAT_BGRA);
 		ICCProfileTransform::DoTransform(cache.transform, cache.rgb.pixels, cache.rgb.pixels, width, height);
 	}
-	if (!isHdr && flags == AVIF_TRANSFORM_NONE) {
+	if (!isHdr && flags == AVIF_TRANSFORM_NONE && pGainOut != NULL) {
 		// Gain-map (Option D, Phase 4): an SDR AVIF with a gain map is
-		// an HDR photo — reconstruct the HDR image and tone-map it.
-		// TryApplyAvifGainMap returns NULL when there is no gain map
-		// or anything fails; the SDR base is kept unchanged then.
+		// an HDR photo -- extract the gain map (grayscale + metadata,
+		// NOT applied); the load thread attaches it to the image and
+		// applies it on demand, or at load when GainMapDefault() is
+		// HDR. ExtractAvifGainMap returns false when there is no gain
+		// map or anything fails; the SDR base is kept unchanged then.
 		// It runs after the ICC transform (the base it reconstructs
 		// from is sRGB, like the HEIF path).
-		// P2-A1: gain-map work allocates (gainGray.assign, three
-		// vectors, ApplyGainMap's upsampled resize). A bad_alloc here
-		// must not fail the whole load -- fall back to SDR.
-		unsigned char* gainMapped = NULL;
+		// P2-A1: gain-map work allocates (gainGray.assign). A
+		// bad_alloc here must not fail the whole load -- fall back
+		// to SDR.
 		try {
-			gainMapped = TryApplyAvifGainMap(cache.decoder->image, cache.rgb.pixels, width, height);
+			gainmap::ExtractedGainMap gain;
+			if (ExtractAvifGainMap(cache.decoder->image, width, height, gain)) {
+				*pGainOut = std::move(gain);
+			}
 		} catch (...) {
 			// Keep the SDR base image; the gain map is optional.
-		}
-		if (gainMapped != NULL) {
-			delete[] cache.rgb.pixels;
-			cache.rgb.pixels = gainMapped;
 		}
 	}
 
