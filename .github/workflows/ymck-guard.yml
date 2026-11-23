@@ -207,3 +207,23 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView -I src/JPEGView/libpng-apng/include tests/psd_hdr_test.cpp src/JPEGView/PsdHdr.cpp src/JPEGView/PsdIcc.cpp src/JPEGView/HdrToneMap.cpp -lz -llcms2 -o /tmp/psd_hdr_test
           /tmp/psd_hdr_test
+
+  jxl-frame-header-test:
+    name: JXL frame-header API semantics test (S1)
+    # Pinned to ubuntu-24.04 on purpose: the harness links the system
+    # libjxl 0.7 (-l:libjxl.so.0.7), which is what 24.04 ships and what
+    # the harness was verified against locally (13/0). ubuntu-latest is
+    # now 26.04, whose image does not install libjxl at all, so the
+    # same link line would fail there. The exercised symbols are
+    # ABI-stable across 0.7/0.11/0.13; only the link target differs.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: JXL frame-header harness test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -DJXL_STATIC_DEFINE -I src/JPEGView/libjxl/include tests/jxl_frame_header_test.cpp -l:libjxl.so.0.7 -o /tmp/jxl_frame_header_test
+          /tmp/jxl_frame_header_test
