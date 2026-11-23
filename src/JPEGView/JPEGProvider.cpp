@@ -263,6 +263,40 @@ bool CJPEGProvider::ClearRequest(CJPEGImage* pImage, bool releaseLockedFile) {
 	return bErased;
 }
 
+int CJPEGProvider::StartBackgroundRequest(LPCTSTR strFileName, int nFrameIndex, const CProcessParams& processParams, ERawLoadMode eRawLoadMode) {
+	// Reuse a matching request (same file, frame and requested mode),
+	// whether it is ready or still in flight -- starting a second load
+	// for the same representation would waste the expensive RAW decode.
+	CImageRequest* pRequest = FindRequest(strFileName, nFrameIndex, eRawLoadMode);
+	if (pRequest != NULL) {
+		return pRequest->Handle;
+	}
+	pRequest = StartNewRequest(strFileName, nFrameIndex, processParams, eRawLoadMode);
+	if (pRequest == NULL) {
+		// A2-9: the request object (or its load request) could not be
+		// allocated.
+		return -1;
+	}
+	return pRequest->Handle;
+}
+
+CJPEGImage* CJPEGProvider::GetImageByHandle(int nHandle) {
+	std::list<CImageRequest*>::iterator iter;
+	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {
+		if ((*iter)->Handle == nHandle) {
+			if ((*iter)->Ready && !(*iter)->Deleted && (*iter)->Image != NULL) {
+				// Like RequestImage: mark the request in use and update its
+				// access time, so the image is not deleted while displayed.
+				(*iter)->InUse = true;
+				(*iter)->AccessTimeStamp = m_nCurrentTimeStamp++;
+				return (*iter)->Image;
+			}
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
 void CJPEGProvider::OnImageLoadCompleted(int nHandle) {
 	std::list<CImageRequest*>::iterator iter;
 	for (iter = m_requestList.begin( ); iter != m_requestList.end( ); iter++ ) {

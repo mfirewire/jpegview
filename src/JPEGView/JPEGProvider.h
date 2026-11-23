@@ -47,6 +47,23 @@ public:
 	CJPEGImage* RequestImage(CFileList* pFileList, EReadAheadDirection eDirection, LPCTSTR strFileName, int nFrameIndex,
 		const CProcessParams & processParams, bool& bOutOfMemory, bool& bExceptionError, ERawLoadMode eRawLoadMode = RawLoad_Configured, bool* pbSizeLimitExceeded = NULL);
 
+	// Starts (or reuses) a background load for the given file/frame/mode and
+	// returns the request handle, or -1 if the request could not be allocated
+	// (A2-9). If a matching request (same file, frame and requested mode) is
+	// already present or in flight, its handle is returned without starting
+	// a new load. Used by the RAW thumbnail/full-size toggle, which must not
+	// block the UI on the expensive production: the caller swaps to the new
+	// representation when the request completes (or immediately, when the
+	// accessor below already returns an image).
+	int StartBackgroundRequest(LPCTSTR strFileName, int nFrameIndex, const CProcessParams& processParams, ERawLoadMode eRawLoadMode);
+
+	// Returns the loaded image for a background request handle, or NULL when
+	// the handle is unknown, the load failed, the request was deleted, or
+	// the load is not ready yet. On success the request is marked InUse and
+	// its access time is updated (like RequestImage), so the caller must
+	// only call it when it intends to swap to the image.
+	CJPEGImage* GetImageByHandle(int nHandle);
+
 	// Notifies that the specified image is no longer used and its memory can be freed.
 	// The CJPEGProvider class may decide to keep the image cached.
 	// In all cases, accessing the image after having called this method may causes access violation.
