@@ -3,6 +3,11 @@
 
 enum TJSAMP;
 
+// Gain-map retention (HDR toggle): the extracted gain map travels via
+// an out-parameter on ReadImage; forward declaration avoids pulling
+// GainMap.h into this header.
+namespace gainmap { struct ExtractedGainMap; }
+
 // F-H09 fix: the Compress default argument (TJSAMP_420) and callers
 // (SaveImage.cpp) need the enumerators, not just the forward
 // declaration above, so include the TurboJPEG header here.
@@ -19,7 +24,8 @@ public:
 						 bool &outOfMemory, // set to true when no memory to read image
 						 bool &isSizeLimitExceeded, // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 						 const void *buffer, // memory address containing jpeg compressed data.
-						 int sizebytes); // size of jpeg compressed data.
+						 int sizebytes, // size of jpeg compressed data.
+						 gainmap::ExtractedGainMap* pGainOut = NULL); // optional: receives the extracted (not applied) gain map; NULL skips extraction.
 
 	// F-M26: read only the JPEG header to obtain the real chroma
 	// subsampling. GDI+ does not expose it, so the GDI+ paths use this to

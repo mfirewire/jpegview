@@ -12,18 +12,19 @@
 
 namespace {
 
-// UltraHDR gain-map reconstruction (ISO 21496-1, Option D Phase 2).
-// `pBaseBgr` is the already-decoded 3-channel base image (TJPAD
-// stride). On success returns a NEW tone-mapped BGR buffer with the
-// same stride and deletes `pBaseBgr`; the caller must use the
-// returned buffer instead. On ANY failure returns NULL and leaves
-// `pBaseBgr` untouched, so the caller keeps the SDR base: a broken
-// gain map must never fail the load.
-unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebytes,
-	unsigned char* pBaseBgr, int width, int height) {
+// UltraHDR gain-map extraction (ISO 21496-1, Option D Phase 2).
+// Extracts the gain map (grayscale + metadata) WITHOUT applying it:
+// the load thread attaches it to the image (SetRetainedGainMap) and
+// applies it on demand, or at load when GainMapDefault() is HDR. On
+// ANY failure returns false and leaves `outGain` untouched (valid ==
+// false), so the caller keeps the SDR base: a broken gain map must
+// never fail the load. The fused apply moved out of this function;
+// ApplyGainMapToBgr is now called from CJPEGImage::ComputeHdrBuffer.
+static bool ExtractUltraHdrGainMap(const unsigned char* jpegBuf, int sizebytes,
+	int width, int height, gainmap::ExtractedGainMap& outGain) {
 	size_t gainOffset = 0, gainSize = 0;
 	if (!gainmap::FindGainMapJpeg(jpegBuf, (size_t)sizebytes, gainOffset, gainSize)) {
-		return NULL;  // no MPF gain map: SDR path, untouched
+		return false;  // no MPF gain map: SDR path, untouched
 	}
 	const unsigned char* pGainJpeg = jpegBuf + gainOffset;
 
@@ -32,15 +33,14 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 	// with Cb/Cr != 128, so R != G != B.
 	tjhandle hGain = tj3Init(TJINIT_DECOMPRESS);
 	if (hGain == NULL) {
-		return NULL;
+		return false;
 	}
 	// G2: scope-guarded (F7): the temp buffers are freed
 	// automatically on every path, including a bad_alloc unwind
-	// from the fused call's upsampled.resize or the XMP std::string
-	// copies. pOutBgr is a unique_ptr released only on success;
-	// pBaseBgr (caller-owned, deleted only on the success path)
-	// stays raw.
-	std::unique_ptr<unsigned char[]> pGainGray;
+	// from the XMP std::string copies. The gain gray buffer is a
+	// vector (moved into outGain on success) so no raw buffer
+	// escapes this function.
+	std::vector<uint8_t> gainGray;
 	int gainW = 0, gainH = 0;
 	if (tj3DecompressHeader(hGain, (unsigned char*)pGainJpeg, (int)gainSize) == 0) {
 		gainW = tj3Get(hGain, TJPARAM_JPEGWIDTH);
@@ -55,18 +55,22 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 			gainW <= MAX_IMAGE_DIMENSION && gainH <= MAX_IMAGE_DIMENSION &&
 			gainW <= width * 4 && gainH <= height * 4 &&
 			IsImageBufferSizeOk((size_t)gainW, (size_t)gainH, &gainBytes)) {
-			pGainGray.reset(new(std::nothrow) unsigned char[gainBytes]);
-			if (pGainGray != NULL) {
-				if (tj3Decompress8(hGain, (unsigned char*)pGainJpeg, (int)gainSize,
-						pGainGray.get(), gainW, TJPF_GRAY) != 0) {
-					pGainGray.reset();
-				}
+			try {
+				gainGray.resize(gainBytes);
+			} catch (...) {
+				tj3Destroy(hGain);
+				return false;
+			}
+			if (tj3Decompress8(hGain, (unsigned char*)pGainJpeg, (int)gainSize,
+					gainGray.data(), gainW, TJPF_GRAY) != 0) {
+				tj3Destroy(hGain);
+				return false;
 			}
 		}
 	}
 	tj3Destroy(hGain);
-	if (pGainGray == NULL) {
-		return NULL;
+	if (gainGray.empty()) {
+		return false;
 	}
 
 	// Metadata: ISO 21496-1 binary APP2 in the gain-map JPEG first,
@@ -102,33 +106,15 @@ unsigned char* TryApplyUltraHdrGainMap(const unsigned char* jpegBuf, int sizebyt
 		}
 	}
 	if (!bHaveMeta) {
-		return NULL;
+		return false;
 	}
 
-	// Fused gain-map apply + tone map (variant B): the 8-bit BGR base
-	// goes straight into gainmap::ApplyGainMapToBgr — no RGB temp, no
-	// float linear buffer. Every allocation is size-checked; any
-	// failure returns NULL and the caller keeps the SDR base.
-	// pOutBgr is a unique_ptr (released only on success) so a
-	// bad_alloc unwind from the fused call cannot leak it.
-	const size_t baseStride = (size_t)TJPAD(width * 3);
-	const size_t outStride = baseStride;
-	size_t outBytes = 0;
-	if (!IsImageBufferSizeOk(outStride, (size_t)height, &outBytes)) {
-		return NULL;
-	}
-	std::unique_ptr<unsigned char[]> pOutBgr(new(std::nothrow) unsigned char[outBytes]);
-	if (pOutBgr == NULL) {
-		return NULL;
-	}
-	// Zero the row padding so no uninitialised bytes reach the DIB.
-	memset(pOutBgr.get(), 0, outBytes);
-	if (!gainmap::ApplyGainMapToBgr(pBaseBgr, width, height, baseStride,
-		pGainGray.get(), gainW, gainH, meta, 1.0, pOutBgr.get(), outStride)) {
-		return NULL;
-	}
-	delete[] pBaseBgr;
-	return pOutBgr.release();
+	outGain.gray = std::move(gainGray);
+	outGain.width = gainW;
+	outGain.height = gainH;
+	outGain.meta = meta;
+	outGain.valid = true;
+	return true;
 }
 
 }  // namespace
@@ -140,7 +126,8 @@ void * TurboJpeg::ReadImage(int &width,
 					   bool &outOfMemory,
 					   bool &isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 					   const void *buffer,
-					   int sizebytes)
+					   int sizebytes,
+					   gainmap::ExtractedGainMap* pGainOut)
 {
 	outOfMemory = false;
 	width = height = 0;
@@ -196,22 +183,25 @@ void * TurboJpeg::ReadImage(int &width,
 			}
 		}
 	// UltraHDR gain map (ISO 21496-1): if this JPEG carries an MPF
-	// gain-map image, reconstruct HDR and tone-map it; on any
-	// failure the SDR base is returned unchanged. CMYK/YCCK
-	// (4-channel) images never take this path.
-	if (pPixelData != NULL && !bCMYK) {
-		// P2-A1: gain-map work allocates (ApplyGainMap resizes the
-		// upsampled gain map; the XMP string is copied). A bad_alloc
-		// here must not fail the whole load -- fall back to SDR.
-		unsigned char* pGainMapped = NULL;
+	// gain-map image, extract it (grayscale + metadata, NOT applied);
+	// the load thread attaches it to the image and applies it on
+	// demand, or at load when GainMapDefault() is HDR. On any failure
+	// the SDR base is returned unchanged. CMYK/YCCK (4-channel)
+	// images never take this path. The extraction is skipped entirely
+	// when the caller does not want the gain map (pGainOut == NULL,
+	// e.g. thumbnail decodes).
+	if (pPixelData != NULL && !bCMYK && pGainOut != NULL) {
+		// P2-A1: gain-map work allocates (the gain gray vector, the
+		// XMP std::string copies). A bad_alloc here must not fail
+		// the whole load -- fall back to SDR.
 		try {
-			pGainMapped = TryApplyUltraHdrGainMap(
-				(const unsigned char*)buffer, sizebytes, pPixelData, width, height);
+			gainmap::ExtractedGainMap gain;
+			if (ExtractUltraHdrGainMap(
+					(const unsigned char*)buffer, sizebytes, width, height, gain)) {
+				*pGainOut = std::move(gain);
+			}
 		} catch (...) {
 			// Keep the SDR base image; the gain map is optional.
-		}
-		if (pGainMapped != NULL) {
-			pPixelData = pGainMapped;
 		}
 	}
 	}
