@@ -2063,6 +2063,221 @@ void TestFusedGainMapExact() {
     }
 }
 
+void TestRetainedGainMapExact() {
+    using namespace gainmap;
+    // The retained path (item 2/3): a format reader extracts the gain
+    // map once into an ExtractedGainMap (native-resolution gray +
+    // metadata) and the image applies it on demand through the fused
+    // entry points, reading the gray bytes and metadata out of the
+    // struct -- exactly what CJPEGImage::ComputeHdrBuffer does. The
+    // retained apply must be bit-identical to the immediate apply
+    // (ApplyGainMap + ConvertLinearImage[/ToBgra]) on the same inputs.
+    // Metadata shapes are the ones the readers actually produce:
+    //   * ISO: parsed from the real HLG APP2 payload (kIsoPayloadHlg)
+    //     -- gainMapMax ~0.1, tiny offsets;
+    //   * XMP Seq: parsed from the synthetic UltraHDR packet (kXmpSeq)
+    //     -- gainMapMax 0.1, alternateOffset 0.001, alternateHdrHeadroom
+    //     2.300448;
+    //   * Apple: parsed from the Apple packet (kXmpApple) -- gainMapMax
+    //     1.0, appleHeadroomFallback;
+    //   * AVIF-typical A/B: constructed directly with the values
+    //     AvifGainMapToMetadata would produce (AVIFWrapper.cpp): channel
+    //     0 of each per-channel rational array, unsigned-fraction
+    //     headrooms, useBaseColorSpace flag. AvifGainMapToMetadata
+    //     itself is NOT Linux-testable (it takes a libavif avifGainMap),
+    //     so only its output shape is constructed here; the boundary is
+    //     that mapping, verified by reading the wrapper. The headroom
+    //     fields and useBaseColorSpace do not enter the apply math (the
+    //     fused table is built from gainMapMin/Max, gamma and the
+    //     offsets); they are part of the shape because the retained
+    //     struct carries them.
+    // The comparison is byte-exact (==), BGR and BGRA, on the same
+    // 256x256 (gain, base) sweep as TestFusedGainMapExact, plus one
+    // upsampled retained case (2x2 gain onto a 4x4 base).
+    const int kW = 256, kH = 256;
+    std::vector<uint8_t> baseRgb((size_t)kW * kH * 3);
+    std::vector<uint8_t> gain((size_t)kW * kH);
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            size_t i = (size_t)y * kW + x;
+            gain[i] = (uint8_t)x;
+            baseRgb[i * 3 + 0] = (uint8_t)y;
+            baseRgb[i * 3 + 1] = (uint8_t)((x + y) & 0xff);
+            baseRgb[i * 3 + 2] = (uint8_t)((7 * x + 13 * y) & 0xff);
+        }
+    }
+    std::vector<uint8_t> baseBgr((size_t)kW * kH * 3);
+    std::vector<uint8_t> baseBgra((size_t)kW * kH * 4);
+    for (size_t i = 0; i < (size_t)kW * kH; ++i) {
+        baseBgr[i * 3 + 0] = baseRgb[i * 3 + 2];
+        baseBgr[i * 3 + 1] = baseRgb[i * 3 + 1];
+        baseBgr[i * 3 + 2] = baseRgb[i * 3 + 0];
+        baseBgra[i * 4 + 0] = baseRgb[i * 3 + 2];
+        baseBgra[i * 4 + 1] = baseRgb[i * 3 + 1];
+        baseBgra[i * 4 + 2] = baseRgb[i * 3 + 0];
+        baseBgra[i * 4 + 3] = (uint8_t)((i * 7) & 0xff);
+    }
+    struct Shape {
+        const char* name;
+        Metadata meta;
+    };
+    Metadata mIso, mXmp, mApple;
+    Check(ParseIso21496Metadata(kIsoPayloadHlg, sizeof(kIsoPayloadHlg), mIso) && mIso.valid,
+          "retained ISO shape parses from real HLG payload");
+    Check(ParseXmpMetadata(std::string(kXmpSeq), mXmp) && mXmp.valid,
+          "retained XMP Seq shape parses");
+    Check(ParseXmpMetadata(std::string(kXmpApple), mApple) && mApple.valid,
+          "retained Apple shape parses");
+    Metadata mAvifA;
+    mAvifA.gainMapMin = -0.5;            // -1/2
+    mAvifA.gainMapMax = 1.5;             // 3/2
+    mAvifA.gamma = 1.1;                  // 11/10
+    mAvifA.baseOffset = 0.001;           // 1/1000
+    mAvifA.alternateOffset = -0.002;     // -1/500
+    mAvifA.baseHdrHeadroom = 0.0;
+    mAvifA.alternateHdrHeadroom = 2.5;   // 5/2
+    mAvifA.useBaseColorSpace = true;
+    mAvifA.valid = true;
+    Metadata mAvifB;
+    mAvifB.gainMapMin = 0.0;
+    mAvifB.gainMapMax = 2.0;             // 2/1, headroom 4x
+    mAvifB.gamma = 1.0;
+    mAvifB.baseOffset = 0.0;
+    mAvifB.alternateOffset = 0.0;
+    mAvifB.baseHdrHeadroom = 0.0;
+    mAvifB.alternateHdrHeadroom = 2.0;   // 2/1
+    mAvifB.useBaseColorSpace = false;
+    mAvifB.valid = true;
+    const Shape kShapes[] = {
+        {"ISO real HLG", mIso},
+        {"XMP Seq", mXmp},
+        {"Apple headroom", mApple},
+        {"AVIF-typical A", mAvifA},
+        {"AVIF-typical B", mAvifB},
+    };
+    std::vector<float> linear((size_t)kW * kH * 3);
+    std::vector<uint8_t> oldBgr((size_t)kW * kH * 3);
+    std::vector<uint8_t> newBgr((size_t)kW * kH * 3);
+    std::vector<uint8_t> oldBgra((size_t)kW * kH * 4);
+    std::vector<uint8_t> newBgra((size_t)kW * kH * 4);
+    for (size_t s = 0; s < sizeof(kShapes) / sizeof(kShapes[0]); ++s) {
+        // The retained struct, as a reader's Extract step produces it.
+        ExtractedGainMap retained;
+        retained.gray = gain;
+        retained.width = kW;
+        retained.height = kH;
+        retained.meta = kShapes[s].meta;
+        retained.valid = true;
+        // Old (immediate) path, BGR.
+        bool ranOld = ApplyGainMap(baseRgb.data(), kW, kH, gain.data(), kW, kH,
+                                   kShapes[s].meta, 1.0, linear.data());
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linear.data(), kW, kH, (size_t)kW * 3,
+                                           oldBgr.data(), (size_t)kW * 3);
+        }
+        // Retained path, BGR: gray + meta read out of the struct.
+        bool ranNew = ApplyGainMapToBgr(baseBgr.data(), kW, kH, (size_t)kW * 3,
+                                        retained.gray.data(), retained.width, retained.height,
+                                        retained.meta, 1.0,
+                                        newBgr.data(), (size_t)kW * 3);
+        char what[160];
+        std::snprintf(what, sizeof(what), "retained BGR %s runs iff old runs", kShapes[s].name);
+        Check(retained.valid && retained.width == kW && retained.height == kH && ranOld == ranNew, what);
+        bool exact = ranOld && ranNew;
+        if (exact) {
+            for (size_t i = 0; i < oldBgr.size(); ++i) {
+                if (oldBgr[i] != newBgr[i]) { exact = false; break; }
+            }
+        }
+        std::snprintf(what, sizeof(what), "retained BGR %s bit-identical to immediate path", kShapes[s].name);
+        Check(exact, what);
+        // Old (immediate) path, BGRA (alpha from baseBgra+3, stride 4).
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImageToBgra(linear.data(), kW, kH, (size_t)kW * 3,
+                                                 oldBgra.data(), (size_t)kW * 4,
+                                                 baseBgra.data() + 3, 4);
+        }
+        bool ranNewA = ApplyGainMapToBgra(baseBgra.data(), kW, kH, (size_t)kW * 4,
+                                          retained.gray.data(), retained.width, retained.height,
+                                          retained.meta, 1.0,
+                                          newBgra.data(), (size_t)kW * 4);
+        std::snprintf(what, sizeof(what), "retained BGRA %s runs iff old runs", kShapes[s].name);
+        Check(ranOld == ranNewA, what);
+        exact = ranOld && ranNewA;
+        if (exact) {
+            for (size_t i = 0; i < oldBgra.size(); ++i) {
+                if (oldBgra[i] != newBgra[i]) { exact = false; break; }
+            }
+        }
+        std::snprintf(what, sizeof(what), "retained BGRA %s bit-identical to immediate path", kShapes[s].name);
+        Check(exact, what);
+    }
+    // Upsampled retained gain: a 2x2 gain map onto a 4x4 base, through
+    // the retained struct with the AVIF-typical A metadata.
+    {
+        const int w = 4, h = 4, gw = 2, gh = 2;
+        ExtractedGainMap retained;
+        retained.gray = {0, 85, 170, 255};
+        retained.width = gw;
+        retained.height = gh;
+        retained.meta = mAvifA;
+        retained.valid = true;
+        uint8_t rgbUp[4 * 4 * 3];
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                size_t i = (size_t)y * w + x;
+                rgbUp[i * 3 + 0] = (uint8_t)((i * 37) & 0xff);
+                rgbUp[i * 3 + 1] = (uint8_t)((i * 91 + 13) & 0xff);
+                rgbUp[i * 3 + 2] = (uint8_t)((i * 53 + 7) & 0xff);
+            }
+        std::vector<uint8_t> bgrUp((size_t)w * h * 3);
+        std::vector<uint8_t> bgraUp((size_t)w * h * 4);
+        for (size_t i = 0; i < (size_t)w * h; ++i) {
+            bgrUp[i * 3 + 0] = rgbUp[i * 3 + 2];
+            bgrUp[i * 3 + 1] = rgbUp[i * 3 + 1];
+            bgrUp[i * 3 + 2] = rgbUp[i * 3 + 0];
+            bgraUp[i * 4 + 0] = rgbUp[i * 3 + 2];
+            bgraUp[i * 4 + 1] = rgbUp[i * 3 + 1];
+            bgraUp[i * 4 + 2] = rgbUp[i * 3 + 0];
+            bgraUp[i * 4 + 3] = (uint8_t)((i * 11) & 0xff);
+        }
+        std::vector<float> linUp((size_t)w * h * 3);
+        std::vector<uint8_t> oldUp((size_t)w * h * 3);
+        std::vector<uint8_t> newUp((size_t)w * h * 3);
+        std::vector<uint8_t> oldUpA((size_t)w * h * 4);
+        std::vector<uint8_t> newUpA((size_t)w * h * 4);
+        bool ranOld = ApplyGainMap(rgbUp, w, h, retained.gray.data(), gw, gh,
+                                   retained.meta, 1.0, linUp.data());
+        if (ranOld) {
+            HdrToneMap::ConvertLinearImage(linUp.data(), w, h, (size_t)w * 3,
+                                           oldUp.data(), (size_t)w * 3);
+            HdrToneMap::ConvertLinearImageToBgra(linUp.data(), w, h, (size_t)w * 3,
+                                                 oldUpA.data(), (size_t)w * 4,
+                                                 bgraUp.data() + 3, 4);
+        }
+        bool ranNew = ApplyGainMapToBgr(bgrUp.data(), w, h, (size_t)w * 3,
+                                        retained.gray.data(), retained.width, retained.height,
+                                        retained.meta, 1.0, newUp.data(), (size_t)w * 3);
+        bool exact = ranOld && ranNew;
+        if (exact) {
+            for (size_t i = 0; i < oldUp.size(); ++i) {
+                if (oldUp[i] != newUp[i]) { exact = false; break; }
+            }
+        }
+        Check(exact, "retained BGR upsampled gain bit-identical to immediate path");
+        bool ranNewA = ApplyGainMapToBgra(bgraUp.data(), w, h, (size_t)w * 4,
+                                          retained.gray.data(), retained.width, retained.height,
+                                          retained.meta, 1.0, newUpA.data(), (size_t)w * 4);
+        exact = ranOld && ranNewA;
+        if (exact) {
+            for (size_t i = 0; i < oldUpA.size(); ++i) {
+                if (oldUpA[i] != newUpA[i]) { exact = false; break; }
+            }
+        }
+        Check(exact, "retained BGRA upsampled gain bit-identical to immediate path");
+    }
+}
+
 int main() {
     TestParseIsoReal();
     TestParseIsoNegative();
@@ -2077,6 +2292,7 @@ int main() {
     TestApplyGainMapRealMeta();
     TestApplyGainMapLutExact();
     TestFusedGainMapExact();
+    TestRetainedGainMapExact();
     std::printf("gainmap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
