@@ -1,9 +1,10 @@
-# JPEGView v1.3.46-20261121
+# JPEGView v1.3.46-20261123
 
-HDR support: PQ (ST 2084) and HLG images now display tone-mapped to SDR, gain-map photos apply their gain maps (JPEG and AVIF), and 16/32-bit PSD files open with tone mapping. This release also fixes the HDR issues found in review and updates five bundled libraries. Everything below was verified against the code and — for the device-testable items — on a real Windows machine.
+This release is a hardening and limits update on top of v1.3.46-20261121: crafted PSD/PSB, ICC and gain-map files no longer hang or crash the viewer (21 fixes), the x64 PSD file-size limit is raised from 500 MB to 1 GB, and drag-and-drop no longer reads from an uninitialised buffer for over-long paths. HDR support is unchanged from v1.3.46-20261121: PQ (ST 2084) and HLG images display tone-mapped to SDR, gain-map photos apply their gain maps (JPEG and AVIF), and 16/32-bit PSD files open with tone mapping. Everything below was verified against the code and — for the device-testable items — on a real Windows machine.
 
 ## What's new
 
+- **PSD file-size limit (x64)**: the x64 limit is raised from 500 MB to 1 GB, so large uncompressed PSDs up to 1 GB now open instead of being rejected at the file-size check (Win32 stays 100 MB).
 - **HDR tone mapping**: images with a PQ or HLG transfer now display tone-mapped to SDR (1000-nit peak, SDR white 203 nits) instead of showing the raw signal too dark. Supported in PNG, AVIF, HEIF and JXL. SDR images are unaffected.
 - **Gain maps (ISO 21496-1)**: JPEG UltraHDR and AVIF gain-map photos now apply their gain map. Apple XMP gain-map JPEGs (iPhone-shared HDR photos) are supported too, including files whose headroom lives in the auxiliary image's XMP. HEIF gain maps are NOT applied in this release — see the limitation below.
 - **PSD HDR**: 16-bit and 32-bit PSD/PSB files (RGB and grayscale, Raw/RLE/ZIP) now open with tone mapping instead of falling back to the embedded thumbnail. 8-bit PSDs are byte-identical to before.
@@ -22,7 +23,7 @@ HDR support: PQ (ST 2084) and HLG images now display tone-mapped to SDR, gain-ma
 - **Apple gain-map JPEG**: an iPhone-shared HDR JPEG silently showed SDR because the headroom lives in the auxiliary image's XMP, which was never read; the auxiliary XMP is now tried as a second fallback (verified on real files).
 - **Saving**: a JPEG whose embedded ICC profile is not sRGB (e.g. Adobe RGB, Display P3) no longer keeps that profile on the output file after the pixels were converted to sRGB; the stale profile is stripped when embedded colour profiles are enabled.
 - **Hardening (crafted files)**: crafted PSD/PSB, ICC and gain-map files no longer hang or crash the viewer (21 hardening fixes, see CHANGELOG).
-- **Drag and drop**: dropping a file whose path is longer than 511 characters no longer reads from an uninitialised buffer; such a path is ignored instead (the app does not support long paths).
+- **Drag and drop**: dropping a file whose path is longer than 511 characters no longer reads from an uninitialised buffer; such a path is ignored instead (the app does not support long paths). Verified in code review; a device test needs a path over 511 characters to trigger.
 
 ## Library updates
 
@@ -45,7 +46,7 @@ iPhone HDR photos in HEIF format are shown as SDR for now: gain-map application 
 - Colour management (embedded ICC profiles) applies to JPEG and PNG. Exceptions: images decoded through the WIC fallback get no colour management, and CMYK JPEGs always convert - the switch only chooses between the embedded CMYK profile and the shipped cmyk.icm (a naive formula is the last resort).
 - 16-bit CMYK PSD files still show only the embedded thumbnail (16-bit CMYK decode was never implemented; 8-bit CMYK works).
 - If lcms2 cannot open an embedded profile, the pixels stay unconverted but the save filter still strips a non-sRGB profile, so the saved file can be mis-tagged the other way; and the sRGB check does not look at the profile's tone curve.
-- If applying a JPEG gain map throws while out of memory, a few small buffers can leak (bounded, does not accumulate across images).
+- Saving a JPEG through the GDI+ path may strip a non-sRGB profile that GDI+ silently did not convert (the same class of issue as the lcms2 case above); no triggering profile has been found, so this is unconfirmed.
 - The ZIP-prediction fix was validated against independent decoders and generated files, not a Photoshop-written sample (none was available); the 65535×65535 JXL out-of-memory guard is covered by unit tests only (no real sample exists).
 - The brotli patch level (1.2.1) cannot be confirmed from the binary itself; the upstream changelog is the only evidence.
 
@@ -53,7 +54,7 @@ iPhone HDR photos in HEIF format are shown as SDR for now: gain-map application 
 
 | Platform | File |
 |---|---|
-| Windows x64 | `JPEGView-x64-v1.3.46-20261121.zip` |
-| Windows x86 | `JPEGView-win32-v1.3.46-20261121.zip` |
+| Windows x64 | `JPEGView-x64-v1.3.46-20261123.zip` |
+| Windows x86 | `JPEGView-win32-v1.3.46-20261123.zip` |
 
 Extract and run `JPEGView.exe`; no installer required.
