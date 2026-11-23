@@ -35,7 +35,8 @@ public:
 	// If RAW metadata is specified, ownership of this memory is transferred to this class.
 	CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, int nChannels, 
 		__int64 nJPEGHash, EImageFormat eImageFormat, bool bIsAnimation, int nFrameIndex, int nNumberOfFrames, int nFrameTimeMs,
-		CLocalDensityCorr* pLDC = NULL, bool bIsThumbnailImage = false, CRawMetadata* pRawMetadata = NULL);
+		CLocalDensityCorr* pLDC = NULL, bool bIsThumbnailImage = false, CRawMetadata* pRawMetadata = NULL,
+		EImageProvenance eProvenance = NotRaw);
 	~CJPEGImage(void);
 
 	// Gets resampled and processed 32 bpp DIB image (up or downsampled).
@@ -321,6 +322,9 @@ public:
 	// Gets the image format this image has originally
 	EImageFormat GetImageFormat() const { return m_eImageFormat; }
 
+	// Gets which representation of a RAW file this image is (NotRaw for non-RAW images).
+	EImageProvenance GetProvenance() const { return m_eProvenance; }
+
 	// Gets if the image format is one of the formats supported by GDI+
 	bool IsGDIPlusFormat() const {
 		return m_eImageFormat == IF_JPEG || m_eImageFormat == IF_WindowsBMP || m_eImageFormat == IF_PNG || m_eImageFormat == IF_TIFF || m_eImageFormat == IF_GIF;
@@ -438,6 +442,7 @@ private:
 	bool m_bGainMapLoadRotationApplied;
 	__int64 m_nPixelHash;
 	EImageFormat m_eImageFormat;
+	EImageProvenance m_eProvenance;
 	TJSAMP m_eJPEGChromoSampling;
 
 	// multiframe and GIF animation related data

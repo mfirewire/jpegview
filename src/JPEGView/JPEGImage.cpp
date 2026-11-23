@@ -67,7 +67,7 @@ static CBasicProcessing::SIMDArchitecture ToSIMDArchitecture(Helpers::CPUType cp
 
 CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, int nChannels, __int64 nJPEGHash,
 					   EImageFormat eImageFormat, bool bIsAnimation, int nFrameIndex, int nNumberOfFrames, int nFrameTimeMs,
-					   CLocalDensityCorr* pLDC, bool bIsThumbnailImage, CRawMetadata* pRawMetadata)
+					   CLocalDensityCorr* pLDC, bool bIsThumbnailImage, CRawMetadata* pRawMetadata, EImageProvenance eProvenance)
 	: m_rotationParams{ 0 },
 	m_fColorCorrectionFactorsNull{ 0 }
 {
@@ -91,6 +91,11 @@ CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, 
 	m_nHdrChannels = 0;
 	m_bShowingHDR = false;
 	m_bGainMapLoadRotationApplied = false;
+
+	// RAW representation (H5): which representation of a RAW file this
+	// image is; NotRaw for non-RAW images. Set by the RAW readers at
+	// construction (RawReader by bGetThumb, CReaderRAW always thumbnail).
+	m_eProvenance = eProvenance;
 
 	if (pEXIFData != NULL) {
 		unsigned char * pEXIF = (unsigned char *)pEXIFData;

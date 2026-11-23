@@ -59,6 +59,17 @@ enum EImageFormat {
 	IF_Unknown
 };
 
+// Which representation of a RAW file an image is (H5). Used by the RAW
+// thumbnail/full-size toggle: the toggle decision reads the ACTUAL
+// produced representation, not the requested mode (a thumbnail-mode
+// request can fall back to a full-size decode and vice versa).
+// Non-RAW images are always NotRaw.
+enum EImageProvenance {
+	NotRaw,       // not a RAW file
+	RawThumbnail, // the embedded preview of a RAW file
+	RawFullSize   // the fully decoded RAW file
+};
+
 // Horizontal trapezoid
 /*
  (x1s, y1)----------(x1e, y1)
