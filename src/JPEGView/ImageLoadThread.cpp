@@ -21,6 +21,7 @@
 #include "JXLWrapper.h"
 #include "HEIFWrapper.h"
 #include "AVIFWrapper.h"
+#include "GainMap.h" // ExtractedGainMap (HDR toggle)
 #include "RAWWrapper.h"
 #endif
 #include "WEBPWrapper.h"
@@ -1156,7 +1157,11 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 				bool bSizeLimitExceeded = false;
 				// int nTicks = ::GetTickCount();
 
-				void* pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nBPP, eChromoSubSampling, bOutOfMemory, bSizeLimitExceeded, pBuffer, nFileSize);
+				// Gain-map (HDR toggle): the reader extracts the gain map
+				// (if any) into this struct; it is attached to the image
+				// below and applied in ProcessImageAfterLoad.
+				gainmap::ExtractedGainMap gain;
+				void* pPixelData = TurboJpeg::ReadImage(nWidth, nHeight, nBPP, eChromoSubSampling, bOutOfMemory, bSizeLimitExceeded, pBuffer, nFileSize, &gain);
 				
 				/*
 				TCHAR buffer[20];
@@ -1234,6 +1239,13 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 					request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, 
 						Helpers::FindEXIFBlock(pBuffer, nFileSize), nBPP, 
 						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
+					// Gain-map (HDR toggle): attach the extracted gain map
+					// (grayscale + metadata, not yet applied); the load-time
+					// rotation is mirrored onto it and the HDR view is
+					// applied in ProcessImageAfterLoad.
+					if (gain.valid) {
+						request->Image->SetRetainedGainMap(std::move(gain));
+					}
 					// F-H10: preserve the source JPEG's APP/COM segments for saving.
 					CString sJPEGComment = Helpers::GetJPEGComment(pBuffer, nFileSize);
 					request->Image->SetJPEGComment(sJPEGComment);
@@ -1654,8 +1666,12 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 			int nWidth, nHeight, nBPP, nFrameCount, nFrameTimeMs;
 			bool bHasAnimation;
 			void* pEXIFData;
+			// Gain-map (HDR toggle): the reader extracts the gain map
+			// (if any) into this struct; it is attached to the image
+			// below and applied in ProcessImageAfterLoad.
+			gainmap::ExtractedGainMap gain;
 			uint8* pPixelData = (uint8*)m_avifReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, 
-				nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
+				nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize, &gain);
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastAvifFileName = sFileName;
@@ -1665,6 +1681,13 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_AVIF, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
+				// Gain-map (HDR toggle): attach the extracted gain map
+				// (grayscale + metadata, not yet applied); the load-time
+				// rotation is mirrored onto it and the HDR view is applied
+				// in ProcessImageAfterLoad.
+				if (gain.valid) {
+					request->Image->SetRetainedGainMap(std::move(gain));
+				}
 				free(pEXIFData);
 				bSuccess = true;
 			} else {
@@ -1757,7 +1780,11 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request, const char* pBu
 		nFrameCount = 1;
 		nFrameTimeMs = 0;
 		void* pEXIFData;
-		uint8* pPixelData = (uint8*)HeifReader::ReadImage(nWidth, nHeight, nBPP, nFrameCount, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, request->FrameIndex, pBuffer, nFileSize);
+		// Gain-map (HDR toggle): the reader extracts the gain map
+		// (if any) into this struct; it is attached to the image
+		// below and applied in ProcessImageAfterLoad.
+		gainmap::ExtractedGainMap gain;
+		uint8* pPixelData = (uint8*)HeifReader::ReadImage(nWidth, nHeight, nBPP, nFrameCount, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, request->FrameIndex, pBuffer, nFileSize, &gain);
 		if (pPixelData != NULL) {
 			// F-14/E13: alpha blend with a size_t counter and LUTs, skipping
 			// the loop entirely when no pixel is transparent (see
@@ -1765,6 +1792,13 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request, const char* pBu
 			AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 			request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, nBPP, 0, IF_HEIF, false, request->FrameIndex, nFrameCount, nFrameTimeMs);
+			// Gain-map (HDR toggle): attach the extracted gain map
+			// (grayscale + metadata, not yet applied); the load-time
+			// rotation is mirrored onto it and the HDR view is applied
+			// in ProcessImageAfterLoad.
+			if (gain.valid) {
+				request->Image->SetRetainedGainMap(std::move(gain));
+			}
 			free(pEXIFData);
 		}
 	} catch(heif::Error he) {
@@ -3636,6 +3670,18 @@ CImageLoadThread::EAfterLoadResult CImageLoadThread::ProcessImageAfterLoad(CRequ
 	// is still marked (F-M27).
 	if (!request->Image->VerifyRotationAfterLoad(CRotationParams(request->ProcessParams.RotationParams, request->ProcessParams.RotationParams.Rotation + request->ProcessParams.UserRotation))) {
 		return AfterLoad_Error;
+	}
+
+	// Gain-map (HDR toggle): mirror the load-time rotation onto the
+	// retained gain map, then show the HDR view when the INI default
+	// is HDR. Both are best-effort: on any failure the image stays
+	// SDR. This runs before the NoProcessingAfterLoad early return,
+	// matching the old reader-time apply (which also ran when
+	// processing was off); the rotation itself is a load step, not a
+	// processing step.
+	request->Image->RotateRetainedGainMapAfterLoad();
+	if (CSettingsProvider::This().GainMapDefault() != 0) {
+		request->Image->ToggleHDR();
 	}
 
 	// Do nothing (except rotation) if processing after load turned off
