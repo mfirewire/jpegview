@@ -216,12 +216,20 @@ jobs:
     # now 26.04, whose image does not install libjxl at all, so the
     # same link line would fail there. The exercised symbols are
     # ABI-stable across 0.7/0.11/0.13; only the link target differs.
+    # Note: the 24.04 runner image itself does not ship libjxl either
+    # (run 45095688917 failed with "cannot find -l:libjxl.so.0.7"),
+    # so the job installs the runtime package libjxl0.7 first.
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout (no submodules needed)
         uses: actions/checkout@v5
         with:
           submodules: false
+
+      - name: Install system libjxl 0.7 (link target)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libjxl0.7
 
       - name: JXL frame-header harness test
         run: |
