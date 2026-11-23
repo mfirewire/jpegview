@@ -267,6 +267,8 @@ CSettingsProvider::CSettingsProvider(void) {
 	m_sFileEndingsRAW = GetString(_T("FileEndingsRAW"), _T("*.pef;*.dng;*.crw;*.nef;*.cr2;*.mrw;*.rw2;*.orf;*.x3f;*.arw;*.kdc;*.nrw;*.dcr;*.sr2;*.srf;*.raf;*.kc2;*.erf;*.3fr;*.raw;*.mef;*.mos;*.mdc;*.cr3;*.srw"));
 	m_sFileEndingsExtra = GetString(_T("FileEndingsExtra"), _T(""));
 	m_nDisplayFullSizeRAW = GetInt(_T("DisplayFullSizeRAW"), 2, 0, 3);
+	// GainMapDefault: 0 = open gain-map images in SDR, 1 = open in HDR (default).
+	m_nGainMapDefault = GetInt(_T("GainMapDefault"), 1, 0, 1);
 	m_bCreateParamDBEntryOnSave = GetBool(_T("CreateParamDBEntryOnSave"), true);
 	m_bWrapAroundFolder = GetBool(_T("WrapAroundFolder"), true);
 	m_bFlashWindowAlert = GetBool(_T("FlashWindowAlert"), true);

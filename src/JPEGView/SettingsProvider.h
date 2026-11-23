@@ -94,6 +94,8 @@ public:
 	LPCTSTR FileEndingsExtra() { return m_sFileEndingsExtra; }
 	void AddTemporaryRAWFileEnding(LPCTSTR sEnding) { m_sFileEndingsRAW += CString(_T(";*.")) + sEnding; }
 	int DisplayFullSizeRAW() { return m_nDisplayFullSizeRAW; }
+	// GainMapDefault: default view for gain-map (HDR) images, 0 = SDR, 1 = HDR.
+	int GainMapDefault() { return m_nGainMapDefault; }
 	bool CreateParamDBEntryOnSave() { return m_bCreateParamDBEntryOnSave; }
 	bool SaveWithoutPrompt() { return m_bSaveWithoutPrompt; }
 	bool CropWithoutPromptLosslessJPEG() { return m_bCropWithoutPromptLosslessJPEG; }
@@ -273,6 +275,7 @@ private:
 	CString m_sFileEndingsRAW;
 	CString m_sFileEndingsExtra;
 	int m_nDisplayFullSizeRAW;
+	int m_nGainMapDefault;
 	bool m_bCreateParamDBEntryOnSave;
 	bool m_bWrapAroundFolder;
 	bool m_bSaveWithoutPrompt;
