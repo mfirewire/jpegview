@@ -35,7 +35,10 @@ const unsigned int MAX_HEIF_FILE_SIZE = 1024 * 1024 * 50;
 #endif
 
 #ifdef _WIN64
-const unsigned int MAX_PSD_FILE_SIZE = 1024 * 1024 * 500;
+// Raised from 500 MB to 1 GB (2026-11-23, user decision). Still below 2^31,
+// so the LONG casts in PSDWrapper (resync offset) stay safe. Win32 stays
+// 100 MB; the decoded-output cap MAX_IMAGE_BYTES is unchanged.
+const unsigned int MAX_PSD_FILE_SIZE = 1024 * 1024 * 1024;
 #else
 const unsigned int MAX_PSD_FILE_SIZE = 1024 * 1024 * 100;
 #endif

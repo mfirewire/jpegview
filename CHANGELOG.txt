@@ -79,6 +79,9 @@ Bugs fixed:
 - The tinyexr multipart header length is now tracked in size_t, so a part header over 4 GiB can no longer wrap the CVE-2026-110597 patch check (the public header struct is unchanged)
 - ThorVG version in the SVG wrapper header comment corrected to 1.1.4 (comment only)
 
+Changed behavior:
+- PSD files: the x64 file-size limit is raised from 500 MB to 1 GB (Win32 stays 100 MB), so large uncompressed PSDs up to 1 GB now open instead of being rejected at the file-size check; the decoded-output cap (4 GB on x64) and the 65535 dimension limit are unchanged, and the limit stays below 2^31 so the 32-bit offset arithmetic in the PSD reader stays safe
+
 Investigated (no change):
 - E6 (single-visit RAW retries): investigated and closed without a code change. dcraw_mod never fully decodes (dcraw_main hardcodes write_fun = write_thumb and only extracts the embedded preview), so one access performs at most one full decode (LibRaw), never three; the default mode-2 order is LibRaw thumbnail, then the dcraw thumbnail, then the LibRaw full image (mode 3 is full size, thumbnail, dcraw, in that order). Each attempt rescues files the others cannot, so no fallback was cut; the only overlap is the same embedded JPEG preview bytes decoded twice and one repeated LibRaw header parse.
 - Single instance: launching with no file now always brings the running window forward - the empty payload is now signalled explicitly, so it no longer reopens the current image when one was already open (follow-up to the #76 fix)
