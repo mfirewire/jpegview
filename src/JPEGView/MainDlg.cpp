@@ -228,6 +228,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 	m_bExceptionErrorLastImage = false;
 	m_bSizeLimitExceededLastImage = false;
 	m_nLastLoadError = HelpersGUI::FileLoad_Ok;
+	m_nPendingRawToggleHandle = -1;
 
 	m_dMovieFPS = 1.0;
 	m_nAutoStartSlideShow = false;
@@ -1206,6 +1207,9 @@ LRESULT CMainDlg::OnImageLoadCompleted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM 
 	}
 	// route to JPEG provider
 	m_pJPEGProvider->OnImageLoadCompleted((int)lParam);
+	// The provider has populated the request by now (R2), so a pending
+	// RAW toggle can complete against the loaded image.
+	CompletePendingRawToggle((int)lParam);
 	return 0;
 }
 
@@ -1343,6 +1347,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	if (m_bLDC) ::CheckMenuItem(hMenuTrackPopup, IDM_LDC, MF_CHECKED);
 	if (m_bKeepParams) ::CheckMenuItem(hMenuTrackPopup, IDM_KEEP_PARAMETERS, MF_CHECKED);
 	if (m_pCurrentImage != NULL && m_pCurrentImage->IsShowingHDR()) ::CheckMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_CHECKED);
+	if (m_pCurrentImage != NULL && m_pCurrentImage->GetProvenance() == RawFullSize) ::CheckMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_CHECKED);
 	HMENU hMenuNavigation = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_NAVIGATION);
 	::CheckMenuItem(hMenuNavigation,  m_pFileList->GetNavigationMode()*10 + IDM_LOOP_FOLDER, MF_CHECKED);
 	HMENU hMenuOrdering = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_DISPLAY_ORDER);
@@ -1446,6 +1451,8 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	} else {
 		if (!m_pCurrentImage->HasGainMap())
 			::EnableMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_BYCOMMAND | MF_GRAYED);
+		if (m_pCurrentImage->GetProvenance() == NotRaw)
+			::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_BYCOMMAND | MF_GRAYED);
 		if (m_bKeepParams || m_pCurrentImage->IsClipboardImage() ||
 			CParameterDB::This().FindEntry(m_pCurrentImage->GetPixelHash()) == NULL)
 			::EnableMenuItem(hMenuTrackPopup, IDM_CLEAR_PARAM_DB, MF_BYCOMMAND | MF_GRAYED);
@@ -1603,11 +1610,14 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			ReloadImage(false);
 			break;
 		case IDM_RELOAD_FULLSIZE:
-			// O-08(e): no image, no reload. The menu already grays this item
-			// when there is no image, but the Ctrl+Shift+R shortcut still
-			// reaches here; ReloadImageFullSize itself has no NULL guard.
+			// RAW toggle (Ctrl+Shift+R): flip between the thumbnail and
+			// the full-size view of the current RAW file. The menu already
+			// grays this item when there is no image or the image is not
+			// a RAW file, but the Ctrl+Shift+R shortcut still reaches
+			// here; ToggleRawRepresentation itself returns early for
+			// those cases.
 			if (m_pCurrentImage != NULL) {
-				ReloadImageFullSize();
+				ToggleRawRepresentation();
 			}
 			break;
 		case IDM_TOGGLE_HDR:
@@ -3004,6 +3014,9 @@ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
 		m_pJPEGProvider->ClearRequest(m_pCurrentImage, true);
 	}
 	m_pCurrentImage = NULL;
+	// Navigation cancels a pending RAW-toggle swap: the image is changing,
+	// so the background production for the old representation is stale.
+	m_nPendingRawToggleHandle = -1;
 
 	// do not perform a new image request if flagged
 	if (nFlags & NO_REQUEST) {
@@ -3097,12 +3110,103 @@ void CMainDlg::ReloadImage(bool keepParameters, bool updateWindow) {
 	GotoImage(CMainDlg::POS_Current, updateWindow ? flags : flags | NO_UPDATE_WINDOW);
 }
 
-void CMainDlg::ReloadImageFullSize() {
-	// Intentional: no KEEP_PARAMETERS. The full-size view shows the RAW
-	// original with default processing parameters; per-image edits (gamma,
-	// rotation, sharpening) do not carry over. This is by design, not a
-	// missing flag -- see the note in ProcessReadRAWRequest.
-	GotoImage(CMainDlg::POS_Current, FORCE_FULLSIZE_RAW);
+void CMainDlg::ToggleRawRepresentation() {
+	if (m_pCurrentImage == NULL || m_pJPEGProvider == NULL || m_pFileList == NULL) {
+		return;
+	}
+	// The decision reads the ACTUAL produced representation, not the
+	// requested mode: a thumbnail-mode request can fall back to a full
+	// decode and vice versa, so only the provenance tells which view
+	// is on screen.
+	EImageProvenance eFrom = m_pCurrentImage->GetProvenance();
+	if (eFrom == NotRaw) {
+		return;
+	}
+	ERawLoadMode eTargetMode = (eFrom == RawThumbnail) ? RawLoad_ForceFull : RawLoad_ForceThumb;
+	LPCTSTR sFileName = m_pFileList->Current();
+	int nFrameIndex = m_pCurrentImage->FrameIndex();
+	int nHandle = m_pJPEGProvider->StartBackgroundRequest(sFileName, nFrameIndex, CreateProcessParams(false), eTargetMode);
+	if (nHandle < 0) {
+		// A2-9: the other representation could not even be requested.
+		return;
+	}
+	CJPEGImage* pNewImage = m_pJPEGProvider->GetImageByHandle(nHandle);
+	if (pNewImage != NULL) {
+		SwapToRawRepresentation(pNewImage);
+		return;
+	}
+	// Not ready yet: keep showing the current representation; the
+	// pending swap completes in OnImageLoadCompleted. A newer toggle
+	// overwrites the pending one (latest wins).
+	m_nPendingRawToggleHandle = nHandle;
+	m_sPendingRawToggleFile = sFileName;
+	m_nPendingRawToggleFrame = nFrameIndex;
+	m_ePendingRawToggleFrom = eFrom;
+}
+
+void CMainDlg::SwapToRawRepresentation(CJPEGImage* pNewImage) {
+	if (pNewImage == NULL || m_pCurrentImage == NULL) {
+		return;
+	}
+	if (pNewImage == m_pCurrentImage) {
+		// The toggle reused the request that produced the current image:
+		// its mode asked for the other representation, but the reader
+		// fell back to the one already shown (e.g. a full-size request
+		// that could only produce the thumbnail). There is nothing to
+		// swap to, and resetting parameters or OCR for a no-op swap
+		// would be wrong.
+		m_nPendingRawToggleHandle = -1;
+		return;
+	}
+	CJPEGImage* pOldImage = m_pCurrentImage;
+	m_pJPEGProvider->NotifyNotUsed(pOldImage);
+	m_pCurrentImage = pNewImage;
+	// Per-representation parameters (E3): the new representation starts
+	// from the parameter-DB entry for its own pixel hash when one exists,
+	// else from the defaults -- exactly like a fresh load. A round trip
+	// therefore keeps each side's own stored parameters.
+	CProcessParams procParams = CreateProcessParams(false);
+	EProcessingFlags procFlags = procParams.ProcFlags;
+	pNewImage->RestoreInitialParameters(m_pFileList->Current(), procParams.ImageProcParams, procFlags,
+		procParams.RotationParams.Rotation, procParams.Zoom, procParams.Offsets,
+		CSize(procParams.TargetWidth, procParams.TargetHeight), procParams.MonitorSize);
+	// Thumbnail and full-size differ in dimensions, so the old OCR boxes
+	// would be wrong on the new image.
+	ResetOcrResult();
+	AfterNewImageLoaded(true, false, false);
+	Invalidate(FALSE);
+	UpdateWindow();
+	m_nLastLoadError = HelpersGUI::FileLoad_Ok;
+	m_nPendingRawToggleHandle = -1;
+}
+
+void CMainDlg::CompletePendingRawToggle(int nHandle) {
+	if (nHandle != m_nPendingRawToggleHandle) {
+		return;
+	}
+	m_nPendingRawToggleHandle = -1;
+	if (m_pCurrentImage == NULL || m_pFileList == NULL || m_pJPEGProvider == NULL) {
+		return;
+	}
+	// Only complete the swap while still on the same file and frame and
+	// the current image is still the representation the toggle started
+	// from; otherwise the user has navigated away and the pending swap
+	// is stale.
+	if (m_sPendingRawToggleFile != m_pFileList->Current()) {
+		return;
+	}
+	if (m_nPendingRawToggleFrame != m_pCurrentImage->FrameIndex()) {
+		return;
+	}
+	if (m_pCurrentImage->GetProvenance() != m_ePendingRawToggleFrom) {
+		return;
+	}
+	CJPEGImage* pNewImage = m_pJPEGProvider->GetImageByHandle(nHandle);
+	if (pNewImage != NULL) {
+		SwapToRawRepresentation(pNewImage);
+	}
+	// NULL: the other representation could not be produced (e.g. no
+	// readable preview); keep showing the current one.
 }
 
 void CMainDlg::AdjustLDC(int nMode, double dInc) {

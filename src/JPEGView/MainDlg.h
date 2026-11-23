@@ -207,7 +207,9 @@ public:
 	void MouseOn();
 	void GotoImage(EImagePosition ePos);
 	void ReloadImage(bool keepParameters, bool updateWindow = true);
-	void ReloadImageFullSize();
+	void ToggleRawRepresentation(); // flip between the thumbnail and the full-size view of the current RAW file (Ctrl+Shift+R)
+	void SwapToRawRepresentation(CJPEGImage* pNewImage);
+	void CompletePendingRawToggle(int nHandle);
 	// OCR 识别结果只对识别那一刻的图像内容有效；换图、旋转、裁剪、缩放、镜像、
 	// 透视、锐化等任何就地改变图像内容的操作之后都要调用，否则旧词的包围盒会
 	// 错位到新图像上，Ctrl+C 还会复制到已经过时的文字。
@@ -249,6 +251,10 @@ private:
 	CDirectoryWatcher* m_pDirectoryWatcher = NULL; // notifies the main window when the current file changed or a file in the current directory was added or deleted; NULL until OnInitDialog creates it
 	CJPEGProvider * m_pJPEGProvider; // reads image (of any format, not only JPEGs) files, using read ahead
 	CJPEGImage * m_pCurrentImage; // currently displayed image
+	int m_nPendingRawToggleHandle; // handle of the pending background RAW-toggle request, -1 when none
+	CString m_sPendingRawToggleFile; // file of the pending RAW toggle (the swap completes only while still on this file)
+	int m_nPendingRawToggleFrame; // frame index of the pending RAW toggle
+	EImageProvenance m_ePendingRawToggleFrom; // representation the pending RAW toggle started from
 	bool m_bOutOfMemoryLastImage; // true if the last image could not be requested because not enough memory
 	bool m_bExceptionErrorLastImage; // true if the last image could not be requested because of an unhandled exception
 	bool m_bSizeLimitExceededLastImage; // true if the last image exceeded the pixel cap (P2-5, not OOM)

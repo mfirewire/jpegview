@@ -3057,7 +3057,7 @@ void CImageLoadThread::ProcessReadRAWRequest(CRequest * request) {
 		// "Settings" here means the configured mode only: the per-image
 		// processing parameters (gamma, rotation, etc.) are intentionally
 		// reset for the full-size view, because it shows the RAW original
-		// as-is (see CMainDlg::ReloadImageFullSize).
+		// as-is (see CMainDlg::ToggleRawRepresentation).
 		int fullsize = (request->RawLoadMode == RawLoad_ForceFull) ? 3 :
 			(request->RawLoadMode == RawLoad_ForceThumb) ? 2 :
 			CSettingsProvider::This().DisplayFullSizeRAW();
