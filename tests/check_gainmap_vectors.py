@@ -16,6 +16,18 @@
 #     Tolerance: max diff <= 1 (observed 0 for the Mozilla pair, <= 1
 #     for the Seine crops -- YUV->RGB rounding differs by <= 1 LSB
 #     between two independent decoders on real photos).
+#     The 8-bit check cannot see low-byte damage, so a normalized
+#     16-bit check runs alongside it (P3-6): r8 = vec - ff - (ff>>8)
+#     for 8-bit sources, r10 = vec - ff - (ff>>10) for 10-bit, BGR
+#     only, tolerance 3 (r8) / 2 (r10). Saturated channels (ff or vec
+#     == 65535) are carved out -- there v*257 predicts 65790 and both
+#     sides truncate to 65535. The v*257-vs-v*256 story holds only
+#     for the Mozilla pair; the Seine vectors are true 16-bit
+#     YUV->RGB output, so the normalized form (not a raw 16-bit
+#     comparison) is what makes the low byte meaningful.
+#     Fragility (option A): the two Seine 8-bit diffs sit exactly at
+#     tolerance 1, so a 1-LSB decoder rounding change reds CI loudly
+#     (a loud failure, not a silent pass).
 #     EXCEPTION -- mozilla-hdr base pixel tie is SKIPPED in CI
 #     (documented manual step, P1-1 section 13(c) fallback). No ffmpeg
 #     decode variant reproduces the committed vector on the CI
@@ -33,8 +45,11 @@
 #     mozilla-hdr-base16.bgra (64x32, uniform B=G=R=47802,
 #     A=65535) was extracted with libavif; locally, ffmpeg 8.1.2
 #     native gbrp decode gives uniform 186 (max diff 0), and
-#     libavif's avifdec gives the same. The mozilla-hdr GAIN tie
-#     still runs in CI (gray stream, unaffected by the RGB issue).
+#     libavif's avifdec gives the same. The normalized r8 check for
+#     this base is skipped for the same reason (it needs the same
+#     decode); its values are verified locally (r8 = 0 on ffmpeg
+#     8.1.2 + libdav1d). The mozilla-hdr GAIN tie still runs in CI
+#     (gray stream, unaffected by the RGB issue).
 #   - gain: stream 1 (the gain-map image) decoded to 8-bit gray.
 #     Tolerance: max diff <= 1 (observed byte-exact on ffmpeg 8.1.2).
 #   - Seine vectors are a 128x128 centre crop (x 136..264, y 86..214) of
@@ -129,13 +144,13 @@ def main():
         return 1
 
     cases = [
-        # (stem, width, height, crop or None, skip base pixel tie?)
-        ("mozilla-hdr", 64, 32, None, True),
-        ("mozilla-sdr", 64, 32, None, False),
-        ("seine-hdr", 400, 300, (136, 86, 128, 128), False),
-        ("seine-sdr", 400, 300, (136, 86, 128, 128), False),
+        # (stem, width, height, crop or None, skip base pixel tie?, source bit depth)
+        ("mozilla-hdr", 64, 32, None, True, 8),
+        ("mozilla-sdr", 64, 32, None, False, 8),
+        ("seine-hdr", 400, 300, (136, 86, 128, 128), False, 10),
+        ("seine-sdr", 400, 300, (136, 86, 128, 128), False, 8),
     ]
-    for stem, w, h, crop, skip_base in cases:
+    for stem, w, h, crop, skip_base, depth in cases:
         avif = SAMPLES / f"{stem}-base-gainmap.avif"
         suffix = "-crop128" if crop else ""
         base_vec = (SAMPLES / f"{stem}-base16{suffix}.bgra").read_bytes()
@@ -150,6 +165,11 @@ def main():
                   f"reproduces the vector on CI ffmpeg 8.0.1 -- verify "
                   f"by hand (see header EXCEPTION)")
             SKIPS.append(f"{stem} base16 @8bit")
+            # The normalized r8 check needs the same ffmpeg decode of
+            # this base, so it rides the same manual step.
+            print(f"SKIP {stem} base16 normalized r8: same decode as the "
+                  f"8-bit tie -- verify by hand (see header EXCEPTION)")
+            SKIPS.append(f"{stem} base16 normalized r8")
         else:
             raw_base = ffmpeg_decode(avif, 0, "bgra64le", "libdav1d")
             if raw_base is None:
@@ -167,6 +187,35 @@ def main():
             if d_base > 1:
                 print(f"  first decoded pixel (BGRA): {list(raw8[0:4])}, "
                       f"first vector pixel (BGRA): {list(vec8[0:4])}")
+            # P3-6 (A+C): normalized 16-bit check on the same decode
+            # (no extra ffmpeg call). r8/r10 subtracts the upscale
+            # model (vec is v*257, ffmpeg is v*256), so the low byte
+            # is pinned; without it a damaged low byte is invisible
+            # to the 8-bit check. Saturated channels (ff or vec ==
+            # 65535) are carved out: there v*257 predicts 65790,
+            # unrepresentable, and both sides truncate to 65535 (a
+            # structural artifact, not rounding). Alpha is excluded
+            # (both sides 65535, residual -255).
+            if len(raw_base) == len(base_vec):
+                vec16 = struct.unpack(f"<{len(base_vec) // 2}H", base_vec)
+                ff16 = struct.unpack(f"<{len(raw_base) // 2}H", raw_base)
+                shift = 8 if depth == 8 else 10
+                tol = 3 if depth == 8 else 2
+                rname = f"r{depth}"
+                worst = 0
+                for i in range(len(vec16)):
+                    if i % 4 == 3:
+                        continue
+                    v, f = vec16[i], ff16[i]
+                    if f == 65535 or v == 65535:
+                        continue
+                    r = v - f - (f >> shift)
+                    if abs(r) > abs(worst):
+                        worst = r
+                check(abs(worst) <= tol,
+                      f"{stem} base16 normalized {rname}: max |{rname}| {abs(worst)} (tolerance {tol})")
+            else:
+                check(False, f"{stem} base16 normalized: size mismatch")
 
         raw_gain = ffmpeg_decode(avif, 1, "gray", "libdav1d")
         if raw_gain is None:
