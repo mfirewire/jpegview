@@ -1488,7 +1488,7 @@ void CLASS ppm16_thumb(CJPEGImage** Image, bool& bOutOfMemory)
 
     free(thumb);
 
-    *Image = new CJPEGImage(thumb_width, thumb_height, data, NULL, 3, 0, IF_WindowsBMP, false, 0, 1, 0, NULL, false, CreateRawMetadata());
+    *Image = new CJPEGImage(thumb_width, thumb_height, data, NULL, 3, 0, IF_WindowsBMP, false, 0, 1, 0, NULL, false, CreateRawMetadata(), RawThumbnail);
 }
 
 

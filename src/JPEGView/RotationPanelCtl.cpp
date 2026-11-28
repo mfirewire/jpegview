@@ -135,6 +135,11 @@ void CRotationPanelCtl::ApplyTransformation() {
 		// there is already rotation applied - reload image with keeping parameters (this will reset the free rotation to zero and
 		// ignore any parameter DB value for free rotation)
 		m_pMainDlg->ReloadImage(true, false);
+		// ReloadImage() can null CurrentImage() (load failure in
+		// GotoImage), so re-check before dereferencing it below.
+		if (CurrentImage() == NULL) {
+			return;
+		}
 	}
 	if (!CurrentImage()->RotateOriginalPixels(rotation, m_bAutoCrop, m_bKeepAspectRatio)) {
 		::MessageBox(m_pMainDlg->GetHWND(), CNLS::GetString(_T("The operation failed because not enough memory is available!")),

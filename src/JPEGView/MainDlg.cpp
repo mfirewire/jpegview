@@ -3148,8 +3148,10 @@ void CMainDlg::SwapToRawRepresentation(CJPEGImage* pNewImage) {
 	if (pNewImage == NULL || m_pCurrentImage == NULL) {
 		return;
 	}
-	if (pNewImage == m_pCurrentImage) {
-		// The toggle reused the request that produced the current image:
+	if (pNewImage == m_pCurrentImage ||
+		pNewImage->GetProvenance() == m_pCurrentImage->GetProvenance()) {
+		// The toggle reused the request that produced the current image,
+		// or the reader produced a new object of the same representation:
 		// its mode asked for the other representation, but the reader
 		// fell back to the one already shown (e.g. a full-size request
 		// that could only produce the thumbnail). There is nothing to
