@@ -21,12 +21,21 @@
 #     this 8-bit source makes ffmpeg insert a scaler, and on the CI
 #     runner's ffmpeg 8.0.1 (Ubuntu 26.04 resolute, libavcodec62,
 #     dav1d 1.5.3) that scaler applies a PQ->sRGB conversion (max
-#     diff 69 vs the vector; 255 - 186 = 69). So for this one sample
-#     the base is decoded to its NATIVE format (gbrp, no scaler in
-#     the graph at all) and the G/B/R planes are compared directly
-#     against the vector's channels at 8-bit. Native-format decode
-#     returns the coded values, so it is immune to scaler behaviour
-#     and version-stable.
+#     diff 69 vs the vector; 255 - 186 = 69). A plain native-format
+#     request (-pix_fmt gbrp) also fails on 8.0.1: the auto-scale it
+#     inserts misinterprets the RGB planes as YUV, and BT.601
+#     limited-range YUV->RGB of 186 gives (255, 125, 255) (again
+#     diff 69). So for this one sample the base is decoded through
+#     an explicit filter chain -- setparams tags the frame RGB
+#     (colorspace=0 is AVCOL_SPC_RGB; setparams does not accept
+#     the name "rgb"; primaries bt709 and transfer smpte2084
+#     restate the stream's own signalling), then format converts
+#     to gbrp inside the filtergraph, so no external auto-scale is
+#     inserted and the conversion is RGB->RGB -- and the G/B/R
+#     planes are compared directly against the vector's channels
+#     at 8-bit. Whether 8.0.1 respects the RGB tag inside the
+#     filtergraph is what CI tests; a local pass proves only that
+#     the syntax runs and the values are right on 8.1.2.
 #   - gain: stream 1 (the gain-map image) decoded to 8-bit gray.
 #     Tolerance: max diff <= 1 (observed byte-exact on ffmpeg 8.1.2).
 #   - Seine vectors are a 128x128 centre crop (x 136..264, y 86..214) of
@@ -66,15 +75,24 @@ def check(cond, what):
         FAILURES.append(what)
 
 
-def ffmpeg_decode(src, stream, pix_fmt, codec=None):
-    """Decode one stream of src to rawvideo bytes; returns bytes or None."""
+def ffmpeg_decode(src, stream, pix_fmt, codec=None, vf=None):
+    """Decode one stream of src to rawvideo bytes; returns bytes or None.
+
+    Normally the output format is requested with -pix_fmt. When vf is
+    given, the conversion runs inside the filtergraph instead (no
+    -pix_fmt): the filter chain's last filter sets the output format.
+    """
     with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as tmp:
         out = tmp.name
     cmd = ["ffmpeg", "-v", "error"]
     if codec:
         cmd += ["-c:v", codec]
-    cmd += ["-i", str(src), "-map", f"0:{stream}",
-            "-pix_fmt", pix_fmt, "-f", "rawvideo", "-y", out]
+    cmd += ["-i", str(src), "-map", f"0:{stream}"]
+    if vf is not None:
+        cmd += ["-vf", vf]
+    else:
+        cmd += ["-pix_fmt", pix_fmt]
+    cmd += ["-f", "rawvideo", "-y", out]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(f"ffmpeg failed for {src} stream {stream}: {r.stderr.strip()}")
@@ -142,7 +160,16 @@ def main():
         gain_vec = (SAMPLES / f"{stem}-gain8{suffix}.raw").read_bytes()
 
         if native_gbr:
-            raw_base = ffmpeg_decode(avif, 0, "gbrp", "libdav1d")
+            # Force the frame to RGB inside the filtergraph before the
+            # format conversion: on the CI runner's ffmpeg 8.0.1, a
+            # plain -pix_fmt gbrp request inserts an auto-scale that
+            # misinterprets the RGB planes as YUV (BT.601 gives
+            # (255, 125, 255) from 186). Tagging the frame RGB
+            # (colorspace=0 is AVCOL_SPC_RGB; setparams does not
+            # accept the name "rgb") makes the conversion RGB->RGB.
+            raw_base = ffmpeg_decode(
+                avif, 0, "gbrp", "libdav1d",
+                vf="setparams=colorspace=0:color_primaries=bt709:color_trc=smpte2084,format=gbrp")
             if raw_base is None:
                 check(False, f"{stem}: ffmpeg decode failed")
                 continue
