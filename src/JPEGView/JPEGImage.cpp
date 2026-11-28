@@ -84,9 +84,11 @@ CJPEGImage::CJPEGImage(int nWidth, int nHeight, void* pPixels, void* pEXIFData, 
 		m_nOriginalChannels = 0;
 	}
 
-	// Gain-map (HDR) toggle state: SDR view active, no HDR buffer and
-	// no retained gain map yet (attached by the load thread after the
-	// format reader extracts it).
+	// Gain-map (HDR) toggle state: base view active, no alternate
+	// buffer and no retained gain map yet (attached by the load thread
+	// after the format reader extracts it). m_bShowingHDR starts false
+	// and is corrected by SetRetainedGainMap once the base direction
+	// is known (true when the base itself is HDR).
 	m_pHdrPixels = NULL;
 	m_nHdrChannels = 0;
 	m_bShowingHDR = false;
@@ -227,16 +229,52 @@ void CJPEGImage::SetRetainedGainMap(gainmap::ExtractedGainMap&& gain) {
 	if (!gain.valid) {
 		return;
 	}
+	// NB-1: the initial view is the BASE view, which is HDR when the
+	// base headroom exceeds the alternate one -- so m_bShowingHDR
+	// tracks the HDR view, not "the alternate view". The load thread
+	// calls this after the reader blends the base.
+	m_bShowingHDR = gain.meta.baseHdrHeadroom > gain.meta.alternateHdrHeadroom;
+	// Scheme A: install the wrapper-precomputed alternate view as the
+	// second buffer, so the first toggle needs no recompute. Only a
+	// buffer of exactly the base dimensions is accepted -- a size
+	// mismatch (or an OOM) is NOT fatal: the lazy 8-bit path
+	// (ComputeHdrBuffer) recomputes the alternate view on toggle, and
+	// a mismatched buffer must never be installed (ToggleHDR would
+	// swap in garbage). The vector is freed after installing: the
+	// buffer lives in m_pHdrPixels now, and holding a second copy
+	// would double the memory for the alternate view.
+	if (!gain.alternateBgra.empty()) {
+		const size_t expected = (size_t)m_nOrigWidth * (size_t)m_nOrigHeight * 4;
+		if (gain.alternateBgra.size() == expected) {
+			m_pHdrPixels = new(std::nothrow) unsigned char[expected];
+			if (m_pHdrPixels != NULL) {
+				memcpy(m_pHdrPixels, gain.alternateBgra.data(), expected);
+				m_nHdrChannels = 4;
+			}
+		}
+		std::vector<uint8_t>().swap(gain.alternateBgra);
+	}
 	m_gainMap = std::move(gain);
 }
 
 bool CJPEGImage::ComputeHdrBuffer() {
-	if (!HasGainMap() || m_pHdrPixels != NULL || m_bShowingHDR) {
+	if (!HasGainMap() || m_pHdrPixels != NULL) {
 		return false;
 	}
+	// NB-1: the second buffer is the ALTERNATE view, not "the HDR
+	// view": when the base is HDR (base > alt) the alternate view is
+	// SDR and the weight is -1 (inverse gain); when the base is SDR
+	// the alternate view is HDR and the weight is +1. The old
+	// m_bShowingHDR guard is dropped: the caller is showing the base
+	// view whenever this runs (the toggle swaps the buffers, and
+	// EnsureBaseActive restores the base before an edit), so "already
+	// showing HDR" cannot mean "the alternate buffer is already
+	// computed" -- m_pHdrPixels != NULL is the only guard that can
+	// say that.
 	if (m_pOrigPixels == NULL || m_nOriginalChannels == 0 || m_gainMap.gray.empty()) {
 		return false;
 	}
+	const double wAlt = (m_gainMap.meta.baseHdrHeadroom > m_gainMap.meta.alternateHdrHeadroom) ? -1.0 : 1.0;
 	// Stride follows the active buffer's layout: 3-channel bases come
 	// from TurboJPEG with a TJPAD(width*3) stride; 4-channel bases are
 	// packed width*4 (AVIF/HEIF, or a 3-channel base converted in place
@@ -256,7 +294,7 @@ bool CJPEGImage::ComputeHdrBuffer() {
 		bOk = gainmap::ApplyGainMapToBgra((const uint8_t*)m_pOrigPixels,
 			m_nOrigWidth, m_nOrigHeight, baseStride,
 			m_gainMap.gray.data(), m_gainMap.width, m_gainMap.height,
-			m_gainMap.meta, 1.0, pOut.get(), baseStride);
+			m_gainMap.meta, wAlt, pOut.get(), baseStride);
 	} else if (m_nOriginalChannels == 3) {
 		// Zero the row padding so no uninitialised bytes reach the DIB
 		// (same as TurboJpeg's immediate-apply path).
@@ -264,7 +302,7 @@ bool CJPEGImage::ComputeHdrBuffer() {
 		bOk = gainmap::ApplyGainMapToBgr((const uint8_t*)m_pOrigPixels,
 			m_nOrigWidth, m_nOrigHeight, baseStride,
 			m_gainMap.gray.data(), m_gainMap.width, m_gainMap.height,
-			m_gainMap.meta, 1.0, pOut.get(), baseStride);
+			m_gainMap.meta, wAlt, pOut.get(), baseStride);
 	} else {
 		return false;
 	}
@@ -294,8 +332,15 @@ bool CJPEGImage::ToggleHDR() {
 	return true;
 }
 
-void CJPEGImage::EnsureSdrBaseActive() {
-	if (!m_bShowingHDR || m_pHdrPixels == NULL) {
+void CJPEGImage::EnsureBaseActive() {
+	// NB-1: the base view is the view the file was loaded as -- SDR
+	// when base <= alt, HDR when base > alt. Restore it when the
+	// alternate view is active and the base buffer exists. Without a
+	// gain map m_bShowingHDR is false and bBaseIsHdr is false, so
+	// this is a no-op (as before).
+	const bool bBaseIsHdr = HasGainMap() &&
+		(m_gainMap.meta.baseHdrHeadroom > m_gainMap.meta.alternateHdrHeadroom);
+	if ((m_bShowingHDR == bBaseIsHdr) || m_pHdrPixels == NULL) {
 		return;
 	}
 	unsigned char* pTmpPixels = (unsigned char*)m_pOrigPixels;
@@ -304,7 +349,7 @@ void CJPEGImage::EnsureSdrBaseActive() {
 	int nTmpChannels = m_nOriginalChannels;
 	m_nOriginalChannels = m_nHdrChannels;
 	m_nHdrChannels = nTmpChannels;
-	m_bShowingHDR = false;
+	m_bShowingHDR = bBaseIsHdr;
 	InvalidateAllCachedPixelData();
 }
 
@@ -506,7 +551,7 @@ void CJPEGImage::FreeUnsharpMaskResources() {
 }
 
 bool CJPEGImage::ApplyUnsharpMaskToOriginalPixels(const CUnsharpMaskParams & unsharpMaskParams) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	InvalidateAllCachedPixelData();
 
 	double dStartTime = Helpers::GetExactTickCount();
@@ -539,7 +584,7 @@ bool CJPEGImage::ApplyUnsharpMaskToOriginalPixels(const CUnsharpMaskParams & uns
 }
 
 bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKeepAspectRatio) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	InvalidateAllCachedPixelData();
 
 	CPoint offset;
@@ -547,6 +592,28 @@ bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKe
 	void* pRotatedPixels = CBasicProcessing::RotateHQ(offset, newSize, dRotation,
 		CSize(m_nOrigWidth, m_nOrigHeight), m_pOrigPixels, m_nOriginalChannels, CSettingsProvider::This().ColorBackground());
 	if (pRotatedPixels == NULL) return false;
+	// NB-1 (scheme A): mirror the load-time free rotation onto the
+	// precomputed alternate view, with the same offset/size/angle as
+	// the base (the alternate is at the pre-rotation dimensions and
+	// 4ch, installed by SetRetainedGainMap). Any failure drops it --
+	// the lazy 8-bit path (ComputeHdrBuffer) recomputes it on toggle.
+	// Suppressed after load, where the geometric edit drops both
+	// buffers instead (m_bGainMapLoadRotationApplied, below).
+	if (m_pHdrPixels != NULL && !m_bGainMapLoadRotationApplied) {
+		void* pRotatedHdrPixels = NULL;
+		if (m_nHdrChannels == 4) {
+			pRotatedHdrPixels = CBasicProcessing::RotateHQ(offset, newSize, dRotation,
+				CSize(m_nOrigWidth, m_nOrigHeight), m_pHdrPixels, m_nHdrChannels,
+				CSettingsProvider::This().ColorBackground());
+		}
+		if (pRotatedHdrPixels == NULL) {
+			DropHdrBuffer();
+		} else {
+			delete[] m_pHdrPixels;
+			m_pHdrPixels = (unsigned char*)pRotatedHdrPixels;
+			m_nHdrChannels = 4;
+		}
+	}
 	delete[] m_pOrigPixels;
 
 	m_nOrigWidth = newSize.cx;
@@ -567,7 +634,7 @@ bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKe
 }
 
 bool CJPEGImage::TrapezoidOriginalPixels(const CTrapezoid& trapezoid, bool bAutoCrop, bool bKeepAspectRatio) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	InvalidateAllCachedPixelData();
 
 	int nXStart, nXEnd;
@@ -613,7 +680,7 @@ bool CJPEGImage::TrapezoidOriginalPixels(const CTrapezoid& trapezoid, bool bAuto
 }
 
 bool CJPEGImage::ResizeOriginalPixels(EResizeFilter filter, CSize newSize) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	int newWidth = newSize.cx, newHeight = newSize.cy;
 	if (newWidth <= 0 || newHeight <= 0) {
 		return false;
@@ -947,7 +1014,7 @@ bool CJPEGImage::VerifyRotationAfterLoad(const CRotationParams& rotationParams) 
 }
 
 bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	double dStartTickCount = Helpers::GetExactTickCount();
 
 	// Rotation can only be done in 32 bpp
@@ -958,6 +1025,25 @@ bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
 	InvalidateAllCachedPixelData();
 	void* pNewOriginalPixels = CBasicProcessing::Rotate32bpp(m_nOrigWidth, m_nOrigHeight, m_pOrigPixels, nRotation);
 	if (pNewOriginalPixels == NULL) return false;
+	// NB-1 (scheme A): mirror the load-time quarter turn onto the
+	// precomputed alternate view (same rotation, pre-rotation
+	// dimensions -- m_nOrigWidth/m_nOrigHeight are still the old
+	// values here). Any failure drops it -- the lazy 8-bit path
+	// (ComputeHdrBuffer) recomputes it on toggle. Suppressed after
+	// load, where the geometric edit drops both buffers instead
+	// (m_bGainMapLoadRotationApplied, below).
+	if (m_pHdrPixels != NULL && !m_bGainMapLoadRotationApplied) {
+		void* pNewHdrPixels = NULL;
+		if (m_nHdrChannels == 4) {
+			pNewHdrPixels = CBasicProcessing::Rotate32bpp(m_nOrigWidth, m_nOrigHeight, m_pHdrPixels, nRotation);
+		}
+		if (pNewHdrPixels == NULL) {
+			DropHdrBuffer();
+		} else {
+			delete[] m_pHdrPixels;
+			m_pHdrPixels = (unsigned char*)pNewHdrPixels;
+		}
+	}
 	delete[] m_pOrigPixels;
 	m_pOrigPixels = pNewOriginalPixels;
 	if (nRotation != 180) {
@@ -996,7 +1082,7 @@ bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
 }
 
 bool CJPEGImage::Mirror(bool bHorizontally) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	double dStartTickCount = Helpers::GetExactTickCount();
 
 	// Rotation can only be done in 32 bpp
@@ -1021,7 +1107,7 @@ bool CJPEGImage::Mirror(bool bHorizontally) {
 }
 
 bool CJPEGImage::Crop(CRect cropRect) {
-	EnsureSdrBaseActive();
+	EnsureBaseActive();
 	// Cropping can only be done in 32 bpp
 	if (!ConvertSrcTo4Channels()) {
 		return false;

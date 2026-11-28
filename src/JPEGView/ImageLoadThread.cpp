@@ -1241,8 +1241,9 @@ void CImageLoadThread::ProcessReadJPEGRequest(CRequest * request) {
 						Helpers::CalculateJPEGFileHash(pBuffer, nFileSize), IF_JPEG, false, 0, 1, 0);
 					// Gain-map (HDR toggle): attach the extracted gain map
 					// (grayscale + metadata, not yet applied); the load-time
-					// rotation is mirrored onto it and the HDR view is
-					// applied in ProcessImageAfterLoad.
+					// rotation is mirrored onto it and the non-base view is
+					// applied in ProcessImageAfterLoad when the INI default
+					// asks for it.
 					if (gain.valid) {
 						request->Image->SetRetainedGainMap(std::move(gain));
 					}
@@ -1578,12 +1579,19 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 				// the loop entirely when no pixel is transparent (see
 				// AlphaBlendImageToBackground; pixel results are identical).
 				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+				// NB-1 (scheme A): blend the precomputed alternate view
+				// with the same background as the base, so it matches
+				// the base exactly when the toggle swaps it in.
+				if (!gain.alternateBgra.empty()) {
+					AlphaBlendImageToBackground((uint32*)gain.alternateBgra.data(), (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+				}
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_JXL, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
 				// Gain-map (HDR toggle): attach the extracted gain map
 				// (grayscale + metadata, not yet applied); the load-time
-				// rotation is mirrored onto it and the HDR view is applied
-				// in ProcessImageAfterLoad.
+				// rotation is mirrored onto it and the non-base view is
+				// applied in ProcessImageAfterLoad when the INI default
+				// asks for it.
 				if (gain.valid) {
 					request->Image->SetRetainedGainMap(std::move(gain));
 				}
@@ -1690,12 +1698,19 @@ void CImageLoadThread::ProcessReadAVIFRequest(CRequest* request) {
 				// the loop entirely when no pixel is transparent (see
 				// AlphaBlendImageToBackground; pixel results are identical).
 				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+				// NB-1 (scheme A): blend the precomputed alternate view
+				// with the same background as the base, so it matches
+				// the base exactly when the toggle swaps it in.
+				if (!gain.alternateBgra.empty()) {
+					AlphaBlendImageToBackground((uint32*)gain.alternateBgra.data(), (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+				}
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_AVIF, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
 				// Gain-map (HDR toggle): attach the extracted gain map
 				// (grayscale + metadata, not yet applied); the load-time
-				// rotation is mirrored onto it and the HDR view is applied
-				// in ProcessImageAfterLoad.
+				// rotation is mirrored onto it and the non-base view is
+				// applied in ProcessImageAfterLoad when the INI default
+				// asks for it.
 				if (gain.valid) {
 					request->Image->SetRetainedGainMap(std::move(gain));
 				}
@@ -1801,12 +1816,19 @@ void CImageLoadThread::ProcessReadHEIFRequest(CRequest* request, const char* pBu
 			// the loop entirely when no pixel is transparent (see
 			// AlphaBlendImageToBackground; pixel results are identical).
 			AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+			// NB-1 (scheme A): blend the precomputed alternate view
+			// with the same background as the base, so it matches
+			// the base exactly when the toggle swaps it in.
+			if (!gain.alternateBgra.empty()) {
+				AlphaBlendImageToBackground((uint32*)gain.alternateBgra.data(), (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
+			}
 
 			request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, nBPP, 0, IF_HEIF, false, request->FrameIndex, nFrameCount, nFrameTimeMs);
 			// Gain-map (HDR toggle): attach the extracted gain map
 			// (grayscale + metadata, not yet applied); the load-time
-			// rotation is mirrored onto it and the HDR view is applied
-			// in ProcessImageAfterLoad.
+			// rotation is mirrored onto it and the non-base view is
+			// applied in ProcessImageAfterLoad when the INI default
+			// asks for it.
 			if (gain.valid) {
 				request->Image->SetRetainedGainMap(std::move(gain));
 			}
@@ -3689,14 +3711,20 @@ CImageLoadThread::EAfterLoadResult CImageLoadThread::ProcessImageAfterLoad(CRequ
 
 	// Gain-map (HDR toggle): mirror the load-time rotation onto the
 	// retained gain map, then show the HDR view when the INI default
-	// is HDR. Both are best-effort: on any failure the image stays
-	// SDR. This runs before the NoProcessingAfterLoad early return,
-	// matching the old reader-time apply (which also ran when
-	// processing was off); the rotation itself is a load step, not a
-	// processing step.
+	// asks for it. The base view may itself be HDR (HDR-base file),
+	// so the toggle runs only when the wanted view differs from the
+	// base view: an HDR-base file already shows HDR, and stays on
+	// its base view when the default is HDR. Both are best-effort: on
+	// any failure the image stays on its base view. This runs before
+	// the NoProcessingAfterLoad early return, matching the old
+	// reader-time apply (which also ran when processing was off); the
+	// rotation itself is a load step, not a processing step.
 	request->Image->RotateRetainedGainMapAfterLoad();
-	if (CSettingsProvider::This().GainMapDefault() != 0) {
-		request->Image->ToggleHDR();
+	if (request->Image->HasGainMap()) {
+		const bool bWantHdr = CSettingsProvider::This().GainMapDefault() != 0;
+		if (bWantHdr != request->Image->IsGainMapBaseHdr()) {
+			request->Image->ToggleHDR();
+		}
 	}
 
 	// Do nothing (except rotation) if processing after load turned off

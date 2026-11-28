@@ -21,7 +21,16 @@
 // the tone mapper itself works on RGB only. (P2-B4: previously the
 // output alpha was forced opaque, so a transparent HDR pixel rendered
 // as a black block after the background blend.)
-static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp)
+// NB-1 (scheme A): when pGain points at a valid extracted gain map,
+// the ALTERNATE view is precomputed here from the 16-bit signal
+// (ApplyGainMapToBgra16 on the Pass-1 float buffer) BEFORE the tone
+// map below destroys it, and stored in pGain->alternateBgra. The
+// alternate view is SDR when the base is HDR (weight -1, inverse
+// gain). A failure here is not fatal: the lazy 8-bit path
+// (CJPEGImage::ComputeHdrBuffer) recomputes it on toggle. pGain may
+// be NULL (no gain map wanted); an invalid gain map is a no-op.
+static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp,
+	gainmap::ExtractedGainMap* pGain)
 {
 	size_t rgbSize = 0;
 	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &rgbSize))
@@ -30,7 +39,11 @@ static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, in
 	if (rgb == NULL)
 		return NULL;
 	// Pass 1: 16-bit BGRA -> float RGB (0..1). BGRA order: B, G, R, A.
+	// NB-1: track transparency here: the alternate-view apply below
+	// needs a separate 16-bit alpha plane, built only when some pixel
+	// is transparent (else NULL = opaque).
 	const uint16_t* p16 = (const uint16_t*)pixels16;
+	bool bHasTransparency = false;
 	for (int y = 0; y < height; y++)
 	{
 		for (int x = 0; x < width; x++)
@@ -40,10 +53,54 @@ static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, in
 			dst[0] = (float)((double)px[2] / 65535.0);
 			dst[1] = (float)((double)px[1] / 65535.0);
 			dst[2] = (float)((double)px[0] / 65535.0);
+			if (px[3] != 65535) {
+				bHasTransparency = true;
+			}
 		}
 	}
 	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cicp.transfer);
 	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cicp.primaries);
+	// NB-1 (scheme A): precompute the alternate view from the 16-bit
+	// signal (the float rgb buffer IS the signal
+	// ApplyGainMapToBgra16 takes) before the tone map below. The
+	// weight comes from the signed-weight formula at the alternate
+	// headroom (0 for an HDR base -> SDR view, max(base, alt) for an
+	// SDR base -> HDR view). The alpha plane is deinterleaved only
+	// when some pixel is transparent.
+	if (pGain != NULL && pGain->valid) {
+		const bool bBaseIsHdr = pGain->meta.baseHdrHeadroom > pGain->meta.alternateHdrHeadroom;
+		// H_alt: 0 for an HDR base (the alternate view is SDR), else
+		// max(base, alt) -- which IS the alternate headroom here,
+		// since !bBaseIsHdr means base <= alt.
+		const double hAlt = bBaseIsHdr ? 0.0 : pGain->meta.alternateHdrHeadroom;
+		const double wAlt = gainmap::ComputeGainWeight(pGain->meta, hAlt);
+		std::vector<uint16_t> alpha16;
+		const uint16_t* pAlpha = NULL;
+		if (bHasTransparency) {
+			try {
+				alpha16.resize((size_t)width * (size_t)height);
+			} catch (...) {
+				alpha16.clear();
+			}
+			if (!alpha16.empty()) {
+				for (size_t i = 0; i < (size_t)width * (size_t)height; ++i) {
+					alpha16[i] = p16[i * 4 + 3];
+				}
+				pAlpha = alpha16.data();
+			}
+		}
+		std::vector<uint8_t> alternate;
+		try {
+			alternate.resize((size_t)width * (size_t)height * 4);
+		} catch (...) {
+			alternate.clear();
+		}
+		if (!alternate.empty() && gainmap::ApplyGainMapToBgra16(rgb, width, height, transfer, primaries,
+				pGain->gray.data(), pGain->width, pGain->height, pGain->meta, wAlt,
+				pAlpha, 65535, alternate.data(), (size_t)width * 4)) {
+			pGain->alternateBgra = std::move(alternate);
+		}
+	}
 	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)width * height, transfer, primaries);
 	// P2-C3: precompute the EETF parameters once per image (the
 	// per-pixel ConvertPixel call recomputed them every pixel).
@@ -109,12 +166,14 @@ static unsigned char* ConvertAvifHdrToSdr(const uint8_t* pixels16, int width, in
 // headroom and bakes in its own tone mapping, while JPEGView wants
 // the full reconstruction (weight 1.0) plus its own BT.2390 path.
 //
-// ExtractAvifGainMap runs only on the SDR path (a gain-map AVIF is
-// SDR base + gain map, never PQ/HLG) and fills the extracted gain
-// map (grayscale + metadata) without applying it, or returns false
-// when there is no gain map or anything fails -- the caller keeps
-// the base BGRA unchanged in that case. A broken gain map must
-// never fail the whole load.
+// ExtractAvifGainMap fills the extracted gain map (grayscale +
+// metadata) without applying it, or returns false when there is no
+// gain map or anything fails -- the caller keeps the base BGRA
+// unchanged in that case. A broken gain map must never fail the
+// whole load. NB-1: the base may be HDR (PQ/HLG) as well as SDR --
+// an HDR base carries a gain map too, and its alternate view is the
+// SDR view (weight -1). The caller hoists this before the HDR
+// conversion, so the 16-bit signal is still available.
 
 // avifSignedFraction/avifUnsignedFraction -> double. Returns false
 // when the denominator is 0 or the value is non-finite.
@@ -223,14 +282,16 @@ static bool DecodeAvifGainMapGray(const avifGainMap* gainMap, int baseWidth, int
 	return true;
 }
 
-// Extract the gain map of an SDR AVIF base image, if it has one.
-// Fills `outGain` (grayscale + metadata) WITHOUT applying it; the
-// load thread attaches it to the image and applies it on demand, or
-// at load when GainMapDefault() is HDR. Returns false when there is
-// no gain map or anything fails -- the caller keeps the SDR base
-// unchanged in that case. A broken gain map must never fail the load.
-// The fused apply moved out of this function; ApplyGainMapToBgra is
-// now called from CJPEGImage::ComputeHdrBuffer.
+// Extract the gain map of an AVIF base image (SDR or HDR), if it
+// has one. Fills `outGain` (grayscale + metadata) WITHOUT applying
+// it; the load thread attaches it to the image and applies it on
+// demand, or at load when GainMapDefault() asks for the non-base
+// view. Returns false when there is no gain map or anything fails --
+// the caller keeps the base unchanged in that case. A broken gain
+// map must never fail the load. The fused apply moved out of this
+// function; ApplyGainMapToBgra is now called from
+// CJPEGImage::ComputeHdrBuffer, and the 16-bit alternate view is
+// precomputed in ConvertAvifHdrToSdr (scheme A).
 static bool ExtractAvifGainMap(const avifImage* image,
 	int width, int height, gainmap::ExtractedGainMap& outGain)
 {
@@ -445,11 +506,39 @@ void* AvifReader::ReadImage(int& width,
 		DeleteCache();
 		return NULL;
 	}
+	// The transform flags come from the parsed header and do not
+	// change during decode/conversion, so they are read here (before
+	// the HDR conversion) instead of below.
+	avifTransformFlags flags = cache.decoder->image->transformFlags;
+	// NB-1: extract the gain map BEFORE the HDR conversion below: the
+	// conversion tone-maps the 16-bit signal to 8-bit SDR, and the
+	// alternate view (scheme A, computed in ConvertAvifHdrToSdr)
+	// needs the 16-bit signal. The gate drops the old !isHdr (an HDR
+	// base can carry a gain map too) but keeps flags ==
+	// AVIF_TRANSFORM_NONE: the clap/irot/imir transforms below apply
+	// to the base pixels only, so a transformed base would no longer
+	// align with the gain map. The gain is assigned to *pGainOut at
+	// the old location below. When flags == NONE (the only case the
+	// extraction runs) the transforms are no-ops, so the width/height
+	// passed here equal the post-transform ones the old code passed.
+	gainmap::ExtractedGainMap gain;
+	if (flags == AVIF_TRANSFORM_NONE && pGainOut != NULL) {
+		// P2-A1: gain-map work allocates (gainGray.assign). A
+		// bad_alloc here must not fail the whole load -- fall back
+		// to the base view.
+		try {
+			ExtractAvifGainMap(cache.decoder->image, width, height, gain);
+		} catch (...) {
+			// Keep the base image; the gain map is optional.
+		}
+	}
 	if (isHdr) {
 		// HDR: tone-map the 16-bit BGRA to 8-bit BGRA now, so the
 		// clap/irot/imir transforms below (which expect 32bpp) and
 		// the rest of the pipeline see the same 8-bit BGRA as SDR.
-		unsigned char* pixels8 = ConvertAvifHdrToSdr(cache.rgb.pixels, width, height, cicp);
+		// The gain (when valid) rides along so the alternate view is
+		// precomputed from the 16-bit signal before it is destroyed.
+		unsigned char* pixels8 = ConvertAvifHdrToSdr(cache.rgb.pixels, width, height, cicp, &gain);
 		if (pixels8 == NULL) {
 			delete[] cache.rgb.pixels;
 			outOfMemory = true;
@@ -461,8 +550,8 @@ void* AvifReader::ReadImage(int& width,
 		cache.rgb.rowBytes = (uint32_t)(width * 4);
 	}
 
-	// Handle clap, irot and imir boxes
-	avifTransformFlags flags = cache.decoder->image->transformFlags;
+	// Handle clap, irot and imir boxes (flags was read above,
+	// before the HDR conversion).
 	if (flags & AVIF_TRANSFORM_CLAP) {
 		avifCleanApertureBox* clap = &cache.decoder->image->clap;
 		avifCropRect crop;
@@ -510,26 +599,16 @@ void* AvifReader::ReadImage(int& width,
 			cache.transform = ICCProfileTransform::CreateTransform(icc.data, icc.size, ICCProfileTransform::FORMAT_BGRA);
 		ICCProfileTransform::DoTransform(cache.transform, cache.rgb.pixels, cache.rgb.pixels, width, height);
 	}
-	if (!isHdr && flags == AVIF_TRANSFORM_NONE && pGainOut != NULL) {
-		// Gain-map (Option D, Phase 4): an SDR AVIF with a gain map is
-		// an HDR photo -- extract the gain map (grayscale + metadata,
-		// NOT applied); the load thread attaches it to the image and
-		// applies it on demand, or at load when GainMapDefault() is
-		// HDR. ExtractAvifGainMap returns false when there is no gain
-		// map or anything fails; the SDR base is kept unchanged then.
-		// It runs after the ICC transform (the base it reconstructs
-		// from is sRGB, like the HEIF path).
-		// P2-A1: gain-map work allocates (gainGray.assign). A
-		// bad_alloc here must not fail the whole load -- fall back
-		// to SDR.
-		try {
-			gainmap::ExtractedGainMap gain;
-			if (ExtractAvifGainMap(cache.decoder->image, width, height, gain)) {
-				*pGainOut = std::move(gain);
-			}
-		} catch (...) {
-			// Keep the SDR base image; the gain map is optional.
-		}
+	if (pGainOut != NULL && gain.valid) {
+		// Gain-map (Option D, Phase 4): the gain was extracted before
+		// the HDR conversion above (the 16-bit signal is gone by now);
+		// assign it here, at the old extraction location, so the load
+		// thread attaches it (with the precomputed alternate view,
+		// when present) and applies it on demand, or at load when
+		// GainMapDefault() asks for the non-base view. (The ICC
+		// transform above ran on the base only; the lazy SDR alternate
+		// is reconstructed from that sRGB base, as before.)
+		*pGainOut = std::move(gain);
 	}
 
 	avifRWData exif = cache.decoder->image->exif;

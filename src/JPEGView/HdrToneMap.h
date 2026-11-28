@@ -137,6 +137,28 @@ double Bt2390EetfPqWithParams(double signal, const Bt2390Params& params);
 // per-pixel loop runs, after its table lookup.
 void GamutMap(double* r, double* g, double* b);
 
+// Gamut inverse matrix (source primaries -> sRGB), or NULL for sRGB
+// (BT.709: identity, no matrix needed). Public so the 16-bit
+// gain-map apply (GainMap.cpp) can run the same step
+// ConvertPixelWithParams runs, after its own signal->linear
+// conversion. Moved out of the anonymous namespace in HdrToneMap.cpp
+// for this (like GamutMap/ToByte before it).
+const double (*GamutInverse(Primaries primaries))[3];
+
+// Luma coefficients (Y row of the RGB-to-XYZ matrix) for the given
+// primaries (sRGB coefficients for BT.709/unknown). Public so the
+// 16-bit gain-map apply can compute the content peak in the source
+// gamut (approach (a) in the NB-1 plan: by luminance invariance this
+// equals the post-inverse sRGB peak).
+const double* GamutLuma(Primaries primaries);
+
+// HLG OOTF forward (BT.2100): scene-linear RGB -> display-linear RGB
+// (SDR white = 1.0) in the target gamut. Public so the 16-bit
+// gain-map apply can run the same HLG conversion ComputePeakNits
+// runs, without its EETF.
+void HlgOotfForward(double sceneR, double sceneG, double sceneB, const double luma[3],
+                    double* outR, double* outG, double* outB);
+
 // Linear sRGB code -> 8-bit byte: Clamp01 * 255 + 0.5, round to
 // nearest. Public so the gain-map fused path can finish pixels
 // exactly the way the per-pixel loop does.

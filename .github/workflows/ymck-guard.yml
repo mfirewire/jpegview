@@ -273,3 +273,16 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_rotate_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/gainmap_rotate_test
           /tmp/gainmap_rotate_test
+  gainmap-signed-weight-test:
+    name: Gain-map signed-weight unification test (NB-1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Gain-map signed-weight test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_signed_weight_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/gainmap_signed_weight_test
+          /tmp/gainmap_signed_weight_test

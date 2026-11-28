@@ -184,7 +184,8 @@ double SrgbToLinearDouble(double c) {
 // Shared validation + table building for ApplyGainMap and the fused
 // entry points. Validates the metadata and weightFactor (same contract
 // as ApplyGainMap), clamps the gain range to [-16, +16] stops
-// (P3-A2+P3-B3) and weightFactor to [0,1], and builds the two
+// (P3-A2+P3-B3) and weightFactor to [-1,1] (NB-1: a negative weight is
+// the inverse gain, HDR base -> SDR view), and builds the two
 // 256-entry tables. Returns false on bad input (tables untouched).
 // The clamp comment from ApplyGainMap applies: a corrupt/hostile file
 // could carry gainMapMin/Max of +/-1e308; logBoost is a convex
@@ -206,8 +207,10 @@ bool BuildGainTables(const Metadata& meta, double weightFactor,
     if (std::isnan(weightFactor)) {
         return false;
     }
-    if (weightFactor < 0.0) {
-        weightFactor = 0.0;
+    // NB-1: the clamp is [-1,1], not [0,1]: a negative weight is the
+    // inverse gain (HDR base -> SDR view), not "no gain".
+    if (weightFactor < -1.0) {
+        weightFactor = -1.0;
     }
     if (weightFactor > 1.0) {
         weightFactor = 1.0;
@@ -752,10 +755,10 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
     // false and the caller shows SDR — a packet with both hdrgm and
     // a valid Apple Headroom yields no gain map at all. No such
     // packet is known to exist (Apple files carry no hdrgm;
-    // UltraHDR files carry no Apple version). Note the HEIF caller
-    // (TryApplyHeifGainMap) is currently disabled and returns NULL
-    // up front (SDR-for-now, user decision 2026-11-21), so this
-    // branch's result presently reaches only the JPEG/AVIF callers.
+    // UltraHDR files carry no Apple version). The HEIF caller is
+    // TryParseGainMapXmp (HEIFWrapper.cpp, enabled since the HEIF
+    // gain-map re-enable), so this branch's result reaches the JPEG,
+    // AVIF, and HEIF callers.
     if (!anyHdrgm) {
         double headroom = 0.0;
         if (FindXmpField(xmp, "HDRGainMapHeadroom", headroom)) {
@@ -782,6 +785,11 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
                 return false;
             }
             out.gainMapMax = std::log2(headroom);
+            // NB-1 (plan section 2.6): the single Apple number is both
+            // the max log boost and the alternate headroom -- Apple
+            // exposes no independent alternate headroom, so the one
+            // number carries both meanings. Base stays 0.0.
+            out.alternateHdrHeadroom = out.gainMapMax;
             out.gainMapMin = 0.0;
             out.gamma = hasAppleGamma ? appleGamma : 1.0;
             out.baseOffset = 0.0;
@@ -1000,6 +1008,39 @@ bool FindXmpPacket(const unsigned char* jpeg, int sizebytes, const unsigned char
 	return false;
 }
 
+double ComputeGainWeight(const Metadata& meta, double displayHeadroom) {
+    const double base = meta.baseHdrHeadroom;
+    const double alt = meta.alternateHdrHeadroom;
+    // Degenerate / invalid headroom: the formula is undefined when
+    // base == alt (zero denominator), and corrupt when a headroom is
+    // non-finite or negative (headroom is log2 of a ratio >= 1, so it
+    // must be finite and >= 0). Fall back to the legacy SDR-base
+    // direction, as a step at the HDR headroom: H >= max(base, alt)
+    // -> full gain (+1), below it -> base (0). This is the formula's
+    // limit as alt -> base, and for base == alt == 0 the step sits at
+    // 0, so the alternate (HDR) view still gets +1. The check runs
+    // BEFORE any division, so base == alt never divides by zero.
+    // An invalid headroom returns +1 outright (the alternate view is
+    // the HDR view in the legacy direction); a NaN displayHeadroom
+    // falls through to f = NaN below and is clamped to 0 (base view).
+    if (!std::isfinite(base) || !std::isfinite(alt) || base < 0.0 || alt < 0.0) {
+        return 1.0;
+    }
+    if (base == alt) {
+        return (displayHeadroom >= base) ? 1.0 : 0.0;
+    }
+    // f = clamp((H - base) / (alt - base), 0, 1); w = sign(alt - base) * f.
+    // The denominator is non-zero here (base != alt, checked above).
+    double f = (displayHeadroom - base) / (alt - base);
+    if (!(f >= 0.0)) {
+        f = 0.0;  // also catches NaN (a NaN displayHeadroom)
+    }
+    if (f > 1.0) {
+        f = 1.0;
+    }
+    return (alt > base ? 1.0 : -1.0) * f;
+}
+
 bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
                   const uint8_t* gainMap, int gainW, int gainH,
                   const Metadata& meta, double weightFactor, float* outLinear) {
@@ -1052,6 +1093,150 @@ bool ApplyGainMapToBgra(const uint8_t* baseBgra, int width, int height, size_t b
                         uint8_t* outBgra, size_t outStride) {
     return FusedApply(baseBgra, width, height, baseStride, gainMap, gainW, gainH,
                       meta, weightFactor, outBgra, outStride, 4);
+}
+
+// 16-bit-base gain-map apply (NB-1): the alternate (non-base) view
+// from a 16-bit HDR base. The signal -> linear conversion is the
+// plain one (no EETF): PQ via PqSignalToNits/203, HLG via
+// HlgSignalToSceneLinear + HlgOotfForward -- the same conversion
+// HdrToneMap::ComputePeakNits uses without its EETF. Do NOT call
+// ConvertPixelWithParams here: it applies the BT.2390 EETF on the
+// input, and the EETF runs only once, on the output side below
+// (ConvertLinearPixelWithParams). The content peak is the max
+// source-gamut luminance of the POST-gain linear values (approach (a)
+// in the plan: by luminance invariance this equals the post-inverse
+// sRGB peak); it drives the EETF parameters.
+bool ApplyGainMapToBgra16(const float* baseSignalRgb, int width, int height,
+                          HdrToneMap::Transfer transfer, HdrToneMap::Primaries primaries,
+                          const uint8_t* gainMap, int gainW, int gainH,
+                          const Metadata& meta, double weightFactor,
+                          const uint16_t* alpha16, uint32_t alphaMaxVal,
+                          uint8_t* outBgra, size_t outStride) {
+    if (baseSignalRgb == nullptr || gainMap == nullptr || outBgra == nullptr) {
+        return false;
+    }
+    if (width <= 0 || height <= 0 || gainW <= 0 || gainH <= 0) {
+        return false;
+    }
+    // Stride guards (same shape as FusedApply): a BGRA row is width*4.
+    const size_t rowBytes = (size_t)width * 4;
+    if (outStride < rowBytes) {
+        return false;
+    }
+    if (outStride > ((size_t)-1 - rowBytes) / (size_t)height) {
+        return false;
+    }
+    if (alpha16 != nullptr && alphaMaxVal == 0) {
+        return false;
+    }
+    double boostTable[256], srgbTable[256];
+    if (!BuildGainTables(meta, weightFactor, boostTable, srgbTable)) {
+        return false;
+    }
+    // The sRGB table is built (and validated) by the shared builder
+    // but unused on this path: the base arrives as float signal,
+    // not 8-bit sRGB bytes.
+    (void)srgbTable;
+    // Upsample the gain map to base resolution when it differs.
+    const uint8_t* gain = gainMap;
+    std::vector<uint8_t> upsampled;
+    if (gainW != width || gainH != height) {
+        // OOM while upsampling: fail the apply, do not throw.
+        try {
+            upsampled.resize((size_t)width * (size_t)height);
+        } catch (...) {
+            return false;
+        }
+        BilinearUpsampleGray(gainMap, gainW, gainH, upsampled.data(), width, height);
+        gain = upsampled.data();
+    }
+    const size_t pixelCount = (size_t)width * (size_t)height;
+    // Post-gain linear buffer (source gamut, SDR white = 1.0): the
+    // content peak must be known before the EETF parameters are built,
+    // so the linear values are stored, not streamed.
+    std::vector<float> linear;
+    try {
+        linear.resize(pixelCount * 3);
+    } catch (...) {
+        return false;
+    }
+    const double* luma = HdrToneMap::GamutLuma(primaries);
+    double peakLinear = 0.0;
+    for (size_t i = 0; i < pixelCount; ++i) {
+        double sr = (double)baseSignalRgb[i * 3 + 0];
+        double sg = (double)baseSignalRgb[i * 3 + 1];
+        double sb = (double)baseSignalRgb[i * 3 + 2];
+        double linR, linG, linB;
+        if (transfer == HdrToneMap::Transfer::kPq) {
+            linR = HdrToneMap::PqSignalToNits(sr) / HdrToneMap::kSdrWhiteNits;
+            linG = HdrToneMap::PqSignalToNits(sg) / HdrToneMap::kSdrWhiteNits;
+            linB = HdrToneMap::PqSignalToNits(sb) / HdrToneMap::kSdrWhiteNits;
+        } else if (transfer == HdrToneMap::Transfer::kHlg) {
+            double scr = HdrToneMap::HlgSignalToSceneLinear(sr);
+            double scg = HdrToneMap::HlgSignalToSceneLinear(sg);
+            double scb = HdrToneMap::HlgSignalToSceneLinear(sb);
+            HdrToneMap::HlgOotfForward(scr, scg, scb, luma, &linR, &linG, &linB);
+        } else {
+            // Not an HDR transfer: pass the signal through as linear
+            // (the caller gates on IsHdr, so this is only a safety net;
+            // same as ConvertPixelWithParams' else branch).
+            linR = sr < 0.0 ? 0.0 : (sr > 1.0 ? 1.0 : sr);
+            linG = sg < 0.0 ? 0.0 : (sg > 1.0 ? 1.0 : sg);
+            linB = sb < 0.0 ? 0.0 : (sb > 1.0 ? 1.0 : sb);
+        }
+        // Gain: (linear + baseOffset) * boost - alternateOffset.
+        const double boost = boostTable[gain[i]];
+        linear[i * 3 + 0] = (float)((linR + meta.baseOffset) * boost - meta.alternateOffset);
+        linear[i * 3 + 1] = (float)((linG + meta.baseOffset) * boost - meta.alternateOffset);
+        linear[i * 3 + 2] = (float)((linB + meta.baseOffset) * boost - meta.alternateOffset);
+        // Content peak on the stored (float) values, like
+        // PeakLinearFromBytes: negatives/NaN contribute 0, and a
+        // non-finite peak falls back to 1.0 below.
+        double pr = (double)linear[i * 3 + 0];
+        double pg = (double)linear[i * 3 + 1];
+        double pb = (double)linear[i * 3 + 2];
+        if (!(pr >= 0.0)) pr = 0.0;
+        if (!(pg >= 0.0)) pg = 0.0;
+        if (!(pb >= 0.0)) pb = 0.0;
+        double yLum = pr * luma[0] + pg * luma[1] + pb * luma[2];
+        if (yLum > peakLinear) peakLinear = yLum;
+    }
+    if (!std::isfinite(peakLinear)) peakLinear = 1.0;
+    // Peak nits, floored at SDR white (PeakNitsFromLinear, inlined:
+    // that helper is static in HdrToneMap.cpp).
+    double peakNits = peakLinear * HdrToneMap::kSdrWhiteNits;
+    if (!(peakNits > 0.0)) peakNits = HdrToneMap::kSdrWhiteNits;
+    HdrToneMap::Bt2390Params params = HdrToneMap::Bt2390MakeParams(peakNits);
+    // Gamut inverse (NULL for sRGB: identity, like ConvertPixelWithParams).
+    const double (*inv)[3] = HdrToneMap::GamutInverse(primaries);
+    for (int y = 0; y < height; ++y) {
+        uint8_t* outRow = outBgra + (size_t)y * outStride;
+        for (int x = 0; x < width; ++x) {
+            const size_t i = (size_t)y * (size_t)width + (size_t)x;
+            double r = (double)linear[i * 3 + 0];
+            double g = (double)linear[i * 3 + 1];
+            double b = (double)linear[i * 3 + 2];
+            if (inv != NULL) {
+                double sr = inv[0][0] * r + inv[0][1] * g + inv[0][2] * b;
+                double sg = inv[1][0] * r + inv[1][1] * g + inv[1][2] * b;
+                double sb = inv[2][0] * r + inv[2][1] * g + inv[2][2] * b;
+                r = sr; g = sg; b = sb;
+            }
+            uint8_t outR = 0, outG = 0, outB = 0;
+            HdrToneMap::ConvertLinearPixelWithParams(r, g, b, peakLinear, params, outR, outG, outB);
+            uint8_t* op = outRow + (size_t)x * 4;
+            op[0] = outB;
+            op[1] = outG;
+            op[2] = outR;
+            if (alpha16 != nullptr) {
+                // Rounded, like the HEIF wrapper's existing formula.
+                op[3] = (uint8_t)(((uint64_t)alpha16[i] * 255 + alphaMaxVal / 2) / alphaMaxVal);
+            } else {
+                op[3] = (uint8_t)0xff;
+            }
+        }
+    }
+    return true;
 }
 
 void BilinearUpsampleGray(const uint8_t* src, int srcW, int srcH,

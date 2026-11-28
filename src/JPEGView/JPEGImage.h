@@ -357,19 +357,29 @@ public:
 	CRawMetadata* GetRawMetadata() { return m_pRawMetadata; }
 
 	// Gain-map (HDR) toggle support. The retained gain map is the
-	// native-resolution gray gain + metadata extracted at load; the HDR
-	// buffer is the tone-mapped reconstruction, computed on demand (or
-	// at load when GainMapDefault() is HDR). Both views share one pixel
-	// hash (fixed at construction from the SDR base) and one set of
-	// processing parameters; every consumer (display, save, copy, OCR,
-	// histogram) sees the currently active view.
+	// native-resolution gray gain + metadata extracted at load; the
+	// alternate-view buffer is the tone-mapped reconstruction,
+	// computed on demand (or at load when GainMapDefault() is HDR, or
+	// precomputed by the wrapper -- scheme A, NB-1). Both views share
+	// one pixel hash (fixed at construction from the base view) and one
+	// set of processing parameters; every consumer (display, save,
+	// copy, OCR, histogram) sees the currently active view. The base
+	// view is HDR when its headroom exceeds the alternate one
+	// (IsGainMapBaseHdr); the alternate view is then SDR, and the
+	// toggle weight is -1 (inverse gain) instead of +1.
 	bool HasGainMap() const { return m_gainMap.valid; }
 	bool IsShowingHDR() const { return m_bShowingHDR; }
+	// Whether the BASE view is HDR (base headroom > alternate
+	// headroom). False for SDR-base files and for images without a
+	// gain map.
+	bool IsGainMapBaseHdr() const {
+		return HasGainMap() && (m_gainMap.meta.baseHdrHeadroom > m_gainMap.meta.alternateHdrHeadroom);
+	}
 	// Takes ownership of an extracted gain map (move). No-op when !gain.valid.
 	void SetRetainedGainMap(gainmap::ExtractedGainMap&& gain);
-	// Flips between the SDR base and the HDR reconstruction. Computes
-	// the HDR buffer on first use; returns false when there is no gain
-	// map or the computation fails (the SDR view is kept then).
+	// Flips between the base view and the alternate view. Computes
+	// the alternate buffer on first use; returns false when there is
+	// no gain map or the computation fails (the base view is kept then).
 	bool ToggleHDR();
 	// Rotates the retained gain map by the rotation applied at load
 	// (m_rotationParams, set by VerifyRotationAfterLoad), so the gain
@@ -422,12 +432,15 @@ private:
 	int m_nInitOrigWidth, m_nInitOrigHeight; // original width of image when constructed (before any rotation and crop)
 	int m_nOriginalChannels;
 	// Gain-map (HDR) toggle state. m_pOrigPixels always holds the ACTIVE
-	// view; m_pHdrPixels holds the other view (NULL until the HDR buffer
-	// is computed). m_nHdrChannels is the channel count of m_pHdrPixels:
-	// each buffer keeps its own count, because GetDIBInternal may
-	// convert the displayed buffer 3->4ch in place (ConvertSrcTo4Channels)
-	// while the other buffer stays 3ch — a pointer-only swap would then
-	// misread it (M1). m_bShowingHDR tells which view is active.
+	// view; m_pHdrPixels holds the other view (NULL until the alternate
+	// buffer is computed -- at load when the wrapper precomputed it
+	// (scheme A, NB-1), or on first toggle). m_nHdrChannels is the
+	// channel count of m_pHdrPixels: each buffer keeps its own count,
+	// because GetDIBInternal may convert the displayed buffer 3->4ch in
+	// place (ConvertSrcTo4Channels) while the other buffer stays 3ch —
+	// a pointer-only swap would then misread it (M1). m_bShowingHDR
+	// tells which view is active (true = the HDR view, whether that is
+	// the base or the alternate).
 	unsigned char* m_pHdrPixels;
 	int m_nHdrChannels;
 	bool m_bShowingHDR;
@@ -589,14 +602,15 @@ private:
 	void InvalidateAllCachedPixelData();
 
 	// Gain-map helpers (see JPEGImage.cpp).
-	// Computes the HDR buffer from the active SDR base + retained gain
-	// map into m_pHdrPixels. Requires HasGainMap(), no HDR buffer yet,
-	// and the SDR view active. False on any failure (no HDR buffer then).
+	// Computes the alternate-view buffer from the active base view +
+	// retained gain map into m_pHdrPixels. Requires HasGainMap() and no
+	// alternate buffer yet. False on any failure (no alternate buffer
+	// then).
 	bool ComputeHdrBuffer();
-	// Swaps the active view back to the SDR base (pointer + channel
-	// count), so a following original-pixel edit applies to the SDR
-	// base. No-op when already showing SDR.
-	void EnsureSdrBaseActive();
+	// Swaps the active view back to the BASE view (pointer + channel
+	// count), so a following original-pixel edit applies to the base.
+	// No-op when already showing the base.
+	void EnsureBaseActive();
 	// Frees the alternate (HDR) buffer, if any.
 	void DropHdrBuffer();
 	// Frees the retained gain map (HasGainMap() goes false).

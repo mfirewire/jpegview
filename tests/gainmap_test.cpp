@@ -851,13 +851,15 @@ void TestApplyGainMap() {
               Near(out[1], 0.21586050011389926, 1e-6) &&
               Near(out[2], 0.21586050011389926, 1e-6),
           "ApplyGainMap (b) gain 0 -> linear unchanged");
-    // weightFactor clamps: 2.0 behaves as 1.0, -1.0 behaves as 0.0.
+    // weightFactor clamps: 2.0 behaves as 1.0; -1.0 is the inverse
+    // gain (NB-1: the clamp is [-1,1], not [0,1]) -- gain 2^-1 = 0.5,
+    // so the linear value halves (0.2158605 * 0.5 = 0.10793025).
     Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, 2.0, out) &&
               Near(out[0], 0.4317210002277985, 1e-5),
           "ApplyGainMap weightFactor 2.0 clamps to 1.0");
     Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, -1.0, out) &&
-              Near(out[0], 0.21586050011389926, 1e-6),
-          "ApplyGainMap weightFactor -1.0 clamps to 0.0 (gain 1.0)");
+              Near(out[0], 0.10793025005694963, 1e-6),
+          "ApplyGainMap weightFactor -1.0 is the inverse gain (x 0.5)");
     // weightFactor 0.5: gain = 2^(1*0.5) = sqrt(2) ->
     // 0.2158605 * 1.41421356 = 0.305275...
     Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, 0.5, out) &&
@@ -897,15 +899,15 @@ void TestApplyGainMap() {
     Check(!ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, nanW, out),
           "ApplyGainMap NaN weightFactor rejected");
     // P3-A8 (5): weightFactor +-Inf clamps like the finite
-    // out-of-range values (+Inf -> 1.0, -Inf -> 0.0); only NaN
-    // rejects (checked above).
+    // out-of-range values (+Inf -> 1.0, -Inf -> -1.0, the inverse
+    // gain, NB-1); only NaN rejects (checked above).
     double infW = HUGE_VAL;
     Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, infW, out) &&
               Near(out[0], 0.4317210002277985, 1e-5),
           "ApplyGainMap weightFactor +Inf clamps to 1.0");
     Check(ApplyGainMap(base, 1, 1, gainFull, 1, 1, m, -infW, out) &&
-              Near(out[0], 0.21586050011389926, 1e-6),
-          "ApplyGainMap weightFactor -Inf clamps to 0.0 (gain 1.0)");
+              Near(out[0], 0.10793025005694963, 1e-6),
+          "ApplyGainMap weightFactor -Inf clamps to -1.0 (inverse gain)");
     Metadata invalid;
     Check(!ApplyGainMap(base, 1, 1, gainFull, 1, 1, invalid, 1.0, out),
           "ApplyGainMap invalid metadata rejected");
@@ -1052,13 +1054,14 @@ void TestApplyGainMapLutExact() {
         Check(ran, "ApplyGainMap LUT param set succeeds");
         // Reference: direct-pow ISO formula, same expression order as
         // GainMap.h documents (gainMapMin/Max clamped to +/-16 and
-        // weightFactor to [0,1], mirroring ApplyGainMap's contract).
+        // weightFactor to [-1,1], mirroring ApplyGainMap's contract;
+        // NB-1: a negative weight is the inverse gain, not "no gain").
         // Skipped when the call above failed (no output to compare);
         // `exact` stays false so the check below still records it.
         double gmin = std::min(16.0, std::max(-16.0, p.gainMapMin));
         double gmax = std::min(16.0, std::max(-16.0, p.gainMapMax));
         double w = p.weightFactor;
-        if (w < 0.0) w = 0.0;
+        if (w < -1.0) w = -1.0;
         if (w > 1.0) w = 1.0;
         double invGamma = 1.0 / p.gamma;
         bool exact = false;

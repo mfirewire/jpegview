@@ -56,6 +56,8 @@
 #include <string>
 #include <vector>
 
+#include "HdrToneMap.h"  // Transfer/Primaries for ApplyGainMapToBgra16 (NB-1)
+
 namespace gainmap {
 
 // Gain-map metadata. `valid` is false until a parser has filled the
@@ -208,13 +210,29 @@ bool FindXmpPacket(const unsigned char* jpeg, int sizebytes,
 // The endpoints agree under gainMapMax = log2(headroom) (g=0 -> 1x, g=1 ->
 // headroom), but the mid-tones differ. No separate linear apply path is
 // implemented (no strong evidence it matches what Photos shows).
+// Signed gain-map weight for a display headroom H (log2 stops).
+//   f = clamp((H - base) / (alt - base), 0, 1); w = sign(alt - base) * f
+// where base = meta.baseHdrHeadroom, alt = meta.alternateHdrHeadroom.
+// H is a LOGICAL display headroom (JPEGView has no HDR display): the
+// caller passes 0 for the SDR view and max(base, alt) for the HDR view.
+// Degenerate (base == alt), non-finite, or negative headroom falls back
+// to the legacy SDR-base direction (HDR view w = +1, SDR view w = 0);
+// the degenerate check runs BEFORE the division, so base == alt never
+// divides by zero. base == alt == 0 behaves exactly as the old
+// weight-1.0 HDR view; base == alt > 0 is new behaviour (a file the
+// old gates skipped now gets legacy handling -- see the NB-1 plan).
+// Returns the weight in [-1, 1]: +1 full forward gain, 0 base unchanged,
+// -1 full inverse gain (HDR base -> SDR view).
+double ComputeGainWeight(const Metadata& meta, double displayHeadroom);
+
 // Reconstruct scene-linear HDR float RGB from an 8-bit sRGB base image
 // and a single-channel 8-bit gain map, using the ISO 21496-1 formula
 // above. `baseSrgb` is width*height*3 bytes, 8-bit sRGB, RGB order.
 // `gainMap` is gainW*gainH bytes, 8-bit grayscale; it is upsampled
 // bilinearly to base size when gainW/gainH differ from width/height.
 // `meta` must be valid (see Metadata). `weightFactor` is clamped to
-// [0,1] (0 = SDR base unchanged, 1 = full HDR). `outLinear` is
+// [-1,1] (-1 = full inverse gain, 0 = SDR base unchanged, 1 = full HDR).
+// `outLinear` is
 // width*height*3 floats, RGB order, scene-linear. Double math is used
 // internally; the output is float. Returns false on bad input (null
 // pointers, non-positive dimensions, !meta.valid, invalid gamma /
@@ -257,6 +275,38 @@ bool ApplyGainMapToBgra(const uint8_t* baseBgra, int width, int height, size_t b
                         const Metadata& meta, double weightFactor,
                         uint8_t* outBgra, size_t outStride);
 
+// 16-bit-base gain-map apply (NB-1 signed-weight unification).
+// Reconstructs the alternate (non-base) view from a 16-bit HDR base:
+// `baseSignalRgb` is width*height*3 floats, RGB order, signal values
+// [0,1] in the source transfer/gamut (the same domain
+// HdrToneMap::ConvertPixelWithParams takes). `gainMap` is gainW*gainH
+// bytes, 8-bit grayscale (upsampled bilinearly when it differs from
+// width/height). `weightFactor` is clamped to [-1,1] (-1 = full inverse
+// gain for an HDR base, +1 = full forward gain). `alpha16` is an
+// optional width*height 16-bit alpha plane (NULL = fully opaque);
+// `alphaMaxVal` is its full-scale value (65535 for AVIF/JXL,
+// (1<<bpp)-1 for HEIF); the output alpha is alpha16*255/alphaMaxVal
+// (rounded). `outBgra` is width*height*4 bytes, BGRA order, with
+// `outStride` bytes between rows.
+// Per pixel: signal -> display-linear (PQ: PqSignalToNits/203; HLG:
+// HlgSignalToSceneLinear + HlgOotfForward; other transfers pass the
+// signal through as linear) WITHOUT any EETF -- the EETF runs only once,
+// on the output side via ConvertLinearPixelWithParams -- then the gain
+// ((linear + baseOffset) * boost - alternateOffset), then the content
+// peak (max source-gamut luminance of the post-gain linear values,
+// negatives/NaN as 0, non-finite -> 1.0) drives the EETF, then the
+// gamut inverse (NULL-checked: sRGB is the identity) and the sRGB
+// OETF. Returns false on bad input (same contract as ApplyGainMap,
+// plus stride checks: a stride narrower than a row, or so large the
+// row arithmetic could wrap size_t, is rejected). On false the output
+// buffer is untouched and the caller keeps the base view.
+bool ApplyGainMapToBgra16(const float* baseSignalRgb, int width, int height,
+                          HdrToneMap::Transfer transfer, HdrToneMap::Primaries primaries,
+                          const uint8_t* gainMap, int gainW, int gainH,
+                          const Metadata& meta, double weightFactor,
+                          const uint16_t* alpha16, uint32_t alphaMaxVal,
+                          uint8_t* outBgra, size_t outStride);
+
 // Single-channel bilinear upsample. If src and dst are the same size
 // the buffer is copied. Source coordinates use centre alignment:
 // sx = (dx + 0.5) * srcW / dstW - 0.5 (same for y); edge pixels are
@@ -283,6 +333,17 @@ struct ExtractedGainMap {
     int height = 0;
     Metadata meta;
     bool valid = false;
+    // Precomputed alternate view (NB-1 scheme A): the non-base view
+    // (8-bit BGRA, baseWidth*baseHeight*4 bytes) computed by the
+    // wrapper from the 16-bit base at load, for HDR (PQ/HLG) bases
+    // with a gain map. Empty when the wrapper did not precompute it
+    // (SDR base, or the 16-bit apply failed); the lazy 8-bit path
+    // (CJPEGImage::ComputeHdrBuffer) then computes it on toggle.
+    // The buffer is at the PRE-rotation dimensions; the load-time
+    // rotation is mirrored onto it (CJPEGImage::Rotate /
+    // RotateOriginalPixels), and the reader alpha-blends it like the
+    // base before handing it over.
+    std::vector<uint8_t> alternateBgra;
 };
 
 // Rotate a single-channel gray image by `quarterTurns` clockwise

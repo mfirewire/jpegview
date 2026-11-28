@@ -47,7 +47,16 @@ bool JxlReader::ExifReserve(size_t new_size) {
 // the tone mapper itself works on RGB only. (P2-B4: previously the
 // output alpha was forced opaque, so a transparent HDR pixel rendered
 // as a black block after the background blend.)
-static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp)
+// NB-1 (scheme A): when pGain points at a valid extracted gain map,
+// the ALTERNATE view is precomputed here from the 16-bit signal
+// (ApplyGainMapToBgra16 on the Pass-1 float buffer) BEFORE the tone
+// map below destroys it, and stored in pGain->alternateBgra. The
+// alternate view is SDR when the base is HDR (weight -1, inverse
+// gain). A failure here is not fatal: the lazy 8-bit path
+// (CJPEGImage::ComputeHdrBuffer) recomputes it on toggle. pGain may
+// be NULL (no gain map wanted); an invalid gain map is a no-op.
+static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp,
+	gainmap::ExtractedGainMap* pGain)
 {
 	size_t rgbSize = 0;
 	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &rgbSize))
@@ -56,7 +65,11 @@ static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int
 	if (rgb == NULL)
 		return NULL;
 	// Pass 1: 16-bit RGBA -> float RGB (0..1). RGBA order: R, G, B, A.
+	// NB-1: track transparency here: the alternate-view apply below
+	// needs a separate 16-bit alpha plane, built only when some pixel
+	// is transparent (else NULL = opaque).
 	const uint16_t* p16 = (const uint16_t*)pixels16;
+	bool bHasTransparency = false;
 	for (int y = 0; y < height; y++)
 	{
 		for (int x = 0; x < width; x++)
@@ -66,10 +79,54 @@ static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int
 			dst[0] = (float)((double)px[0] / 65535.0);
 			dst[1] = (float)((double)px[1] / 65535.0);
 			dst[2] = (float)((double)px[2] / 65535.0);
+			if (px[3] != 65535) {
+				bHasTransparency = true;
+			}
 		}
 	}
 	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cicp.transfer);
 	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cicp.primaries);
+	// NB-1 (scheme A): precompute the alternate view from the 16-bit
+	// signal (the float rgb buffer IS the signal
+	// ApplyGainMapToBgra16 takes) before the tone map below. The
+	// weight comes from the signed-weight formula at the alternate
+	// headroom (0 for an HDR base -> SDR view, max(base, alt) for an
+	// SDR base -> HDR view). The alpha plane is deinterleaved only
+	// when some pixel is transparent.
+	if (pGain != NULL && pGain->valid) {
+		const bool bBaseIsHdr = pGain->meta.baseHdrHeadroom > pGain->meta.alternateHdrHeadroom;
+		// H_alt: 0 for an HDR base (the alternate view is SDR), else
+		// max(base, alt) -- which IS the alternate headroom here,
+		// since !bBaseIsHdr means base <= alt.
+		const double hAlt = bBaseIsHdr ? 0.0 : pGain->meta.alternateHdrHeadroom;
+		const double wAlt = gainmap::ComputeGainWeight(pGain->meta, hAlt);
+		std::vector<uint16_t> alpha16;
+		const uint16_t* pAlpha = NULL;
+		if (bHasTransparency) {
+			try {
+				alpha16.resize((size_t)width * (size_t)height);
+			} catch (...) {
+				alpha16.clear();
+			}
+			if (!alpha16.empty()) {
+				for (size_t i = 0; i < (size_t)width * (size_t)height; ++i) {
+					alpha16[i] = p16[i * 4 + 3];
+				}
+				pAlpha = alpha16.data();
+			}
+		}
+		std::vector<uint8_t> alternate;
+		try {
+			alternate.resize((size_t)width * (size_t)height * 4);
+		} catch (...) {
+			alternate.clear();
+		}
+		if (!alternate.empty() && gainmap::ApplyGainMapToBgra16(rgb, width, height, transfer, primaries,
+				pGain->gray.data(), pGain->width, pGain->height, pGain->meta, wAlt,
+				pAlpha, 65535, alternate.data(), (size_t)width * 4)) {
+			pGain->alternateBgra = std::move(alternate);
+		}
+	}
 	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)width * height, transfer, primaries);
 	// P2-C3: precompute the EETF parameters once per image (the
 	// per-pixel ConvertPixel call recomputed them every pixel).
@@ -460,13 +517,18 @@ static bool DecodeJxlGainMapGray(const uint8_t* code, size_t codeSize,
 // for the jhgm box, parses the bundle + ISO metadata (URN-less), and
 // decodes the nested codestream to grayscale. Returns false (leaves
 // *pGainOut untouched, valid stays false) when there is no gain map
-// or anything fails; the caller keeps the SDR base. Runs after
-// DecodeJpegXlOneShot, before DeleteCache(), so the file buffer is
-// still alive. Never returns true with an invalid map.
+// or anything fails; the caller keeps the base view. Runs after
+// DecodeJpegXlOneShot and before the HDR conversion, so the 16-bit
+// signal is still available for the alternate view (scheme A), and
+// before DeleteCache(), so the file buffer is still alive. Never
+// returns true with an invalid map. NB-1: the base may be HDR as
+// well as SDR -- the old isHdr gate and the baseHdrHeadroom > 0 gate
+// are both removed, so an HDR base with a gain map is extracted too
+// (its alternate view is the SDR view, weight -1).
 static bool ExtractJxlGainMap(const uint8_t* fileData, size_t fileSize,
-                              int baseWidth, int baseHeight, bool isHdr,
+                              int baseWidth, int baseHeight,
                               gainmap::ExtractedGainMap* pGainOut) {
-    if (isHdr || fileData == NULL || pGainOut == NULL) {
+    if (fileData == NULL || pGainOut == NULL) {
         return false;
     }
     const uint8_t* jhgm = NULL;
@@ -484,11 +546,6 @@ static bool ExtractJxlGainMap(const uint8_t* fileData, size_t fileSize,
     }
     gainmap::Metadata meta;
     if (!gainmap::ParseIso21496MetadataNoUrn(metadata, metadataSize, meta)) {
-        return false;
-    }
-    // HDR base + inverse gain is out of scope (plan §1): the native
-    // HDR path already handles HDR bases, so skip the gain map here.
-    if (meta.baseHdrHeadroom > 0.0) {
         return false;
     }
     gainmap::ExtractedGainMap gain;
@@ -572,12 +629,29 @@ void* JxlReader::ReadImage(int& width,
 		outOfMemory = true;
 		return NULL;
 	}
+	// NB-1: extract the gain map BEFORE the HDR conversion below:
+	// the conversion tone-maps the 16-bit signal to 8-bit SDR, and
+	// the alternate view (scheme A, computed in ConvertJxlHdrToSdr)
+	// needs the 16-bit signal. The gain is assigned to *pGainOut at
+	// the old location below. P2-A1 (AVIF): gain-map work allocates,
+	// so a bad_alloc here must not fail the whole load -- fall back
+	// to the base view.
+	gainmap::ExtractedGainMap gain;
+	if (pGainOut != NULL) {
+		try {
+			ExtractJxlGainMap(cache.data, cache.data_size, width, height, &gain);
+		} catch (...) {
+			// Keep the base image; the gain map is optional.
+		}
+	}
 	if (isHdr) {
 		// HDR: the pixels are 16-bit RGBA; tone-map them to 8-bit
 		// BGRA with the helper INSTEAD of the lcms2 ICC path (the
 		// ICC profile was not even fetched for HDR images). The
-		// helper is the only colour conversion on this path.
-		unsigned char* hdrPixels = ConvertJxlHdrToSdr(pixels.data(), width, height, cicp);
+		// helper is the only colour conversion on this path. The gain
+		// (when valid) rides along so the alternate view is
+		// precomputed from the 16-bit signal before it is destroyed.
+		unsigned char* hdrPixels = ConvertJxlHdrToSdr(pixels.data(), width, height, cicp, &gain);
 		if (hdrPixels == NULL) {
 			delete[] pPixelData;
 			outOfMemory = true;
@@ -605,22 +679,16 @@ void* JxlReader::ReadImage(int& width,
 		}
 	}
 
-	// Gain-map (HDR toggle): an SDR JXL with a jhgm box is an HDR
-	// photo -- extract the gain map (grayscale + metadata, NOT
-	// applied); the load thread attaches it to the image and applies
-	// it on demand, or at load when GainMapDefault() is HDR.
-	// ExtractJxlGainMap returns false when there is no gain map or
-	// anything fails; the SDR base is kept unchanged then. It runs
-	// after the decode (the base it reconstructs from is sRGB, like
-	// the AVIF/HEIF paths) and before DeleteCache() (the file buffer
-	// is still alive). P2-A1 (AVIF): gain-map work allocates, so a
-	// bad_alloc here must not fail the whole load -- fall back to SDR.
-	if (pGainOut != NULL) {
-		try {
-			ExtractJxlGainMap(cache.data, cache.data_size, width, height, isHdr, pGainOut);
-		} catch (...) {
-			// Keep the SDR base image; the gain map is optional.
-		}
+	// Gain-map (HDR toggle): the gain was extracted before the HDR
+	// conversion above (the 16-bit signal is gone by now); assign it
+	// here, at the old extraction location, so the load thread
+	// attaches it (with the precomputed alternate view, when present)
+	// and applies it on demand, or at load when GainMapDefault() asks
+	// for the non-base view. It runs before DeleteCache() (the file
+	// buffer is still alive). (The SDR alternate view is computed
+	// lazily on toggle, from the sRGB base, as before.)
+	if (pGainOut != NULL && gain.valid) {
+		*pGainOut = std::move(gain);
 	}
 
 	if (!has_animation)

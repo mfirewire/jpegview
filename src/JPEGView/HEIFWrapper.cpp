@@ -19,7 +19,16 @@
 // itself works on RGB only. (P2-B4: previously the output alpha was
 // forced opaque, so a transparent HDR pixel rendered as a black block
 // after the background blend.)
-static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int width, int height, int bpp, const HdrToneMap::Cicp& cicp)
+// NB-1 (scheme A): when pGain points at a valid extracted gain map,
+// the ALTERNATE view is precomputed here from the 16-bit signal
+// (ApplyGainMapToBgra16 on the Pass-1 float buffer) BEFORE the tone
+// map below destroys it, and stored in pGain->alternateBgra. The
+// alternate view is SDR when the base is HDR (weight -1, inverse
+// gain). A failure here is not fatal: the lazy 8-bit path
+// (CJPEGImage::ComputeHdrBuffer) recomputes it on toggle. pGain may
+// be NULL (no gain map wanted); an invalid gain map is a no-op.
+static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int width, int height, int bpp, const HdrToneMap::Cicp& cicp,
+	gainmap::ExtractedGainMap* pGain)
 {
 	size_t rgbSize = 0;
 	if (!IsImageBufferSizeOk((size_t)width * 3 * sizeof(float), (size_t)height, &rgbSize))
@@ -29,6 +38,12 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 		return NULL;
 	const double maxVal = (double)((1 << bpp) - 1);
 	// Pass 1: 16-bit RGBA rows -> float RGB (0..1). RGBA order: R, G, B, A.
+	// NB-1: track transparency here: the alternate-view apply below
+	// needs a separate 16-bit alpha plane, built only when some pixel
+	// is transparent (else NULL = opaque). Alpha is in the native
+	// range [0, (1<<bpp)-1], like the samples.
+	const uint32_t maxValInt = (uint32_t)((1 << bpp) - 1);
+	bool bHasTransparency = false;
 	for (int y = 0; y < height; y++)
 	{
 		const uint16_t* row = (const uint16_t*)(data + (size_t)y * stride);
@@ -39,10 +54,58 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 			dst[0] = (float)((double)px[0] / maxVal);
 			dst[1] = (float)((double)px[1] / maxVal);
 			dst[2] = (float)((double)px[2] / maxVal);
+			if (px[3] != maxValInt) {
+				bHasTransparency = true;
+			}
 		}
 	}
 	HdrToneMap::Transfer transfer = HdrToneMap::TransferFromCode(cicp.transfer);
 	HdrToneMap::Primaries primaries = HdrToneMap::PrimariesFromCode(cicp.primaries);
+	// NB-1 (scheme A): precompute the alternate view from the 16-bit
+	// signal (the float rgb buffer IS the signal
+	// ApplyGainMapToBgra16 takes) before the tone map below. The
+	// weight comes from the signed-weight formula at the alternate
+	// headroom (0 for an HDR base -> SDR view, max(base, alt) for an
+	// SDR base -> HDR view). The alpha plane is deinterleaved only
+	// when some pixel is transparent; its full-scale value is the
+	// native maxVal, not 65535.
+	if (pGain != NULL && pGain->valid) {
+		const bool bBaseIsHdr = pGain->meta.baseHdrHeadroom > pGain->meta.alternateHdrHeadroom;
+		// H_alt: 0 for an HDR base (the alternate view is SDR), else
+		// max(base, alt) -- which IS the alternate headroom here,
+		// since !bBaseIsHdr means base <= alt.
+		const double hAlt = bBaseIsHdr ? 0.0 : pGain->meta.alternateHdrHeadroom;
+		const double wAlt = gainmap::ComputeGainWeight(pGain->meta, hAlt);
+		std::vector<uint16_t> alpha16;
+		const uint16_t* pAlpha = NULL;
+		if (bHasTransparency) {
+			try {
+				alpha16.resize((size_t)width * (size_t)height);
+			} catch (...) {
+				alpha16.clear();
+			}
+			if (!alpha16.empty()) {
+				for (int y = 0; y < height; y++) {
+					const uint16_t* row = (const uint16_t*)(data + (size_t)y * stride);
+					for (int x = 0; x < width; x++) {
+						alpha16[(size_t)y * width + x] = (row + x * 4)[3];
+					}
+				}
+				pAlpha = alpha16.data();
+			}
+		}
+		std::vector<uint8_t> alternate;
+		try {
+			alternate.resize((size_t)width * (size_t)height * 4);
+		} catch (...) {
+			alternate.clear();
+		}
+		if (!alternate.empty() && gainmap::ApplyGainMapToBgra16(rgb, width, height, transfer, primaries,
+				pGain->gray.data(), pGain->width, pGain->height, pGain->meta, wAlt,
+				pAlpha, maxValInt, alternate.data(), (size_t)width * 4)) {
+			pGain->alternateBgra = std::move(alternate);
+		}
+	}
 	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)width * height, transfer, primaries);
 	// P2-C3: precompute the EETF parameters once per image (the
 	// per-pixel ConvertPixel call recomputed them every pixel).
@@ -72,9 +135,9 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 			dst[1] = g;
 			dst[2] = r;
 			// P2-B4: copy the source alpha, scaled by the native
-			// maxVal (bpp 8..16, so (1<<bpp)-1 fits in uint32_t).
+			// maxVal (bpp 8..16, so (1<<bpp)-1 fits in uint32_t;
+			// maxValInt is computed in Pass 1 above).
 			const uint16_t* px = row + x * 4;
-			const uint32_t maxValInt = (uint32_t)((1 << bpp) - 1);
 			dst[3] = (uint8_t)(((uint32_t)px[3] * 255 + maxValInt / 2) / maxValInt);
 		}
 	}
@@ -89,8 +152,9 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 // metadata carrying the reconstruction parameters. The aux type URNs are
 // "urn:com:apple:photo:2020:aux:hdrgainmap" (Apple, iOS 17+) and
 // "urn:iso:std:iso:ts:21496:-1" (ISO); both are accepted (match on
-// "hdrgainmap" or "21496"). A gain-map HEIF is SDR (isHdr == false), so
-// this runs only on the SDR path; PQ/HLG HEIFs are untouched.
+// "hdrgainmap" or "21496"). NB-1: the base may be HDR (PQ/HLG) as
+// well as SDR -- an HDR base carries a gain map too, and its alternate
+// view is the SDR view (weight -1). The extraction runs on both paths.
 //
 // The C++ wrapper (heif_cxx.h) has no aux-image API, so the C API in
 // heif_aux_images.h is used directly. heif::ImageHandle takes ownership
@@ -252,12 +316,13 @@ static bool TryParseGainMapXmp(const heif::ImageHandle& handle, gainmap::Metadat
 	return false;
 }
 
-// Extract the gain map of an SDR HEIF base image, if it has one.
-// Fills `outGain` (grayscale + metadata) WITHOUT applying it; the
+// Extract the gain map of a HEIF base image (SDR or HDR), if it has
+// one. Fills `outGain` (grayscale + metadata) WITHOUT applying it; the
 // load thread attaches it to the image and applies it on demand, or
-// at load when GainMapDefault() is HDR. Returns false when there is
-// no gain map or anything fails -- the caller keeps the SDR base
-// unchanged in that case. XMP is tried on the primary image first,
+// at load when GainMapDefault() asks for the non-base view. Returns
+// false when there is no gain map or anything fails -- the caller
+// keeps the base unchanged in that case. XMP is tried on the primary
+// image first,
 // then on the gain-map item itself (the gain-map item may carry its
 // own XMP). Any exception from the libheif C++ wrapper
 // (decode_image / get_metadata throw heif::Error) is caught here
@@ -334,9 +399,10 @@ void * HeifReader::ReadImage(int &width,
 	// means not HDR. Only PQ/HLG take the HDR path: decode to 16-bit
 	// and run the tone mapper. SDR keeps the 8-bit RGBA decode and
 	// the exact pre-existing path. Gain-map HEIFs (iPhone HDR photos)
-	// take the SDR path too, and ExtractHeifGainMap (below) extracts
-	// the gain map when one is present; the load thread attaches it
-	// and applies it on demand, or at load when GainMapDefault() is HDR.
+	// usually take the SDR path, but an HDR base can carry a gain map
+	// too; ExtractHeifGainMap (below) extracts it on both paths, the
+	// load thread attaches it and applies it on demand, or at load
+	// when GainMapDefault() asks for the non-base view.
 	HdrToneMap::Cicp cicp;
 	bool isHdr = false;
 	{
@@ -403,6 +469,22 @@ void * HeifReader::ReadImage(int &width,
 		outOfMemory = true;
 		return NULL;
 	}
+	// NB-1: extract the gain map BEFORE the if/else below, on both
+	// paths (the old code extracted it only in the SDR branch). The
+	// extraction reads the aux image + XMP, not the base pixels, so
+	// it does not depend on the HDR conversion; the HDR branch passes
+	// it into ConvertHeifHdrToSdr so the alternate view is precomputed
+	// from the 16-bit signal (scheme A). The gain is assigned to
+	// *pGainOut after the if/else. The extraction is skipped entirely
+	// when the caller does not want the gain map (pGainOut == NULL).
+	gainmap::ExtractedGainMap gain;
+	if (pGainOut != NULL) {
+		try {
+			ExtractHeifGainMap(handle, width, height, gain);
+		} catch (...) {
+			// Keep the base image; the gain map is optional.
+		}
+	}
 	if (isHdr) {
 		// HDR: tone-map the 16-bit RGBA plane to 8-bit BGRA. The bit
 		// depth comes from the decoded image: libheif keeps the
@@ -421,7 +503,7 @@ void * HeifReader::ReadImage(int &width,
 		int bpp = image.get_bits_per_pixel_range(heif_channel_interleaved);
 		if (bpp < 8 || bpp > 16)
 			bpp = 16;
-		unsigned char* hdrPixels = ConvertHeifHdrToSdr(data, stride, width, height, bpp, cicp);
+		unsigned char* hdrPixels = ConvertHeifHdrToSdr(data, stride, width, height, bpp, cicp, &gain);
 		if (hdrPixels == NULL) {
 			delete[] pPixelData;
 			outOfMemory = true;
@@ -446,25 +528,15 @@ void * HeifReader::ReadImage(int &width,
 			}
 		}
 		ICCProfileTransform::DeleteTransform(transform);
-		// Gain-map (Option D, Phase 3): an SDR HEIF with a gain-map aux
-		// image + XMP is an iPhone HDR photo -- extract the gain map
-		// (grayscale + metadata, NOT applied); the load thread
-		// attaches it to the image and applies it on demand, or at
-		// load when GainMapDefault() is HDR. ExtractHeifGainMap
-		// returns false when there is no gain map or anything fails;
-		// the SDR base is kept unchanged in that case. The
-		// extraction is skipped entirely when the caller does not
-		// want the gain map (pGainOut == NULL).
-		if (pGainOut != NULL) {
-			try {
-				gainmap::ExtractedGainMap gain;
-				if (ExtractHeifGainMap(handle, width, height, gain)) {
-					*pGainOut = std::move(gain);
-				}
-			} catch (...) {
-				// Keep the SDR base image; the gain map is optional.
-			}
-		}
+		// (The gain map was extracted before the if/else above; the
+		// SDR alternate view is computed lazily on toggle, from this
+		// sRGB base, as before.)
+	}
+	// NB-1: assign the extracted gain here, at the old extraction
+	// location, so the load thread attaches it (with the precomputed
+	// alternate view, when present).
+	if (pGainOut != NULL && gain.valid) {
+		*pGainOut = std::move(gain);
 	}
 
 	std::vector<heif_item_id> exif_blocks = handle.get_list_of_metadata_block_IDs("Exif");

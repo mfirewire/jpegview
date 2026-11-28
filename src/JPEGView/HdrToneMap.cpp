@@ -74,6 +74,20 @@ const double kRec2020Luma[3] = {0.2627, 0.6780, 0.0593};
 const double kP3Luma[3] = {0.2290, 0.6917, 0.0793};
 const double kP3DciLuma[3] = {0.2095, 0.7216, 0.0689};
 
+double Clamp01(double v) {
+    if (!(v >= 0.0)) return 0.0;  // also catches NaN
+    if (v > 1.0) return 1.0;
+    return v;
+}
+
+}  // namespace
+
+// Gamut inverse / luma / HLG OOTF, moved out of the anonymous
+// namespace so the 16-bit gain-map apply (GainMap.cpp) can use
+// them (see HdrToneMap.h), like GamutMap/ToByte before them.
+// They still see the anonymous-namespace tables (the gamut
+// matrices and luma coefficients) because those are visible
+// in this file.
 const double (*GamutInverse(Primaries primaries))[3] {
     switch (primaries) {
         case Primaries::kBt2020: return kRec2020ToSrgb;
@@ -90,12 +104,6 @@ const double* GamutLuma(Primaries primaries) {
         case Primaries::kP3Dci: return kP3DciLuma;
         default: return kSrgbLuma;  // BT.709 / sRGB: sRGB luma coefficients.
     }
-}
-
-double Clamp01(double v) {
-    if (!(v >= 0.0)) return 0.0;  // also catches NaN
-    if (v > 1.0) return 1.0;
-    return v;
 }
 
 // HLG OOTF forward (BT.2100): scene-linear RGB -> display-linear RGB,
@@ -120,8 +128,6 @@ void HlgOotfForward(double sceneR, double sceneG, double sceneB, const double lu
     *outG = sceneG * scale;
     *outB = sceneB * scale;
 }
-
-}  // namespace
 
 // Gamut mapping and byte conversion, moved out of the anonymous
 // namespace so the gain-map fused path (GainMap.cpp) can use them
