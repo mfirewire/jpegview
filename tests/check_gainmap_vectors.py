@@ -16,26 +16,25 @@
 #     Tolerance: max diff <= 1 (observed 0 for the Mozilla pair, <= 1
 #     for the Seine crops -- YUV->RGB rounding differs by <= 1 LSB
 #     between two independent decoders on real photos).
-#     EXCEPTION -- mozilla-hdr: its base is planar RGB (gbrp, 8-bit)
-#     with a PQ transfer. Requesting a 16-bit format (gbrp16le) from
-#     this 8-bit source makes ffmpeg insert a scaler, and on the CI
+#     EXCEPTION -- mozilla-hdr base pixel tie is SKIPPED in CI
+#     (documented manual step, P1-1 section 13(c) fallback). No ffmpeg
+#     decode variant reproduces the committed vector on the CI
 #     runner's ffmpeg 8.0.1 (Ubuntu 26.04 resolute, libavcodec62,
-#     dav1d 1.5.3) that scaler applies a PQ->sRGB conversion (max
-#     diff 69 vs the vector; 255 - 186 = 69). A plain native-format
-#     request (-pix_fmt gbrp) also fails on 8.0.1: the auto-scale it
-#     inserts misinterprets the RGB planes as YUV, and BT.601
-#     limited-range YUV->RGB of 186 gives (255, 125, 255) (again
-#     diff 69). So for this one sample the base is decoded through
-#     an explicit filter chain -- setparams tags the frame RGB
-#     (colorspace=0 is AVCOL_SPC_RGB; setparams does not accept
-#     the name "rgb"; primaries bt709 and transfer smpte2084
-#     restate the stream's own signalling), then format converts
-#     to gbrp inside the filtergraph, so no external auto-scale is
-#     inserted and the conversion is RGB->RGB -- and the G/B/R
-#     planes are compared directly against the vector's channels
-#     at 8-bit. Whether 8.0.1 respects the RGB tag inside the
-#     filtergraph is what CI tests; a local pass proves only that
-#     the syntax runs and the values are right on 8.1.2.
+#     dav1d 1.5.3) -- three attempts, all max diff 69 (255 - 186):
+#     (1) gbrp16le: the scaler inserted for the 8-bit -> 16-bit
+#     conversion applies a PQ->sRGB conversion (first pixel 255);
+#     (2) native gbrp (-pix_fmt gbrp): the auto-scale misinterprets
+#     the RGB planes as YUV, and BT.601 limited-range YUV->RGB of
+#     186 gives (255, 125, 255); (3) setparams colorspace=0
+#     (AVCOL_SPC_RGB) + format=gbrp inside the filtergraph: the
+#     same (255, 125, 255) -- the conversion is not tag-dependent
+#     on 8.0.1. So the base pixel tie cannot run in CI. The vector
+#     itself is verified by hand instead: tests/samples/
+#     mozilla-hdr-base16.bgra (64x32, uniform B=G=R=47802,
+#     A=65535) was extracted with libavif; locally, ffmpeg 8.1.2
+#     native gbrp decode gives uniform 186 (max diff 0), and
+#     libavif's avifdec gives the same. The mozilla-hdr GAIN tie
+#     still runs in CI (gray stream, unaffected by the RGB issue).
 #   - gain: stream 1 (the gain-map image) decoded to 8-bit gray.
 #     Tolerance: max diff <= 1 (observed byte-exact on ffmpeg 8.1.2).
 #   - Seine vectors are a 128x128 centre crop (x 136..264, y 86..214) of
@@ -57,8 +56,10 @@
 # instead of silently falling back to another decoder.
 #
 # Fails (exit 1) on any mismatch, on a size mismatch, or when ffmpeg is
-# missing -- never a silent skip. Run in CI by the gainmap-signed-weight
-# job in .github/workflows/ymck-guard.yml. Stdlib only; needs ffmpeg.
+# missing. One documented exception: the mozilla-hdr base pixel tie is
+# skipped with a printed SKIP (see EXCEPTION above) -- never a silent
+# skip. Run in CI by the gainmap-signed-weight job in
+# .github/workflows/ymck-guard.yml. Stdlib only; needs ffmpeg.
 import struct
 import subprocess
 import sys
@@ -67,6 +68,7 @@ from pathlib import Path
 
 SAMPLES = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("tests/samples")
 FAILURES = []
+SKIPS = []
 
 
 def check(cond, what):
@@ -75,24 +77,15 @@ def check(cond, what):
         FAILURES.append(what)
 
 
-def ffmpeg_decode(src, stream, pix_fmt, codec=None, vf=None):
-    """Decode one stream of src to rawvideo bytes; returns bytes or None.
-
-    Normally the output format is requested with -pix_fmt. When vf is
-    given, the conversion runs inside the filtergraph instead (no
-    -pix_fmt): the filter chain's last filter sets the output format.
-    """
+def ffmpeg_decode(src, stream, pix_fmt, codec=None):
+    """Decode one stream of src to rawvideo bytes; returns bytes or None."""
     with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as tmp:
         out = tmp.name
     cmd = ["ffmpeg", "-v", "error"]
     if codec:
         cmd += ["-c:v", codec]
-    cmd += ["-i", str(src), "-map", f"0:{stream}"]
-    if vf is not None:
-        cmd += ["-vf", vf]
-    else:
-        cmd += ["-pix_fmt", pix_fmt]
-    cmd += ["-f", "rawvideo", "-y", out]
+    cmd += ["-i", str(src), "-map", f"0:{stream}",
+            "-pix_fmt", pix_fmt, "-f", "rawvideo", "-y", out]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(f"ffmpeg failed for {src} stream {stream}: {r.stderr.strip()}")
@@ -128,18 +121,6 @@ def crop_gray(data, width, x0, y0, cw, ch):
     return bytes(out)
 
 
-def gbrp_to_bgra8(data, width, height):
-    """Native gbrp planes (G, B, R, 8-bit) -> interleaved BGRA (A=255)."""
-    n = width * height
-    g = data[0:n]
-    b = data[n:2 * n]
-    r = data[2 * n:3 * n]
-    out = bytearray()
-    for i in range(n):
-        out += bytes((b[i], g[i], r[i], 255))
-    return bytes(out)
-
-
 def main():
     import shutil
     if shutil.which("ffmpeg") is None:
@@ -147,72 +128,52 @@ def main():
         return 1
 
     cases = [
-        # (stem, width, height, crop or None, native gbrp base?)
+        # (stem, width, height, crop or None, skip base pixel tie?)
         ("mozilla-hdr", 64, 32, None, True),
         ("mozilla-sdr", 64, 32, None, False),
         ("seine-hdr", 400, 300, (136, 86, 128, 128), False),
         ("seine-sdr", 400, 300, (136, 86, 128, 128), False),
     ]
-    for stem, w, h, crop, native_gbr in cases:
+    for stem, w, h, crop, skip_base in cases:
         avif = SAMPLES / f"{stem}-base-gainmap.avif"
         suffix = "-crop128" if crop else ""
         base_vec = (SAMPLES / f"{stem}-base16{suffix}.bgra").read_bytes()
         gain_vec = (SAMPLES / f"{stem}-gain8{suffix}.raw").read_bytes()
 
-        if native_gbr:
-            # Force the frame to RGB inside the filtergraph before the
-            # format conversion: on the CI runner's ffmpeg 8.0.1, a
-            # plain -pix_fmt gbrp request inserts an auto-scale that
-            # misinterprets the RGB planes as YUV (BT.601 gives
-            # (255, 125, 255) from 186). Tagging the frame RGB
-            # (colorspace=0 is AVCOL_SPC_RGB; setparams does not
-            # accept the name "rgb") makes the conversion RGB->RGB.
-            raw_base = ffmpeg_decode(
-                avif, 0, "gbrp", "libdav1d",
-                vf="setparams=colorspace=0:color_primaries=bt709:color_trc=smpte2084,format=gbrp")
+        if skip_base:
+            # Section 13(c) fallback: no ffmpeg decode variant
+            # reproduces this vector on CI's ffmpeg 8.0.1 (see header
+            # EXCEPTION). The base pixel tie is a documented manual
+            # step; the gain tie below still runs in CI.
+            print(f"SKIP {stem} base16 @8bit: no ffmpeg decode variant "
+                  f"reproduces the vector on CI ffmpeg 8.0.1 -- verify "
+                  f"by hand (see header EXCEPTION)")
+            SKIPS.append(f"{stem} base16 @8bit")
+        else:
+            raw_base = ffmpeg_decode(avif, 0, "bgra64le", "libdav1d")
             if raw_base is None:
                 check(False, f"{stem}: ffmpeg decode failed")
                 continue
-            base8 = gbrp_to_bgra8(raw_base, w, h)
+            if crop:
+                x0, y0, cw, ch = crop
+                raw_base = crop_bgra16(raw_base, w, x0, y0, cw, ch)
+            # Base: compare at 8-bit (see header for why 16-bit differs).
+            raw8 = u16_to_8(raw_base)
             vec8 = u16_to_8(base_vec)
-            # Compare only the B/G/R bytes (alpha is 255 on both sides).
-            d_base = max(max_diff(base8[i * 4:i * 4 + 3], vec8[i * 4:i * 4 + 3])
-                         for i in range(w * h))
-            check(len(raw_base) == w * h * 3 and d_base <= 1,
-                  f"{stem} base16 native gbrp @8bit: max diff {d_base} (tolerance 1)")
+            d_base = max_diff(raw8, vec8)
+            check(len(raw_base) == len(base_vec) and d_base <= 1,
+                  f"{stem} base16 @8bit: max diff {d_base} (tolerance 1)")
             if d_base > 1:
-                print(f"  first decoded pixel (BGR): {list(base8[0:3])}, "
-                      f"first vector pixel (BGR): {list(vec8[0:3])}")
-            raw_gain = ffmpeg_decode(avif, 1, "gray", "libdav1d")
-            if raw_gain is None:
-                check(False, f"{stem}: ffmpeg gain decode failed")
-                continue
-            d_gain = max_diff(raw_gain, gain_vec)
-            check(len(raw_gain) == len(gain_vec) and d_gain <= 1,
-                  f"{stem} gain8: max diff {d_gain} (tolerance 1)")
-            if d_gain > 1:
-                print(f"  first decoded gain byte: {raw_gain[0]}, "
-                      f"first vector gain byte: {gain_vec[0]}")
-            continue
+                print(f"  first decoded pixel (BGRA): {list(raw8[0:4])}, "
+                      f"first vector pixel (BGRA): {list(vec8[0:4])}")
 
-        raw_base = ffmpeg_decode(avif, 0, "bgra64le", "libdav1d")
         raw_gain = ffmpeg_decode(avif, 1, "gray", "libdav1d")
-        if raw_base is None or raw_gain is None:
-            check(False, f"{stem}: ffmpeg decode failed")
+        if raw_gain is None:
+            check(False, f"{stem}: ffmpeg gain decode failed")
             continue
         if crop:
             x0, y0, cw, ch = crop
-            raw_base = crop_bgra16(raw_base, w, x0, y0, cw, ch)
             raw_gain = crop_gray(raw_gain, w, x0, y0, cw, ch)
-        # Base: compare at 8-bit (see header for why 16-bit differs).
-        raw8 = u16_to_8(raw_base)
-        vec8 = u16_to_8(base_vec)
-        d_base = max_diff(raw8, vec8)
-        check(len(raw_base) == len(base_vec) and d_base <= 1,
-              f"{stem} base16 @8bit: max diff {d_base} (tolerance 1)")
-        if d_base > 1:
-            print(f"  first decoded pixel (BGRA): {list(raw8[0:4])}, "
-                  f"first vector pixel (BGRA): {list(vec8[0:4])}")
         d_gain = max_diff(raw_gain, gain_vec)
         check(len(raw_gain) == len(gain_vec) and d_gain <= 1,
               f"{stem} gain8: max diff {d_gain} (tolerance 1)")
@@ -238,7 +199,8 @@ def main():
     if FAILURES:
         print(f"check_gainmap_vectors: {len(FAILURES)} failure(s)")
         return 1
-    print("check_gainmap_vectors: all vectors tie to their AVIF/PNG sources")
+    skipped = f", {len(SKIPS)} skipped: {', '.join(SKIPS)}" if SKIPS else ""
+    print(f"check_gainmap_vectors: all checked vectors tie to their AVIF/PNG sources{skipped}")
     return 0
 
 
