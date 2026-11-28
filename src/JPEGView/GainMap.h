@@ -215,12 +215,14 @@ bool FindXmpPacket(const unsigned char* jpeg, int sizebytes,
 // where base = meta.baseHdrHeadroom, alt = meta.alternateHdrHeadroom.
 // H is a LOGICAL display headroom (JPEGView has no HDR display): the
 // caller passes 0 for the SDR view and max(base, alt) for the HDR view.
-// Degenerate (base == alt), non-finite, or negative headroom falls back
-// to the legacy SDR-base direction (HDR view w = +1, SDR view w = 0);
-// the degenerate check runs BEFORE the division, so base == alt never
-// divides by zero. base == alt == 0 behaves exactly as the old
-// weight-1.0 HDR view; base == alt > 0 is new behaviour (a file the
-// old gates skipped now gets legacy handling -- see the NB-1 plan).
+// Degenerate (base == alt) is a step function at H = base: H >= base
+// -> +1, H < base -> 0 -- so the SDR view (H = 0) gets +1 only when
+// base == alt == 0 (pinned by the W0 test). Non-finite or negative
+// headroom returns +1 outright, for both views. The degenerate check
+// runs BEFORE the division, so base == alt never divides by zero.
+// base == alt == 0 behaves exactly as the old weight-1.0 HDR view;
+// base == alt > 0 is new behaviour (a file the old gates skipped
+// now gets legacy handling -- see the NB-1 plan).
 // Returns the weight in [-1, 1]: +1 full forward gain, 0 base unchanged,
 // -1 full inverse gain (HDR base -> SDR view).
 double ComputeGainWeight(const Metadata& meta, double displayHeadroom);

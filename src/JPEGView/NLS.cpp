@@ -36,7 +36,19 @@ void CNLS::ReadStringTable(LPCTSTR sFileName) {
 		return;
 	}
 
-	const int FILE_BUFF_SIZE = 32000;
+	// R-17: the string tables are read only up to this many TCHARs.
+	// The longest file today is ~33k chars (fr, 33264), so the old
+	// 32000 silently truncated the tails of 10 of the 29 language
+	// files. The tail is NOT just the STATUS footer: it also holds
+	// the //! missing-translation listings (real keys, untranslated
+	// -- both cases fall back to English at runtime). Verified 0
+	// keys lost today: every translated line sits before the cut,
+	// and the cut lands inside a // comment line, so no translation
+	// is truncated -- but the margin was thin (pt exceeded the old
+	// cap by 27 chars), so the cap is set well above the longest
+	// file instead. The largest file is ~54 KB, so the whole file
+	// is read under either reading of the fread size below.
+	const int FILE_BUFF_SIZE = 65536;
 	TCHAR* pLineBuff = new TCHAR[FILE_BUFF_SIZE];
 	memset(pLineBuff, 0, FILE_BUFF_SIZE * sizeof(TCHAR));
 	size_t nReadBytes = fread(pLineBuff, 1, FILE_BUFF_SIZE*sizeof(TCHAR), fptr);
