@@ -615,6 +615,7 @@ bool CJPEGImage::ApplyUnsharpMaskToOriginalPixels(const CUnsharpMaskParams & uns
 		// from the pre-mask base), but the gain map still aligns, so
 		// keep it for the next toggle.
 		DropHdrBuffer();
+		m_gainMap.accurateAlternateLost = true;
 	}
 	return bSuccess;
 }
