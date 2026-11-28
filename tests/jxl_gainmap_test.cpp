@@ -27,7 +27,17 @@
 //   T4: end-to-end assembly — the real base decoded with system
 //       libjxl plus the real gain + metadata through
 //       ApplyGainMapToBgra matches the Python reference
-//       (~/workspace/gainmap_reference.py) bit-exactly on 10 pixels.
+//       (~/workspace/gainmap_reference.py) within +-1 per channel on
+//       10 pixels. The tolerance is NOT sloppiness: libjxl's decode
+//       output is deterministic per version but not bit-stable across
+//       versions — measured on this file, 0.7 vs 0.11.1 differ by +-1
+//       in 6991/13400 base pixels and 191/825 gain pixels, and the
+//       assembled output by at most +-1 (peak 3.9633 vs 3.9783).
+//       The apply math itself is version-stable: gainmap_test's
+//       bit-exact Python-reference checks pass on both versions, so
+//       the +-1 here absorbs decoder rounding only. Any real
+//       assembly error (wrong metadata, wrong upsampling, gain not
+//       applied) moves the output by far more than 1.
 // This test does NOT cover the Windows-only wiring (the temp-decoder
 // call inside JXLWrapper.cpp and the ImageLoadThread hookup): those
 // are covered by the Windows CI build and the device test. The
@@ -47,6 +57,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -66,6 +77,12 @@ void Check(bool ok, const char* what) {
         g_failures++;
         std::printf("FAIL: %s\n", what);
     }
+}
+
+// True when a BGRA pixel is within tol levels per channel.
+bool Near4(const uint8_t* px, int b, int g, int r, int a, int tol) {
+    return std::abs((int)px[0] - b) <= tol && std::abs((int)px[1] - g) <= tol &&
+           std::abs((int)px[2] - r) <= tol && std::abs((int)px[3] - a) <= tol;
 }
 
 bool ReadFile(const std::string& path, std::vector<uint8_t>& out) {
@@ -357,7 +374,11 @@ int main(int argc, char** argv) {
 
     // T4: end-to-end assembly — real base + real gain + real metadata
     // through ApplyGainMapToBgra, against the Python reference
-    // (~/workspace/gainmap_reference.py, bit-exact on all 10 pixels).
+    // (~/workspace/gainmap_reference.py). Compared within +-1 per
+    // channel: the decoded inputs drift by +-1 between libjxl 0.7
+    // and 0.11.1 (see the header comment), and the assembled output
+    // by at most +-1; the exactness of the apply math itself is
+    // pinned by gainmap_test on both versions.
     std::vector<uint8_t> base;
     int bw = 0, bh = 0;
     Check(DecodeJxl(file.data(), file.size(), 4, base, bw, bh),
@@ -381,10 +402,9 @@ int main(int argc, char** argv) {
             const int x = kWant[i][0], y = kWant[i][1];
             const uint8_t* px = out.data() + ((size_t)y * bw + x) * 4;
             char what[64];
-            std::snprintf(what, sizeof(what), "T4: pixel (%d,%d) matches Python reference",
+            std::snprintf(what, sizeof(what), "T4: pixel (%d,%d) matches Python reference (+-1)",
                           x, y);
-            Check(px[0] == kWant[i][2] && px[1] == kWant[i][3] &&
-                      px[2] == kWant[i][4] && px[3] == kWant[i][5],
+            Check(Near4(px, kWant[i][2], kWant[i][3], kWant[i][4], kWant[i][5], 1),
                   what);
         }
         // The gain is active: the brightest-gain pixel differs from SDR.
