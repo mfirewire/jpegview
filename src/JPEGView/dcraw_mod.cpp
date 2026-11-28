@@ -10706,9 +10706,9 @@ int dcraw_main (LPCTSTR filename, CJPEGImage** Image, bool& bOutOfMemory)
     }
 
     (*write_fun)(Image, bOutOfMemory);
-    fclose(ifp);
 
 cleanup:
+    if (ifp) { fclose(ifp); ifp = 0; }
     if (meta_data) free (meta_data);
     if (oprof) free (oprof);
     if (image) free (image);
