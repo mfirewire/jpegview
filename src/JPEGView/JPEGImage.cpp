@@ -360,7 +360,15 @@ void CJPEGImage::DropHdrBuffer() {
 }
 
 void CJPEGImage::DropRetainedGainMap() {
+	// R-2: dropping the gain map must also drop the alternate view
+	// buffer -- otherwise a stale scheme-A alternate stays installed
+	// in m_pHdrPixels and the next edit swaps it in as the "base",
+	// destroying the HDR base. The six geometric-edit sites already
+	// call both adjacently (DropHdrBuffer is idempotent: delete[]
+	// NULL + NULL + channels 0), so this only changes the four
+	// load-time failure paths in RotateRetainedGainMapAfterLoad.
 	m_gainMap = gainmap::ExtractedGainMap();
+	DropHdrBuffer();
 }
 
 bool CJPEGImage::RotateRetainedGainMapAfterLoad() {
