@@ -273,6 +273,7 @@ void TestComputeGainWeight() {
         {HUGE_VAL, 0.0, 1.0, 1.0, "W0: base=+Inf -> +1"},
         {-1.0, 2.0, 1.0, 1.0, "W0: base=-1 (negative) -> +1"},
         {0.0, -0.5, 1.0, 1.0, "W0: alt=-0.5 (negative) -> +1"},
+        {2.0, -1.0, 0.0, 1.0, "W0: base=2, alt=-1 (negative) -> +1"},
     };
     for (size_t i = 0; i < sizeof(kCases) / sizeof(kCases[0]); ++i) {
         const Case& c = kCases[i];

@@ -546,6 +546,14 @@ bool ParseIso21496Body(const uint8_t* data, size_t size, Metadata& out) {
     if (!(vals[4] > 0.0)) {  // gamma must be > 0 (and finite, checked above)
         return false;
     }
+    // R-5: headrooms are log2 of a ratio >= 1, so they must be
+    // >= 0. A negative headroom is corrupt metadata; reject it
+    // here so the two alternate-view paths (scheme-A via
+    // ComputeGainWeight and the lazy path) can never disagree
+    // about it.
+    if (vals[0] < 0.0 || vals[1] < 0.0) {
+        return false;
+    }
 
     out.baseHdrHeadroom = vals[0];
     out.alternateHdrHeadroom = vals[1];
@@ -729,6 +737,10 @@ bool ParseXmpMetadata(const std::string& xmp, Metadata& out) {
         if (!std::isfinite(out.baseOffset) || !std::isfinite(out.alternateOffset) ||
             !std::isfinite(out.baseHdrHeadroom) ||
             !std::isfinite(out.alternateHdrHeadroom)) {
+            return false;
+        }
+        // R-5: headrooms must be >= 0 (see ParseIso21496Body).
+        if (out.baseHdrHeadroom < 0.0 || out.alternateHdrHeadroom < 0.0) {
             return false;
         }
         out.valid = true;
@@ -1059,7 +1071,14 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
     const uint8_t* gain = gainMap;
     std::vector<uint8_t> upsampled;
     if (gainW != width || gainH != height) {
-        upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+        // R-8: OOM while upsampling: fail the apply, do not throw
+        // into the caller (same guard as FusedApply; this is the
+        // second half of the earlier P3-1, which only fixed :328).
+        try {
+            upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+        } catch (...) {
+            return false;
+        }
         BilinearUpsampleGray(gainMap, gainW, gainH, upsampled.data(), width, height);
         gain = upsampled.data();
     }
@@ -1230,7 +1249,12 @@ bool ApplyGainMapToBgra16(const float* baseSignalRgb, int width, int height,
             op[2] = outR;
             if (alpha16 != nullptr) {
                 // Rounded, like the HEIF wrapper's existing formula.
-                op[3] = (uint8_t)(((uint64_t)alpha16[i] * 255 + alphaMaxVal / 2) / alphaMaxVal);
+                // R-9: clamp the quotient to 255 first -- an
+                // out-of-contract alpha16[i] > alphaMaxVal would
+                // otherwise wrap mod 256 on the cast.
+                const uint64_t alphaScaled =
+                    ((uint64_t)alpha16[i] * 255 + alphaMaxVal / 2) / alphaMaxVal;
+                op[3] = (uint8_t)(alphaScaled > 255 ? 255 : alphaScaled);
             } else {
                 op[3] = (uint8_t)0xff;
             }

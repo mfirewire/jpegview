@@ -274,7 +274,15 @@ bool CJPEGImage::ComputeHdrBuffer() {
 	if (m_pOrigPixels == NULL || m_nOriginalChannels == 0 || m_gainMap.gray.empty()) {
 		return false;
 	}
-	const double wAlt = (m_gainMap.meta.baseHdrHeadroom > m_gainMap.meta.alternateHdrHeadroom) ? -1.0 : 1.0;
+	// R-5: a single source of truth for the weight -- ComputeGainWeight
+	// (the lazy path used to hard-code the sign, disagreeing with the
+	// scheme-A path on corrupt negative headrooms; parsers now reject
+	// those, and ComputeGainWeight returns +1 for any invalid input).
+	// hAlt is the alternate view's headroom, as in the wrappers:
+	// 0.0 for an HDR base (reverse gain), alt for an SDR base.
+	const double hAlt = (m_gainMap.meta.baseHdrHeadroom > m_gainMap.meta.alternateHdrHeadroom) ?
+		0.0 : m_gainMap.meta.alternateHdrHeadroom;
+	const double wAlt = gainmap::ComputeGainWeight(m_gainMap.meta, hAlt);
 	// Stride follows the active buffer's layout: 3-channel bases come
 	// from TurboJPEG with a TJPAD(width*3) stride; 4-channel bases are
 	// packed width*4 (AVIF/HEIF, or a 3-channel base converted in place
