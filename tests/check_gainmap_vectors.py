@@ -34,6 +34,18 @@
 #     (x < 32) uniformly #898989, right half (x >= 32) uniformly
 #     #bcbcbc. This is the value the W4(a1) test hardcodes (137, 188).
 #
+# The AVIF decodes are pinned to libdav1d (-c:v libdav1d), NOT the
+# ffmpeg default AV1 decoder. Reason: ffmpeg's native 'av1' decoder
+# disagrees with every conformant decoder on the mozilla-hdr base --
+# it fails outright on ffmpeg 8.1.2 and produces values up to 69
+# levels off on the CI runner's ffmpeg 7.x (same 69 whether decoded
+# to bgra64le or to native gbrp16le, so the difference is in the
+# decode itself, not the colorspace conversion). libdav1d and
+# libaom-av1 both reproduce the committed vectors byte-exact locally;
+# libdav1d is pinned because it is the decoder libavif itself uses.
+# If libdav1d is missing, ffmpeg fails and this script fails loudly
+# instead of silently falling back to another decoder.
+#
 # Fails (exit 1) on any mismatch, on a size mismatch, or when ffmpeg is
 # missing -- never a silent skip. Run in CI by the gainmap-signed-weight
 # job in .github/workflows/ymck-guard.yml. Stdlib only; needs ffmpeg.
@@ -53,14 +65,16 @@ def check(cond, what):
         FAILURES.append(what)
 
 
-def ffmpeg_decode(src, stream, pix_fmt):
+def ffmpeg_decode(src, stream, pix_fmt, codec=None):
     """Decode one stream of src to rawvideo bytes; returns bytes or None."""
     with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as tmp:
         out = tmp.name
-    r = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(src), "-map", f"0:{stream}",
-         "-pix_fmt", pix_fmt, "-f", "rawvideo", "-y", out],
-        capture_output=True, text=True)
+    cmd = ["ffmpeg", "-v", "error"]
+    if codec:
+        cmd += ["-c:v", codec]
+    cmd += ["-i", str(src), "-map", f"0:{stream}",
+            "-pix_fmt", pix_fmt, "-f", "rawvideo", "-y", out]
+    r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(f"ffmpeg failed for {src} stream {stream}: {r.stderr.strip()}")
         Path(out).unlink(missing_ok=True)
@@ -127,7 +141,7 @@ def main():
         gain_vec = (SAMPLES / f"{stem}-gain8{suffix}.raw").read_bytes()
 
         if native_gbr:
-            raw_base = ffmpeg_decode(avif, 0, "gbrp16le")
+            raw_base = ffmpeg_decode(avif, 0, "gbrp16le", "libdav1d")
             if raw_base is None:
                 check(False, f"{stem}: ffmpeg decode failed")
                 continue
@@ -138,7 +152,7 @@ def main():
                          for i in range(w * h))
             check(len(raw_base) == w * h * 6 and d_base <= 1,
                   f"{stem} base16 native gbrp @8bit: max diff {d_base} (tolerance 1)")
-            raw_gain = ffmpeg_decode(avif, 1, "gray")
+            raw_gain = ffmpeg_decode(avif, 1, "gray", "libdav1d")
             if raw_gain is None:
                 check(False, f"{stem}: ffmpeg gain decode failed")
                 continue
@@ -147,8 +161,8 @@ def main():
                   f"{stem} gain8: max diff {d_gain} (tolerance 1)")
             continue
 
-        raw_base = ffmpeg_decode(avif, 0, "bgra64le")
-        raw_gain = ffmpeg_decode(avif, 1, "gray")
+        raw_base = ffmpeg_decode(avif, 0, "bgra64le", "libdav1d")
+        raw_gain = ffmpeg_decode(avif, 1, "gray", "libdav1d")
         if raw_base is None or raw_gain is None:
             check(False, f"{stem}: ffmpeg decode failed")
             continue
