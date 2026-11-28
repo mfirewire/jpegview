@@ -42,8 +42,11 @@
 //       48568 bytes) -- the SDR view (weight -1) of its 16-bit PQ base
 //       must reproduce the original SDR base within +-2 per channel
 //       over the full frame, and the 16-bit peak must clear SDR white
-//       (PQ 203 nits -> 38055; measured 47746, 807.6 nits). How it was
-//       built (reproducible; generator:
+//       (PQ 203 nits -> 38055; measured 47746, 807.6 nits). The two
+//       checks together (not the peak alone -- it also passes on the
+//       synthetic file) are the proof that the base is genuinely HDR;
+//       the peak is near-white (per-channel maxima R/G 47746, B 47707).
+//       How it was built (reproducible; generator:
 //       ~/workspace/goals/jpegview-branch-review-and-fix-table/hidden_files/o3_build_sample.py):
 //       trattore SDR base (134x100) x gain map (33x25, BilinearUpsampleGray
 //       with lround) -> HDR linear -> PQ with SDR white 203 nits
@@ -400,10 +403,15 @@ void TestMetadataNoUrn(const uint8_t* meta, size_t metaSize, gainmap::Metadata& 
 // Built from the trattore SDR base x gain map: the base data is genuinely
 // HDR (PQ, SDR white 203 nits, peak 807.6 nits), not the synthetic file's
 // SDR base with flipped rationals. The SDR view (weight -1) must reproduce
-// the original SDR base, and the 16-bit peak must clear SDR white -- this
-// is the pixel-level verification of the JXL HDR-base path (W2 only
-// checks the synthetic file's metadata). `origBase` is the original SDR
-// base decoded by T4 (RGBA, 134x100).
+// the original SDR base, and the 16-bit peak must clear SDR white -- the
+// two checks TOGETHER are the pixel-level verification of the JXL HDR-base
+// path (W2 only checks the synthetic file's metadata): the peak check alone
+// also passes on the synthetic file (its 8-bit white upconverts past 38055),
+// so it is the full-frame pixel reproduction that pins the base to the
+// gain-applied SDR photo. The peak is near-white, not white: per-channel
+// maxima R/G 47746, B 47707 (B 39 below R/G); the brightest pixel is
+// (47746, 47746, 47425). `origBase` is the original SDR base decoded by
+// T4 (RGBA, 134x100).
 void TestRealHdrBase(const std::string& dir, const std::vector<uint8_t>& origBase,
                      int origW, int origH) {
     std::vector<uint8_t> file;
@@ -458,7 +466,7 @@ void TestRealHdrBase(const std::string& dir, const std::vector<uint8_t>& origBas
     }
     // The base is genuinely HDR: the 16-bit peak (RGB channels only;
     // alpha is 65535) clears SDR white (PQ 203 nits -> 38055).
-    // Measured peak is 47746 (807.6 nits).
+    // Measured peak is 47746 (807.6 nits); per-channel maxima R/G 47746, B 47707.
     const uint16_t* px16 = reinterpret_cast<const uint16_t*>(base16.data());
     uint16_t peak16 = 0;
     for (size_t i = 0; i < (size_t)bw * bh; ++i) {
