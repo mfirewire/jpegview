@@ -286,3 +286,13 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_signed_weight_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/gainmap_signed_weight_test
           /tmp/gainmap_signed_weight_test
+
+      # R-13: the C++ test reads pre-extracted vectors, never the .avif
+      # sources, so an extraction error would silently pass CI. Re-extract
+      # base + gain from each AVIF with ffmpeg (independent decoder) and
+      # compare against the committed vectors; also reads the endpoint
+      # PNG greys the test hardcodes. Fails loudly when ffmpeg is missing.
+      - name: Gain-map vector tie (ffmpeg re-extraction)
+        run: |
+          command -v ffmpeg >/dev/null || { sudo apt-get update; sudo apt-get install -y --no-install-recommends ffmpeg; }
+          python3 tests/check_gainmap_vectors.py

@@ -56,6 +56,13 @@
 //     with ~/workspace/.scratch-gainmap-hdrbase/ (C extractor,
 //     vendored libavif 1.4.2); the PNG endpoint was verified by
 //     direct pixel read (left #898989, right #bcbcbc, split at x=32).
+//     The four .avif sources and the endpoint PNG are tied to
+//     these vectors by tests/check_gainmap_vectors.py (CI step in
+//     the signed-weight job): ffmpeg re-extracts base + gain from
+//     each AVIF and the greys from the PNG and compares them
+//     against the committed vectors (bases at 8-bit, tolerance 1
+//     LSB; gains tolerance 1; endpoint halves exact). An
+//     extraction error in a vector can no longer silently pass CI.
 //
 // This test does NOT cover the Windows-only wiring (the wrapper
 // extraction hoists, the reader-side alternate blending, the
