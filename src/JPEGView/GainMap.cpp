@@ -1053,6 +1053,15 @@ double ComputeGainWeight(const Metadata& meta, double displayHeadroom) {
     return (alt > base ? 1.0 : -1.0) * f;
 }
 
+// R-10: the lazy 8-bit alternate is refused exactly when the
+// accurate 16-bit alternate was attempted and lost AND the base
+// is HDR. A non-finite headroom compares false here (lazy
+// allowed), as today -- the parsers only produce finite values.
+bool ShouldRefuseLazyAlternate(const Metadata& meta, bool accurateAlternateLost) {
+    return accurateAlternateLost &&
+        (meta.baseHdrHeadroom > meta.alternateHdrHeadroom);
+}
+
 bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
                   const uint8_t* gainMap, int gainW, int gainH,
                   const Metadata& meta, double weightFactor, float* outLinear) {

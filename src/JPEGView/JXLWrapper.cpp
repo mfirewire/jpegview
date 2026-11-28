@@ -52,9 +52,11 @@ bool JxlReader::ExifReserve(size_t new_size) {
 // (ApplyGainMapToBgra16 on the Pass-1 float buffer) BEFORE the tone
 // map below destroys it, and stored in pGain->alternateBgra. The
 // alternate view is SDR when the base is HDR (weight -1, inverse
-// gain). A failure here is not fatal: the lazy 8-bit path
-// (CJPEGImage::ComputeHdrBuffer) recomputes it on toggle. pGain may
-// be NULL (no gain map wanted); an invalid gain map is a no-op.
+// gain). A failure here is recorded (R-10): the lazy 8-bit path
+// recomputes the alternate on toggle only when the base is SDR;
+// for an HDR base the toggle is refused and the image stays HDR.
+// pGain may be NULL (no gain map wanted); an invalid gain map is
+// a no-op.
 static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int height, const HdrToneMap::Cicp& cicp,
 	gainmap::ExtractedGainMap* pGain)
 {
@@ -107,8 +109,9 @@ static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int
 			// byte cap, like the rgb and 8-bit out buffers -- the rgb
 			// check at the top bounds it implicitly (width*12/row),
 			// but make the bound explicit so a reorder can't drop it.
-			// On failure the plane stays empty and the apply runs
-			// without alpha (pAlpha == NULL), as on a resize failure.
+			// On failure the plane stays empty; the apply is then
+			// skipped and the loss is recorded (R-10), so a
+			// transparent image never gets a silently opaque alternate.
 			if (IsImageBufferSizeOk((size_t)width * sizeof(uint16_t), (size_t)height)) {
 				try {
 					alpha16.resize((size_t)width * (size_t)height);
@@ -126,8 +129,9 @@ static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int
 		std::vector<uint8_t> alternate;
 		// P3 (user-added): pre-check the alternate view against the
 		// byte cap, like the 8-bit out buffer below (same width*4
-		// stride). On failure it stays empty and the lazy 8-bit path
-		// recomputes on toggle, as on a resize failure.
+		// stride). On failure it stays empty and the loss is recorded
+		// (R-10); the lazy 8-bit path recomputes on toggle only for
+		// an SDR base.
 		if (IsImageBufferSizeOk((size_t)width * 4, (size_t)height)) {
 			try {
 				alternate.resize((size_t)width * (size_t)height * 4);
@@ -135,11 +139,24 @@ static unsigned char* ConvertJxlHdrToSdr(const uint8_t* pixels16, int width, int
 				alternate.clear();
 			}
 		}
-		if (!alternate.empty() && gainmap::ApplyGainMapToBgra16(rgb, width, height, transfer, primaries,
+		// R-10: record whether the accurate 16-bit alternate was
+		// attempted and lost. A lost alpha plane counts too: with
+		// transparent pixels the apply would install a silently
+		// opaque alternate. When the flag is set, ComputeHdrBuffer
+		// refuses the lazy 8-bit recompute for an HDR base (the
+		// plan section 2.4-disproved inverse gain), so the image
+		// stays HDR instead. Set regardless of direction -- the
+		// refusal policy gates on direction, not the flag alone.
+		const bool bAlphaLost = bHasTransparency && alpha16.empty();
+		bool bPrecomputed = false;
+		if (!bAlphaLost && !alternate.empty())
+			bPrecomputed = gainmap::ApplyGainMapToBgra16(rgb, width, height, transfer, primaries,
 				pGain->gray.data(), pGain->width, pGain->height, pGain->meta, wAlt,
-				pAlpha, 65535, alternate.data(), (size_t)width * 4)) {
+				pAlpha, 65535, alternate.data(), (size_t)width * 4);
+		if (bPrecomputed)
 			pGain->alternateBgra = std::move(alternate);
-		}
+		else
+			pGain->accurateAlternateLost = true;
 	}
 	double peakNits = HdrToneMap::ComputePeakNits(rgb, (size_t)width * height, transfer, primaries);
 	// P2-C3: precompute the EETF parameters once per image (the
@@ -491,10 +508,16 @@ static bool DecodeJxlGainMapGray(const uint8_t* code, size_t codeSize,
                 return false;
             }
             // m-4: the ISO metadata carries no dimensions; the base
-            // size is the bound (a gain map is never larger than its
-            // base). Zero dimensions are rejected the same way.
+            // size is the bound. R-11: 4x per side, like AVIF/HEIF/
+            // JPEG (a gain map is usually smaller than its base,
+            // and ApplyGainMap upsamples it bilinearly to base
+            // size) -- the old 1x cap rejected valid larger gain
+            // maps the other formats accept. Zero dimensions are
+            // rejected the same way; the byte cap bounds the gray
+            // buffer below to MAX_IMAGE_BYTES.
             if (info.xsize == 0 || info.ysize == 0 ||
-                info.xsize > (uint32_t)baseWidth || info.ysize > (uint32_t)baseHeight) {
+                info.xsize > (uint32_t)baseWidth * 4 || info.ysize > (uint32_t)baseHeight * 4 ||
+                !IsImageBufferSizeOk((size_t)info.xsize, (size_t)info.ysize)) {
                 return false;
             }
             gainWidth = (int)info.xsize;

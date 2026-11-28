@@ -227,6 +227,14 @@ bool FindXmpPacket(const unsigned char* jpeg, int sizebytes,
 // -1 full inverse gain (HDR base -> SDR view).
 double ComputeGainWeight(const Metadata& meta, double displayHeadroom);
 
+// R-10: true when the lazy 8-bit alternate must not be computed:
+// the 16-bit precompute was attempted and failed (or the installed
+// alternate was lost) AND the base view is HDR. False when the
+// 16-bit path never ran (lazy is the only/designed path) and for
+// SDR-base files (lazy forward gain from the true SDR base).
+// Degenerate base == alt is legacy direction (not HDR base).
+bool ShouldRefuseLazyAlternate(const Metadata& meta, bool accurateAlternateLost);
+
 // Reconstruct scene-linear HDR float RGB from an 8-bit sRGB base image
 // and a single-channel 8-bit gain map, using the ISO 21496-1 formula
 // above. `baseSrgb` is width*height*3 bytes, 8-bit sRGB, RGB order.
@@ -340,12 +348,24 @@ struct ExtractedGainMap {
     // wrapper from the 16-bit base at load, for HDR (PQ/HLG) bases
     // with a gain map. Empty when the wrapper did not precompute it
     // (SDR base, or the 16-bit apply failed); the lazy 8-bit path
-    // (CJPEGImage::ComputeHdrBuffer) then computes it on toggle.
-    // The buffer is at the PRE-rotation dimensions; the load-time
-    // rotation is mirrored onto it (CJPEGImage::Rotate /
-    // RotateOriginalPixels), and the reader alpha-blends it like the
-    // base before handing it over.
+    // (CJPEGImage::ComputeHdrBuffer) then computes it on toggle --
+    // but only when the 16-bit path never ran (see
+    // accurateAlternateLost below). The buffer is at the
+    // PRE-rotation dimensions; the load-time rotation is mirrored
+    // onto it (CJPEGImage::Rotate / RotateOriginalPixels), and the
+    // reader alpha-blends it like the base before handing it over.
     std::vector<uint8_t> alternateBgra;
+    // R-10: true when the accurate 16-bit alternate view was
+    // attempted and is now unavailable -- the wrapper's 16-bit
+    // precompute ran and failed, the install copy/size check in
+    // SetRetainedGainMap failed, or the installed alternate was
+    // lost in the load-time rotation mirror. False when the 16-bit
+    // path never ran (SDR base, sRGB/untagged transfer, JPEG).
+    // ComputeHdrBuffer refuses the lazy 8-bit recompute for
+    // HDR-base files when this is set: the lazy path would be the
+    // plan section 2.4-disproved inverse gain from tone-mapped
+    // 8-bit pixels, so the image stays HDR instead.
+    bool accurateAlternateLost = false;
 };
 
 // Rotate a single-channel gray image by `quarterTurns` clockwise

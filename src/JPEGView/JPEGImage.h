@@ -375,6 +375,18 @@ public:
 	bool IsGainMapBaseHdr() const {
 		return HasGainMap() && (m_gainMap.meta.baseHdrHeadroom > m_gainMap.meta.alternateHdrHeadroom);
 	}
+	// Whether the HDR toggle can do anything right now (R-10): a
+	// gain map exists, and either the alternate buffer is already
+	// installed or the lazy path is not refused. The menu greys the
+	// item when this is false, so a toggle that would silently
+	// no-op is visible instead. This mirrors only the R-10 refusal
+	// -- ComputeHdrBuffer can still fail for other reasons (no
+	// pixels, no gray gain), in which case ToggleHDR returns false
+	// as today.
+	bool CanToggleHDR() const {
+		return HasGainMap() && (m_pHdrPixels != NULL ||
+			!gainmap::ShouldRefuseLazyAlternate(m_gainMap.meta, m_gainMap.accurateAlternateLost));
+	}
 	// Takes ownership of an extracted gain map (move). No-op when !gain.valid.
 	void SetRetainedGainMap(gainmap::ExtractedGainMap&& gain);
 	// Flips between the base view and the alternate view. Computes

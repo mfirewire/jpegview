@@ -1449,7 +1449,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 		::EnableMenuItem(hMenuTrackPopup, SUBMENU_POS_TRANSFORM, MF_BYPOSITION  | MF_GRAYED);
 		::EnableMenuItem(hMenuTrackPopup, SUBMENU_POS_WALLPAPER, MF_BYPOSITION | MF_GRAYED);
 	} else {
-		if (!m_pCurrentImage->HasGainMap())
+		if (!m_pCurrentImage->CanToggleHDR())
 			::EnableMenuItem(hMenuTrackPopup, IDM_TOGGLE_HDR, MF_BYCOMMAND | MF_GRAYED);
 		if (m_pCurrentImage->GetProvenance() == NotRaw)
 			::EnableMenuItem(hMenuTrackPopup, IDM_RELOAD_FULLSIZE, MF_BYCOMMAND | MF_GRAYED);
@@ -1623,9 +1623,11 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_TOGGLE_HDR:
 			// HDR toggle (Ctrl+H): flip between the SDR base and the
 			// tone-mapped HDR view. The menu already grays this item
-			// when there is no image or no gain map, but the Ctrl+H
-			// shortcut still reaches here; ToggleHDR itself returns
-			// false when there is no gain map to show. No geometry
+			// when there is no image, no gain map, or the toggle is
+			// known-futile (R-10: HDR base whose accurate alternate
+			// was lost), but the Ctrl+H shortcut still reaches here;
+			// ToggleHDR itself returns false when there is no gain
+			// map to show. No geometry
 			// change, so no window adjustment; the DIB caches were
 			// already invalidated by the toggle, a repaint is enough.
 			if (m_pCurrentImage != NULL) {

@@ -237,12 +237,12 @@ void CJPEGImage::SetRetainedGainMap(gainmap::ExtractedGainMap&& gain) {
 	// Scheme A: install the wrapper-precomputed alternate view as the
 	// second buffer, so the first toggle needs no recompute. Only a
 	// buffer of exactly the base dimensions is accepted -- a size
-	// mismatch (or an OOM) is NOT fatal: the lazy 8-bit path
-	// (ComputeHdrBuffer) recomputes the alternate view on toggle, and
-	// a mismatched buffer must never be installed (ToggleHDR would
-	// swap in garbage). The vector is freed after installing: the
-	// buffer lives in m_pHdrPixels now, and holding a second copy
-	// would double the memory for the alternate view.
+	// mismatch (or an OOM) records the loss (R-10): the lazy 8-bit
+	// path recomputes the alternate view on toggle only for an SDR
+	// base, and a mismatched buffer must never be installed
+	// (ToggleHDR would swap in garbage). The vector is freed after
+	// installing: the buffer lives in m_pHdrPixels now, and holding
+	// a second copy would double the memory for the alternate view.
 	if (!gain.alternateBgra.empty()) {
 		const size_t expected = (size_t)m_nOrigWidth * (size_t)m_nOrigHeight * 4;
 		if (gain.alternateBgra.size() == expected) {
@@ -250,7 +250,18 @@ void CJPEGImage::SetRetainedGainMap(gainmap::ExtractedGainMap&& gain) {
 			if (m_pHdrPixels != NULL) {
 				memcpy(m_pHdrPixels, gain.alternateBgra.data(), expected);
 				m_nHdrChannels = 4;
+			} else {
+				// R-10: the install copy ran out of memory -- the
+				// accurate alternate is lost; record it (the flag
+				// rides through the move below) so the lazy path
+				// is refused for an HDR base.
+				gain.accurateAlternateLost = true;
 			}
+		} else {
+			// R-10: size mismatch -- the alternate cannot be
+			// installed (defensive; the wrappers allocate exactly
+			// the base dimensions). Record the loss as above.
+			gain.accurateAlternateLost = true;
 		}
 		std::vector<uint8_t>().swap(gain.alternateBgra);
 	}
@@ -259,6 +270,15 @@ void CJPEGImage::SetRetainedGainMap(gainmap::ExtractedGainMap&& gain) {
 
 bool CJPEGImage::ComputeHdrBuffer() {
 	if (!HasGainMap() || m_pHdrPixels != NULL) {
+		return false;
+	}
+	// R-10: refuse the lazy 8-bit recompute when the accurate 16-bit
+	// alternate was attempted and lost and the base is HDR: the lazy
+	// path would be the plan section 2.4-disproved inverse gain from
+	// tone-mapped 8-bit pixels. ToggleHDR then fails and the image
+	// stays HDR. For an SDR base (or when the 16-bit path never ran)
+	// the lazy path is the designed one and still runs.
+	if (gainmap::ShouldRefuseLazyAlternate(m_gainMap.meta, m_gainMap.accurateAlternateLost)) {
 		return false;
 	}
 	// NB-1: the second buffer is the ALTERNATE view, not "the HDR
@@ -611,10 +631,11 @@ bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKe
 	// NB-1 (scheme A): mirror the load-time free rotation onto the
 	// precomputed alternate view, with the same offset/size/angle as
 	// the base (the alternate is at the pre-rotation dimensions and
-	// 4ch, installed by SetRetainedGainMap). Any failure drops it --
-	// the lazy 8-bit path (ComputeHdrBuffer) recomputes it on toggle.
-	// Suppressed after load, where the geometric edit drops both
-	// buffers instead (m_bGainMapLoadRotationApplied, below).
+	// 4ch, installed by SetRetainedGainMap). Any failure drops it and
+	// records the loss (R-10: the lazy 8-bit path recomputes it on
+	// toggle only for an SDR base). Suppressed after load, where the
+	// geometric edit drops both buffers instead
+	// (m_bGainMapLoadRotationApplied, below).
 	if (m_pHdrPixels != NULL && !m_bGainMapLoadRotationApplied) {
 		void* pRotatedHdrPixels = NULL;
 		if (m_nHdrChannels == 4) {
@@ -624,6 +645,9 @@ bool CJPEGImage::RotateOriginalPixels(double dRotation, bool bAutoCrop, bool bKe
 		}
 		if (pRotatedHdrPixels == NULL) {
 			DropHdrBuffer();
+			// R-10: the installed alternate was lost in the
+			// load-time mirror -- record it (see ComputeHdrBuffer).
+			m_gainMap.accurateAlternateLost = true;
 		} else {
 			delete[] m_pHdrPixels;
 			m_pHdrPixels = (unsigned char*)pRotatedHdrPixels;
@@ -1044,10 +1068,11 @@ bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
 	// NB-1 (scheme A): mirror the load-time quarter turn onto the
 	// precomputed alternate view (same rotation, pre-rotation
 	// dimensions -- m_nOrigWidth/m_nOrigHeight are still the old
-	// values here). Any failure drops it -- the lazy 8-bit path
-	// (ComputeHdrBuffer) recomputes it on toggle. Suppressed after
-	// load, where the geometric edit drops both buffers instead
-	// (m_bGainMapLoadRotationApplied, below).
+	// values here). Any failure drops it and records the loss
+	// (R-10: the lazy 8-bit path recomputes it on toggle only for
+	// an SDR base). Suppressed after load, where the geometric
+	// edit drops both buffers instead (m_bGainMapLoadRotationApplied,
+	// below).
 	if (m_pHdrPixels != NULL && !m_bGainMapLoadRotationApplied) {
 		void* pNewHdrPixels = NULL;
 		if (m_nHdrChannels == 4) {
@@ -1055,6 +1080,9 @@ bool CJPEGImage::Rotate(int nRotation, bool bMarkDestructive) {
 		}
 		if (pNewHdrPixels == NULL) {
 			DropHdrBuffer();
+			// R-10: the installed alternate was lost in the
+			// load-time mirror -- record it (see ComputeHdrBuffer).
+			m_gainMap.accurateAlternateLost = true;
 		} else {
 			delete[] m_pHdrPixels;
 			m_pHdrPixels = (unsigned char*)pNewHdrPixels;

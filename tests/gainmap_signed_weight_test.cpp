@@ -285,6 +285,44 @@ void TestComputeGainWeight() {
     }
 }
 
+// R-10: the lazy 8-bit alternate must be refused exactly when the
+// accurate 16-bit alternate was attempted and lost AND the base is
+// HDR. The flag itself defaults to false and rides through a move
+// (it lives on ExtractedGainMap, so it clears when the gain map is
+// dropped and never leaks across images).
+void TestShouldRefuseLazyAlternate() {
+    struct Case {
+        double base, alt;
+        bool lost;
+        bool want;
+        const char* what;
+    };
+    static const Case kCases[] = {
+        {2.0, 0.0, true, true, "R-10: HDR base, lost -> refuse"},
+        {2.0, 0.0, false, false, "R-10: HDR base, never attempted -> lazy allowed"},
+        {0.0, 2.0, true, false, "R-10: SDR base, lost -> lazy allowed (forward gain is exact)"},
+        {0.0, 0.0, true, false, "R-10: degenerate base==alt, lost -> lazy allowed"},
+        {2.0, 2.0, true, false, "R-10: degenerate base==alt==2, lost -> lazy allowed"},
+        {1.3, 0.0, true, true, "R-10: Seine headroom 1.3, lost -> refuse"},
+    };
+    for (size_t i = 0; i < sizeof(kCases) / sizeof(kCases[0]); ++i) {
+        const Case& c = kCases[i];
+        gainmap::Metadata m;
+        m.baseHdrHeadroom = c.base;
+        m.alternateHdrHeadroom = c.alt;
+        m.valid = true;
+        Check(gainmap::ShouldRefuseLazyAlternate(m, c.lost) == c.want, c.what);
+    }
+    // Flag: default false, survives a move, cleared by a fresh struct.
+    gainmap::ExtractedGainMap g;
+    Check(g.accurateAlternateLost == false, "R-10: flag defaults to false");
+    g.accurateAlternateLost = true;
+    gainmap::ExtractedGainMap moved = std::move(g);
+    Check(moved.accurateAlternateLost == true, "R-10: flag survives a move");
+    gainmap::ExtractedGainMap fresh;
+    Check(fresh.accurateAlternateLost == false, "R-10: fresh struct clears the flag");
+}
+
 // W1: fused vs non-fused at w = -1, and the Seine set vs the Python
 // reference.
 void TestFusedVsNonFusedNegativeWeight() {
@@ -987,6 +1025,7 @@ void TestRealVectors(const std::string& dir) {
 int main(int argc, char** argv) {
     const std::string dir = (argc > 1) ? argv[1] : "tests/samples";
     TestComputeGainWeight();
+    TestShouldRefuseLazyAlternate();
     TestFusedVsNonFusedNegativeWeight();
     TestAppleFallbackAndIso();
     TestJxlHdrBaseMetadata(dir);
