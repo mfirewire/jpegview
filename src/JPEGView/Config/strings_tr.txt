@@ -404,6 +404,8 @@ Open image...	Görsel aç...
 Open image with	Görseli şununla aç
 Save processed image...	İşlenmiş görseli kaydet
 Reload image	Görseli yeniden yükle
+Show RAW image	RAW görüntüyü görüntüle
+Show HDR	HDR'yi görüntüle
 Open containing folder in Explorer	Bulunduğu klasörü aç
 Print image...	Görseli yazdır...
 Batch rename/copy...	Toplu yeniden adlandır/kopyala
@@ -452,8 +454,10 @@ Change size...	Boyutu değiştir...
 Perspective correction...	Perspektifi düzelt...
 Mirror horizontally	Yatay yansıt
 Mirror vertically	Dikey yansıt
+Convert to JXL...	JXL'ye dönüştür...
 Rotate 180	180 derece döndür
 Auto correction	Otomatik düzelt
+Recognize text (OCR)	Metni tanı (OCR)
 Save parameters to DB	Parametreleri veri tabanına kaydet
 Clear parameters from DB	Veri tabanındaki parametreleri temizle
 Zoom	Yakınlaştır

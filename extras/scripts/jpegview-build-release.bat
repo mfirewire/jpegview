@@ -124,9 +124,8 @@ IF ERRORLEVEL 1 exit /b 1
 call :BUILD_COPY_JPV x64 x64 64
 IF ERRORLEVEL 1 exit /b 1
 
-REM Copy HowToInstall.txt and HowToInstall_ru.txt to OUTPUT
+REM Copy HowToInstall.txt to OUTPUT
 copy "%JPV_ROOT%\HowToInstall.txt" "%XRAW_OUT%"
-copy "%JPV_ROOT%\HowToInstall_ru.txt" "%XRAW_OUT%"
 REM I didn't realize this was never in any releases
 copy "%JPV_ROOT%\CHANGELOG.txt" "%XRAW_OUT%"
 

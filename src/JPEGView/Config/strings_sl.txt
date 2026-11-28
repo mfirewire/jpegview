@@ -404,6 +404,8 @@ Open image...	Odpri sliko...
 Open image with	Odpri sliko z
 Save processed image...	Shrani obdelano sliko...
 Reload image	Znova naloži sliko
+Show RAW image	Prikaži sliko RAW
+Show HDR	Prikaži HDR
 Open containing folder in Explorer	Odpri mapo v Raziskovalcu
 Print image...	Natisni sliko...
 Batch rename/copy...	Paketno preimenuj/kopiraj...
@@ -452,8 +454,10 @@ Change size...	Spremeni velikost
 Perspective correction...	Popravek perspektive...
 Mirror horizontally	Zrcali vodoravno
 Mirror vertically	Zrcali navpično
+Convert to JXL...	Pretvori v JXL...
 Rotate 180	Obrni za 180 stopinj
 Auto correction	Samodejni popravek
+Recognize text (OCR)	Prepoznaj besedilo (OCR)
 Save parameters to DB	Shrani parametre v zbirko podatkov
 Clear parameters from DB	Počisti parametre iz zbirke podatkov
 Zoom	Povečava

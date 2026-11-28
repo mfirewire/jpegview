@@ -404,6 +404,8 @@ Open image...	Öppna bild...
 Open image with	Öppna bild med
 Save processed image...	Spara bearbetad bild...
 Reload image	Uppdatera bild från original
+Show RAW image	Visa RAW-bild
+Show HDR	Visa HDR
 Open containing folder in Explorer	
 Print image...	Skriv ut bild...
 Batch rename/copy...	Byt namn/kopiera (Batch-läge)
@@ -452,8 +454,10 @@ Change size...	Ändra storlek...
 Perspective correction...	Perspektivkorrigering...
 Mirror horizontally	Vänd horisontellt
 Mirror vertically	Vänd vertikalt
+Convert to JXL...	Konvertera till JXL...
 Rotate 180	Rotera 180
 Auto correction	Automatisk bildjustering
+Recognize text (OCR)	Känn igen text (OCR)
 Save parameters to DB	Spara parametrar till databas
 Clear parameters from DB	Ta bort parametrar från databas
 Zoom	

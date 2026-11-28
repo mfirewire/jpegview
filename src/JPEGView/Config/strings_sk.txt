@@ -404,6 +404,8 @@ Open image...	Otvoriť obrázok...
 Open image with	Otvoriť obrázok pomocou
 Save processed image...	Uložiť spracovaný obrázok...
 Reload image	Znovu načítať obrázok
+Show RAW image	Zobraziť obrázok RAW
+Show HDR	Zobraziť HDR
 Open containing folder in Explorer	Otvoriť nadradený priečinok v Prieskumníkovi
 Print image...	Vytlačiť obrázok...
 Batch rename/copy...	Dávkové premenovanie/kopírovanie
@@ -452,8 +454,10 @@ Change size...	Zmeniť veľkosť...
 Perspective correction...	Korekcia perspektívy...
 Mirror horizontally	Zrkadliť horizontálne
 Mirror vertically	Zrkadliť vertikálne
+Convert to JXL...	Previesť do JXL...
 Rotate 180	Otočiť o 180
 Auto correction	Automatická korekcia
+Recognize text (OCR)	Rozpoznať text (OCR)
 Save parameters to DB	Uložiť parametre do DB
 Clear parameters from DB	Vyčistiť parametre z DB
 Zoom	Priblíženie

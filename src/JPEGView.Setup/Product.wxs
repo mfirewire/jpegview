@@ -252,15 +252,11 @@
 				<ComponentRef Id="JPEGView.ini.tpl"/>
 				<ComponentRef Id="KeyMap.txt.default"/>
 				<ComponentRef Id="symbols.km"/>
-				<!-- <ComponentRef Id="KeyMap_ru.txt"/> -->
 			</Feature>
 			<Feature Id="Docs" Title="Documentation">
 				<ComponentRef Id="LICENSE.txt"/>
 				<ComponentRef Id="readme.html"/>
-				<ComponentRef Id="readme_ru.html"/>
-				<ComponentRef Id="readme_uk.html"/>
 				<ComponentRef Id="KeyMap_README.html"/>
-				<ComponentRef Id="KeyMap_README_ru.html"/>
 			</Feature>
 			<Feature Id="Localization" Title="Localization Strings">
 				<ComponentRef Id="strings.txt" />
@@ -656,11 +652,6 @@
 					<Component Id="symbols.km" Guid="*">
 						<File Id="symbols.km" Name="symbols.km" Source="$(var.JPEGView.TargetDir)symbols.km" />
 					</Component>
-					<!--
-					<Component Id="KeyMap_ru.txt" Guid="*">
-						<File Id="KeyMap_ru.txt" Name="KeyMap_ru.txt" Source="$(var.JPEGView.TargetDir)KeyMap_ru.txt" />
-					</Component>
-					-->
 
 					<Component Id="LICENSE.txt" Guid="*">
 						<File Id="LICENSE.txt" Name="LICENSE.txt" Source="$(var.JPEGView.TargetDir)LICENSE.txt" />
@@ -668,17 +659,8 @@
 					<Component Id="readme.html" Guid="*">
 						<File Id="readme.html" Name="readme.html" Source="$(var.JPEGView.TargetDir)readme.html" />
 					</Component>
-					<Component Id="readme_ru.html" Guid="*">
-						<File Id="readme_ru.html" Name="readme_ru.html" Source="$(var.JPEGView.TargetDir)readme_ru.html" />
-					</Component>
-					<Component Id="readme_uk.html" Guid="*">
-						<File Id="readme_uk.html" Name="readme_uk.html" Source="$(var.JPEGView.TargetDir)readme_uk.html" />
-					</Component>
 					<Component Id="KeyMap_README.html" Guid="*">
 						<File Id="KeyMap_README.html" Name="KeyMap-README.html" Source="$(var.JPEGView.TargetDir)KeyMap-README.html" />
-					</Component>
-					<Component Id="KeyMap_README_ru.html" Guid="*">
-						<File Id="KeyMap_README_ru.html" Name="KeyMap-README_ru.html" Source="$(var.JPEGView.TargetDir)KeyMap-README_ru.html" />
 					</Component>
 
 
