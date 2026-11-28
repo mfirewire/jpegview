@@ -38,6 +38,23 @@
 //       the +-1 here absorbs decoder rounding only. Any real
 //       assembly error (wrong metadata, wrong upsampling, gain not
 //       applied) moves the output by far more than 1.
+//   T5: the REAL HDR-base JXL (tests/samples/trattore-gainmap-real-hdrbase.jxl,
+//       48568 bytes) -- the SDR view (weight -1) of its 16-bit PQ base
+//       must reproduce the original SDR base within +-2 per channel
+//       over the full frame, and the 16-bit peak must clear SDR white
+//       (PQ 203 nits -> 38055; measured 47746, 807.6 nits). How it was
+//       built (reproducible; generator:
+//       ~/workspace/goals/jpegview-branch-review-and-fix-table/hidden_files/o3_build_sample.py):
+//       trattore SDR base (134x100) x gain map (33x25, BilinearUpsampleGray
+//       with lround) -> HDR linear -> PQ with SDR white 203 nits
+//       (HdrToneMap.h kSdrWhiteNits; NOT 100 -- the C++ divides PQ nits
+//       by 203) -> u16 -> ffmpeg libjxl lossless (-distance 0; there is
+//       no -lossless AVOption) -> extract the jxlc payload from the
+//       encoder's container output -> assemble sig+ftyp+jxlc+jhgm,
+//       the jhgm box verbatim from the synthetic HDR-base file
+//       (base=2/alt=0). Tolerance +-2: the 0.7/0.11.1 decode skew is
+//       +-1 (see T4) plus PQ quantization; if CI fails here, report the
+//       measured max diff first -- do not silently relax the number.
 // This test does NOT cover the Windows-only wiring (the temp-decoder
 // call inside JXLWrapper.cpp and the ImageLoadThread hookup): those
 // are covered by the Windows CI build and the device test. The
@@ -143,6 +160,58 @@ bool DecodeJxl(const uint8_t* data, size_t size, int channels,
             } else if (status == JXL_DEC_FULL_IMAGE) {
                 ok = w > 0 && h > 0 &&
                      pixels.size() == (size_t)w * h * (size_t)channels;
+                break;
+            } else {
+                break;
+            }
+        }
+    }
+    JxlDecoderDestroy(decoder);
+    return ok;
+}
+
+// 16-bit variant of DecodeJxl for the real HDR-base sample (T5): the
+// base is PQ, so it must be decoded to UINT16 (4 channels, RGBA) or
+// the signal is destroyed. The two M-3 size checks are in BYTES:
+// JxlDecoderImageOutBufferSize returns w*h*4*2 = 107200 for 134x100,
+// not w*h*4 (P2-1: copying the 8-bit checks verbatim breaks here).
+// The pixel buffer is bytes; callers reinterpret it as uint16_t*.
+bool DecodeJxl16(const uint8_t* data, size_t size,
+                 std::vector<uint8_t>& pixels, int& w, int& h) {
+    w = h = 0;
+    JxlDecoder* decoder = JxlDecoderCreate(nullptr);
+    if (decoder == nullptr) return false;
+    bool ok = false;
+    if (JxlDecoderSubscribeEvents(decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) ==
+        JXL_DEC_SUCCESS) {
+        JxlDecoderSetInput(decoder, data, size);
+        JxlDecoderCloseInput(decoder);
+        JxlPixelFormat format = {4, JXL_TYPE_UINT16, JXL_NATIVE_ENDIAN, 0};
+        for (int iter = 0; iter < 64; iter++) {
+            JxlDecoderStatus status = JxlDecoderProcessInput(decoder);
+            if (status == JXL_DEC_ERROR || status == JXL_DEC_NEED_MORE_INPUT) {
+                break;
+            } else if (status == JXL_DEC_BASIC_INFO) {
+                JxlBasicInfo info;
+                if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS) break;
+                if (info.xsize == 0 || info.ysize == 0) break;
+                w = (int)info.xsize;
+                h = (int)info.ysize;
+            } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+                size_t bufferSize = 0;
+                if (JxlDecoderImageOutBufferSize(decoder, &format, &bufferSize) !=
+                    JXL_DEC_SUCCESS) {
+                    break;
+                }
+                if (w <= 0 || h <= 0 || bufferSize != (size_t)w * h * 4 * 2) break;
+                pixels.resize(bufferSize);
+                if (JxlDecoderSetImageOutBuffer(decoder, &format, pixels.data(),
+                                                 pixels.size()) != JXL_DEC_SUCCESS) {
+                    break;
+                }
+            } else if (status == JXL_DEC_FULL_IMAGE) {
+                ok = w > 0 && h > 0 &&
+                     pixels.size() == (size_t)w * h * 4 * 2;
                 break;
             } else {
                 break;
@@ -327,6 +396,118 @@ void TestMetadataNoUrn(const uint8_t* meta, size_t metaSize, gainmap::Metadata& 
           "T2: gamma 0 rejected");
 }
 
+// T5: the REAL HDR-base JXL (tests/samples/trattore-gainmap-real-hdrbase.jxl).
+// Built from the trattore SDR base x gain map: the base data is genuinely
+// HDR (PQ, SDR white 203 nits, peak 807.6 nits), not the synthetic file's
+// SDR base with flipped rationals. The SDR view (weight -1) must reproduce
+// the original SDR base, and the 16-bit peak must clear SDR white -- this
+// is the pixel-level verification of the JXL HDR-base path (W2 only
+// checks the synthetic file's metadata). `origBase` is the original SDR
+// base decoded by T4 (RGBA, 134x100).
+void TestRealHdrBase(const std::string& dir, const std::vector<uint8_t>& origBase,
+                     int origW, int origH) {
+    std::vector<uint8_t> file;
+    Check(ReadFile(dir + "/trattore-gainmap-real-hdrbase.jxl", file),
+          "T5: real HDR-base JXL readable");
+    if (file.empty()) {
+        return;
+    }
+    Check(file.size() == 48568u, "T5: real HDR-base JXL is 48568 bytes");
+    const uint8_t* payload = nullptr;
+    size_t payloadSize = 0;
+    Check(gainmap::FindJxlGainMapBox(file.data(), file.size(), payload, payloadSize),
+          "T5: jhgm box found in real HDR-base JXL");
+    if (payload == nullptr) {
+        return;
+    }
+    Check(payloadSize == 450u, "T5: jhgm payload is 450 bytes (same box as synthetic)");
+    const uint8_t* meta = nullptr;
+    size_t metaSize = 0;
+    const uint8_t* code = nullptr;
+    size_t codeSize = 0;
+    Check(gainmap::ParseJxlGainMapBundle(payload, payloadSize, meta, metaSize, code, codeSize),
+          "T5: real jhgm bundle parses");
+    if (meta == nullptr) {
+        return;
+    }
+    Check(metaSize == 141, "T5: real metadata is 141 bytes");
+    gainmap::Metadata md;
+    Check(gainmap::ParseIso21496MetadataNoUrn(meta, metaSize, md) && md.valid,
+          "T5: real ISO metadata parses");
+    Check(md.baseHdrHeadroom == 2.0, "T5: real baseHdrHeadroom 2.0 (HDR base)");
+    Check(md.alternateHdrHeadroom == 0.0, "T5: real alternateHdrHeadroom 0.0");
+    Check(md.gainMapMin == 0.0 && md.gainMapMax == 2.0,
+          "T5: real gainMapMin 0, gainMapMax 2.0");
+    Check(md.gamma == 1.0 && md.baseOffset == 0.0 && md.alternateOffset == 0.0,
+          "T5: real gamma 1.0, offsets 0");
+    Check(codeSize == 298, "T5: real gain codestream is 298 bytes (same as source)");
+
+    std::vector<uint8_t> gray;
+    int gw = 0, gh = 0;
+    Check(DecodeJxl(code, codeSize, 1, gray, gw, gh), "T5: real gain codestream decodes");
+    Check(gw == 33 && gh == 25, "T5: real gain map is 33x25");
+
+    std::vector<uint8_t> base16;
+    int bw = 0, bh = 0;
+    Check(DecodeJxl16(file.data(), file.size(), base16, bw, bh),
+          "T5: real HDR base decodes (16-bit RGBA)");
+    Check(bw == 134 && bh == 100, "T5: real HDR base is 134x100");
+    if (bw != 134 || bh != 100 || gw != 33 || gh != 25 ||
+        origW != 134 || origH != 100) {
+        return;
+    }
+    // The base is genuinely HDR: the 16-bit peak (RGB channels only;
+    // alpha is 65535) clears SDR white (PQ 203 nits -> 38055).
+    // Measured peak is 47746 (807.6 nits).
+    const uint16_t* px16 = reinterpret_cast<const uint16_t*>(base16.data());
+    uint16_t peak16 = 0;
+    for (size_t i = 0; i < (size_t)bw * bh; ++i) {
+        for (int c = 0; c < 3; ++c) {
+            if (px16[i * 4 + c] > peak16) peak16 = px16[i * 4 + c];
+        }
+    }
+    Check(peak16 > 38055, "T5: real HDR base peak clears SDR white (PQ 203 nits)");
+
+    // SDR view: 16-bit PQ signal -> linear (÷203) -> reverse gain (w=-1).
+    std::vector<float> sig((size_t)bw * bh * 3);
+    for (size_t i = 0; i < (size_t)bw * bh; ++i) {
+        sig[i * 3 + 0] = (float)px16[i * 4 + 0] / 65535.0f;
+        sig[i * 3 + 1] = (float)px16[i * 4 + 1] / 65535.0f;
+        sig[i * 3 + 2] = (float)px16[i * 4 + 2] / 65535.0f;
+    }
+    std::vector<uint8_t> out((size_t)bw * bh * 4);
+    Check(gainmap::ApplyGainMapToBgra16(sig.data(), bw, bh,
+                                        HdrToneMap::Transfer::kPq,
+                                        HdrToneMap::Primaries::kBt709,
+                                        gray.data(), gw, gh, md, -1.0,
+                                        nullptr, 0, out.data(), (size_t)bw * 4),
+          "T5: ApplyGainMapToBgra16 (w=-1) runs");
+    // Full-frame: the SDR view must reproduce the original SDR base
+    // within +-2 per channel (out is BGRA, origBase is RGBA).
+    // Tolerance: the 0.7/0.11.1 decode skew is +-1 (T4 header note);
+    // +-2 absorbs that plus PQ quantization. If CI fails here, report
+    // the measured max diff first -- do not silently relax the number.
+    int maxDiff = 0;
+    bool alphaOk = true;
+    for (size_t i = 0; i < (size_t)bw * bh; ++i) {
+        const uint8_t* o = out.data() + i * 4;
+        const uint8_t* s = origBase.data() + i * 4;
+        int d0 = std::abs((int)o[0] - (int)s[2]);  // B
+        int d1 = std::abs((int)o[1] - (int)s[1]);  // G
+        int d2 = std::abs((int)o[2] - (int)s[0]);  // R
+        if (d0 > maxDiff) maxDiff = d0;
+        if (d1 > maxDiff) maxDiff = d1;
+        if (d2 > maxDiff) maxDiff = d2;
+        if (o[3] != 255) alphaOk = false;
+    }
+    char what[96];
+    std::snprintf(what, sizeof(what),
+                  "T5: SDR view reproduces the original SDR base (+-2, max diff %d)",
+                  maxDiff);
+    Check(maxDiff <= 2, what);
+    Check(alphaOk, "T5: SDR view alpha is 255 everywhere");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -413,6 +594,10 @@ int main(int argc, char** argv) {
         Check(px[0] != sd[0] || px[1] != sd[1] || px[2] != sd[2],
               "T4: HDR pixel differs from the SDR base");
     }
+
+    // T5: the real HDR-base JXL -- the SDR view (weight -1) must
+    // reproduce the original SDR base decoded above (T4's `base`).
+    TestRealHdrBase(dir, base, bw, bh);
 
     std::printf("jxl_gainmap_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
