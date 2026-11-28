@@ -16,16 +16,17 @@
 #     Tolerance: max diff <= 1 (observed 0 for the Mozilla pair, <= 1
 #     for the Seine crops -- YUV->RGB rounding differs by <= 1 LSB
 #     between two independent decoders on real photos).
-#     EXCEPTION -- mozilla-hdr: its base is planar RGB (gbrp) with a PQ
-#     transfer, and the gbrp+PQ -> BGRA conversion differs between
-#     ffmpeg versions: ffmpeg 8.1.2 leaves the PQ values untouched
-#     (byte-exact vs the vector), ffmpeg 7.x (CI runner, libavcodec62)
-#     applies a PQ->sRGB conversion (max diff 69). So for this one
-#     sample the base is decoded to its NATIVE format (gbrp16le, no
-#     colorspace conversion at all) and the G/B/R planes are compared
-#     against the vector's channels. Native decode is conversion-free
-#     and version-stable; >>8 recovers the coded 8-bit values whichever
-#     upscale ffmpeg uses (replicate v*257 or shift v*256).
+#     EXCEPTION -- mozilla-hdr: its base is planar RGB (gbrp, 8-bit)
+#     with a PQ transfer. Requesting a 16-bit format (gbrp16le) from
+#     this 8-bit source makes ffmpeg insert a scaler, and on the CI
+#     runner's ffmpeg 8.0.1 (Ubuntu 26.04 resolute, libavcodec62,
+#     dav1d 1.5.3) that scaler applies a PQ->sRGB conversion (max
+#     diff 69 vs the vector; 255 - 186 = 69). So for this one sample
+#     the base is decoded to its NATIVE format (gbrp, no scaler in
+#     the graph at all) and the G/B/R planes are compared directly
+#     against the vector's channels at 8-bit. Native-format decode
+#     returns the coded values, so it is immune to scaler behaviour
+#     and version-stable.
 #   - gain: stream 1 (the gain-map image) decoded to 8-bit gray.
 #     Tolerance: max diff <= 1 (observed byte-exact on ffmpeg 8.1.2).
 #   - Seine vectors are a 128x128 centre crop (x 136..264, y 86..214) of
@@ -36,14 +37,14 @@
 #
 # The AVIF decodes are pinned to libdav1d (-c:v libdav1d), NOT the
 # ffmpeg default AV1 decoder. Reason: ffmpeg's native 'av1' decoder
-# disagrees with every conformant decoder on the mozilla-hdr base --
-# it fails outright on ffmpeg 8.1.2 and produces values up to 69
-# levels off on the CI runner's ffmpeg 7.x (same 69 whether decoded
-# to bgra64le or to native gbrp16le, so the difference is in the
-# decode itself, not the colorspace conversion). libdav1d and
-# libaom-av1 both reproduce the committed vectors byte-exact locally;
-# libdav1d is pinned because it is the decoder libavif itself uses.
-# If libdav1d is missing, ffmpeg fails and this script fails loudly
+# fails outright on the mozilla-hdr base on ffmpeg 8.1.2, so it is
+# excluded as a guard; the 69-level difference seen on the CI
+# runner was the scaler's PQ->sRGB conversion, not the decoder
+# (pinning libdav1d changed nothing about it -- before the pin the
+# decoder already was libdav1d by default). libdav1d and libaom-av1
+# both reproduce the committed vectors byte-exact locally; libdav1d
+# is pinned because it is the decoder libavif itself uses. If
+# libdav1d is missing, ffmpeg fails and this script fails loudly
 # instead of silently falling back to another decoder.
 #
 # Fails (exit 1) on any mismatch, on a size mismatch, or when ffmpeg is
@@ -109,15 +110,15 @@ def crop_gray(data, width, x0, y0, cw, ch):
     return bytes(out)
 
 
-def gbrp16le_to_bgra8(data, width, height):
-    """Native gbrp16le planes (G, B, R) -> interleaved BGRA at 8-bit."""
+def gbrp_to_bgra8(data, width, height):
+    """Native gbrp planes (G, B, R, 8-bit) -> interleaved BGRA (A=255)."""
     n = width * height
-    planes = [struct.unpack(f"<{n}H", data[i * n * 2:(i + 1) * n * 2])
-              for i in range(3)]
-    g, b, r = planes  # gbrp plane order is G, B, R
+    g = data[0:n]
+    b = data[n:2 * n]
+    r = data[2 * n:3 * n]
     out = bytearray()
     for i in range(n):
-        out += bytes((b[i] >> 8, g[i] >> 8, r[i] >> 8, 255))
+        out += bytes((b[i], g[i], r[i], 255))
     return bytes(out)
 
 
@@ -141,17 +142,20 @@ def main():
         gain_vec = (SAMPLES / f"{stem}-gain8{suffix}.raw").read_bytes()
 
         if native_gbr:
-            raw_base = ffmpeg_decode(avif, 0, "gbrp16le", "libdav1d")
+            raw_base = ffmpeg_decode(avif, 0, "gbrp", "libdav1d")
             if raw_base is None:
                 check(False, f"{stem}: ffmpeg decode failed")
                 continue
-            base8 = gbrp16le_to_bgra8(raw_base, w, h)
+            base8 = gbrp_to_bgra8(raw_base, w, h)
             vec8 = u16_to_8(base_vec)
             # Compare only the B/G/R bytes (alpha is 255 on both sides).
             d_base = max(max_diff(base8[i * 4:i * 4 + 3], vec8[i * 4:i * 4 + 3])
                          for i in range(w * h))
-            check(len(raw_base) == w * h * 6 and d_base <= 1,
+            check(len(raw_base) == w * h * 3 and d_base <= 1,
                   f"{stem} base16 native gbrp @8bit: max diff {d_base} (tolerance 1)")
+            if d_base > 1:
+                print(f"  first decoded pixel (BGR): {list(base8[0:3])}, "
+                      f"first vector pixel (BGR): {list(vec8[0:3])}")
             raw_gain = ffmpeg_decode(avif, 1, "gray", "libdav1d")
             if raw_gain is None:
                 check(False, f"{stem}: ffmpeg gain decode failed")
@@ -159,6 +163,9 @@ def main():
             d_gain = max_diff(raw_gain, gain_vec)
             check(len(raw_gain) == len(gain_vec) and d_gain <= 1,
                   f"{stem} gain8: max diff {d_gain} (tolerance 1)")
+            if d_gain > 1:
+                print(f"  first decoded gain byte: {raw_gain[0]}, "
+                      f"first vector gain byte: {gain_vec[0]}")
             continue
 
         raw_base = ffmpeg_decode(avif, 0, "bgra64le", "libdav1d")
@@ -171,12 +178,20 @@ def main():
             raw_base = crop_bgra16(raw_base, w, x0, y0, cw, ch)
             raw_gain = crop_gray(raw_gain, w, x0, y0, cw, ch)
         # Base: compare at 8-bit (see header for why 16-bit differs).
-        d_base = max_diff(u16_to_8(raw_base), u16_to_8(base_vec))
+        raw8 = u16_to_8(raw_base)
+        vec8 = u16_to_8(base_vec)
+        d_base = max_diff(raw8, vec8)
         check(len(raw_base) == len(base_vec) and d_base <= 1,
               f"{stem} base16 @8bit: max diff {d_base} (tolerance 1)")
+        if d_base > 1:
+            print(f"  first decoded pixel (BGRA): {list(raw8[0:4])}, "
+                  f"first vector pixel (BGRA): {list(vec8[0:4])}")
         d_gain = max_diff(raw_gain, gain_vec)
         check(len(raw_gain) == len(gain_vec) and d_gain <= 1,
               f"{stem} gain8: max diff {d_gain} (tolerance 1)")
+        if d_gain > 1:
+            print(f"  first decoded gain byte: {raw_gain[0]}, "
+                  f"first vector gain byte: {gain_vec[0]}")
 
     # Endpoint PNG: the greys W4(a1) hardcodes, read from the file itself.
     png = SAMPLES / "mozilla-sdr-endpoint.png"
