@@ -50,6 +50,11 @@
 #     decode); its values are verified locally (r8 = 0 on ffmpeg
 #     8.1.2 + libdav1d). The mozilla-hdr GAIN tie still runs in CI
 #     (gray stream, unaffected by the RGB issue).
+#     Manual step (copy-paste; run from the repo root):
+#       ffmpeg -v error -c:v libdav1d -i tests/samples/mozilla-hdr-base-gainmap.avif -map 0:0 -pix_fmt gbrp -f rawvideo -y out.raw
+#     gives 6144 bytes, uniform 186 (max diff 0 vs the vector >>8).
+#       ffmpeg -v error -c:v libdav1d -i tests/samples/mozilla-hdr-base-gainmap.avif -map 0:0 -pix_fmt bgra64le -f rawvideo -y out.raw
+#     gives 16384 bytes, BGR 47616 (>>8 = 186); r8 = 47802 - 47616 - 186 = 0.
 #   - gain: stream 1 (the gain-map image) decoded to 8-bit gray.
 #     Tolerance: max diff <= 1 (observed byte-exact on ffmpeg 8.1.2).
 #   - Seine vectors are a 128x128 centre crop (x 136..264, y 86..214) of
