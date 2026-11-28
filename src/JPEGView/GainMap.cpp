@@ -1082,7 +1082,7 @@ bool ApplyGainMap(const uint8_t* baseSrgb, int width, int height,
     if (gainW != width || gainH != height) {
         // R-8: OOM while upsampling: fail the apply, do not throw
         // into the caller (same guard as FusedApply; this is the
-        // second half of the earlier P3-1, which only fixed :328).
+        // second half of the earlier P3-1, which only fixed :334).
         try {
             upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
         } catch (...) {

@@ -215,6 +215,7 @@ bool FindXmpPacket(const unsigned char* jpeg, int sizebytes,
 // where base = meta.baseHdrHeadroom, alt = meta.alternateHdrHeadroom.
 // H is a LOGICAL display headroom (JPEGView has no HDR display): the
 // caller passes 0 for the SDR view and max(base, alt) for the HDR view.
+// All four production callers pass the ALTERNATE view's headroom (hAlt: 0 for an HDR base, alt for an SDR base); no production caller queries the base view through this function -- the base view is shown unmodified, so it needs no weight.
 // Degenerate (base == alt) is a step function at H = base: H >= base
 // -> +1, H < base -> 0 -- so the SDR view (H = 0) gets +1 only when
 // base == alt == 0 (pinned by the W0 test). Non-finite or negative
