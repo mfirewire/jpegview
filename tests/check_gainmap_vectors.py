@@ -16,6 +16,16 @@
 #     Tolerance: max diff <= 1 (observed 0 for the Mozilla pair, <= 1
 #     for the Seine crops -- YUV->RGB rounding differs by <= 1 LSB
 #     between two independent decoders on real photos).
+#     EXCEPTION -- mozilla-hdr: its base is planar RGB (gbrp) with a PQ
+#     transfer, and the gbrp+PQ -> BGRA conversion differs between
+#     ffmpeg versions: ffmpeg 8.1.2 leaves the PQ values untouched
+#     (byte-exact vs the vector), ffmpeg 7.x (CI runner, libavcodec62)
+#     applies a PQ->sRGB conversion (max diff 69). So for this one
+#     sample the base is decoded to its NATIVE format (gbrp16le, no
+#     colorspace conversion at all) and the G/B/R planes are compared
+#     against the vector's channels. Native decode is conversion-free
+#     and version-stable; >>8 recovers the coded 8-bit values whichever
+#     upscale ffmpeg uses (replicate v*257 or shift v*256).
 #   - gain: stream 1 (the gain-map image) decoded to 8-bit gray.
 #     Tolerance: max diff <= 1 (observed byte-exact on ffmpeg 8.1.2).
 #   - Seine vectors are a 128x128 centre crop (x 136..264, y 86..214) of
@@ -85,6 +95,18 @@ def crop_gray(data, width, x0, y0, cw, ch):
     return bytes(out)
 
 
+def gbrp16le_to_bgra8(data, width, height):
+    """Native gbrp16le planes (G, B, R) -> interleaved BGRA at 8-bit."""
+    n = width * height
+    planes = [struct.unpack(f"<{n}H", data[i * n * 2:(i + 1) * n * 2])
+              for i in range(3)]
+    g, b, r = planes  # gbrp plane order is G, B, R
+    out = bytearray()
+    for i in range(n):
+        out += bytes((b[i] >> 8, g[i] >> 8, r[i] >> 8, 255))
+    return bytes(out)
+
+
 def main():
     import shutil
     if shutil.which("ffmpeg") is None:
@@ -92,17 +114,38 @@ def main():
         return 1
 
     cases = [
-        # (stem, width, height, crop or None)
-        ("mozilla-hdr", 64, 32, None),
-        ("mozilla-sdr", 64, 32, None),
-        ("seine-hdr", 400, 300, (136, 86, 128, 128)),
-        ("seine-sdr", 400, 300, (136, 86, 128, 128)),
+        # (stem, width, height, crop or None, native gbrp base?)
+        ("mozilla-hdr", 64, 32, None, True),
+        ("mozilla-sdr", 64, 32, None, False),
+        ("seine-hdr", 400, 300, (136, 86, 128, 128), False),
+        ("seine-sdr", 400, 300, (136, 86, 128, 128), False),
     ]
-    for stem, w, h, crop in cases:
+    for stem, w, h, crop, native_gbr in cases:
         avif = SAMPLES / f"{stem}-base-gainmap.avif"
         suffix = "-crop128" if crop else ""
         base_vec = (SAMPLES / f"{stem}-base16{suffix}.bgra").read_bytes()
         gain_vec = (SAMPLES / f"{stem}-gain8{suffix}.raw").read_bytes()
+
+        if native_gbr:
+            raw_base = ffmpeg_decode(avif, 0, "gbrp16le")
+            if raw_base is None:
+                check(False, f"{stem}: ffmpeg decode failed")
+                continue
+            base8 = gbrp16le_to_bgra8(raw_base, w, h)
+            vec8 = u16_to_8(base_vec)
+            # Compare only the B/G/R bytes (alpha is 255 on both sides).
+            d_base = max(max_diff(base8[i * 4:i * 4 + 3], vec8[i * 4:i * 4 + 3])
+                         for i in range(w * h))
+            check(len(raw_base) == w * h * 6 and d_base <= 1,
+                  f"{stem} base16 native gbrp @8bit: max diff {d_base} (tolerance 1)")
+            raw_gain = ffmpeg_decode(avif, 1, "gray")
+            if raw_gain is None:
+                check(False, f"{stem}: ffmpeg gain decode failed")
+                continue
+            d_gain = max_diff(raw_gain, gain_vec)
+            check(len(raw_gain) == len(gain_vec) and d_gain <= 1,
+                  f"{stem} gain8: max diff {d_gain} (tolerance 1)")
+            continue
 
         raw_base = ffmpeg_decode(avif, 0, "bgra64le")
         raw_gain = ffmpeg_decode(avif, 1, "gray")
