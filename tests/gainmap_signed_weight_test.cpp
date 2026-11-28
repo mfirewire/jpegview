@@ -754,6 +754,31 @@ void TestApply16BitSynthetic() {
         }
         Check(opaqueOk, "W3: NULL alpha -> opaque (255)");
     }
+    // (d2) R-9: out-of-contract alpha16 > alphaMaxVal must clamp the
+    // output alpha to 255, not wrap mod 256. alpha16=65535 with
+    // alphaMaxVal=32768 gives quotient (65535*255 + 16384)/32768 = 510;
+    // the pre-fix cast produced (uint8_t)510 = 254. The alpha check
+    // is exact on purpose: Near4 with tolerance 1 would pass 254.
+    {
+        const int kW = 1, kH = 1;
+        std::vector<uint16_t> base((size_t)kW * kH * 4, 47802);
+        base[3] = 65535;
+        static const uint16_t kAlpha[1] = {65535};
+        std::vector<uint8_t> gain((size_t)kW * kH, 255);
+        std::vector<float> sig;
+        Bgra16ToSignalRgb(base.data(), kW, kH, sig);
+        std::vector<uint8_t> out((size_t)kW * kH * 4);
+        Metadata m = MozillaMeta();
+        Check(ApplyGainMapToBgra16(sig.data(), kW, kH, HdrToneMap::Transfer::kPq,
+                                   HdrToneMap::Primaries::kBt709, gain.data(), kW, kH,
+                                   m, -1.0, kAlpha, 32768, out.data(), (size_t)kW * 4),
+              "W3: R-9 out-of-contract alpha 16-bit w=-1 runs");
+        bool rgbOk = std::abs((int)out[0] - 137) <= 1 &&
+                     std::abs((int)out[1] - 137) <= 1 &&
+                     std::abs((int)out[2] - 137) <= 1;
+        Check(rgbOk, "W3: R-9 RGB still 137 (setup sanity)");
+        Check(out[3] == 255, "W3: R-9 alpha16 65535 / maxVal 32768 clamps to 255, not 254");
+    }
     // (e) Rotation commutativity (scheme A, plan section 2.4 P2-8):
     // rotate-then-apply == apply-then-rotate for quarter turns.
     // The gain map is rotated with the real RotateGrayQuarterTurns;
