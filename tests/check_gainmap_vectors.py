@@ -60,6 +60,7 @@
 # skipped with a printed SKIP (see EXCEPTION above) -- never a silent
 # skip. Run in CI by the gainmap-signed-weight job in
 # .github/workflows/ymck-guard.yml. Stdlib only; needs ffmpeg.
+import re
 import struct
 import subprocess
 import sys
@@ -180,6 +181,20 @@ def main():
         if d_gain > 1:
             print(f"  first decoded gain byte: {raw_gain[0]}, "
                   f"first vector gain byte: {gain_vec[0]}")
+
+    # P3-3: the 61-byte ISO body W2 hardcodes (1 version byte + 60 body)
+    # must be the mozilla-hdr file's own bytes at offset 512, and absent
+    # from the SDR twin. The expected bytes are parsed out of the C++
+    # test itself, so this ties the test array to the file (a literal
+    # copied into this script would only check the script's own copy).
+    test_src = (Path(__file__).parent / "gainmap_signed_weight_test.cpp").read_text()
+    body = bytes(int(x, 16) for x in re.findall(
+        r"0x([0-9a-fA-F]{2})", test_src.split("kMozillaIsoBody[] = {")[1].split("};")[0]))
+    hdr = (SAMPLES / "mozilla-hdr-base-gainmap.avif").read_bytes()
+    sdr = (SAMPLES / "mozilla-sdr-base-gainmap.avif").read_bytes()
+    check(len(body) == 61 and hdr[512:573] == body,
+          "mozilla-hdr ISO body: test array matches file bytes at offset 512")
+    check(body not in sdr, "mozilla-hdr ISO body: absent from SDR twin")
 
     # Endpoint PNG: the greys W4(a1) hardcodes, read from the file itself.
     png = SAMPLES / "mozilla-sdr-endpoint.png"

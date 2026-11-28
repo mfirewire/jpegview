@@ -516,7 +516,7 @@ void TestAppleFallbackAndIso() {
     }
     // The Mozilla 61-byte ISO body (no URN), taken verbatim from the
     // tmap item of mozilla-hdr-base-gainmap.avif (1 version byte +
-    // 61-byte body). Parses to the section 3.1 values.
+    // 60-byte body). Parses to the section 3.1 values.
     {
         static const uint8_t kMozillaIsoBody[] = {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x01, 0xcf, 0x00, 0x02, 0x00,
