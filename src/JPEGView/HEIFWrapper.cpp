@@ -79,10 +79,18 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 		std::vector<uint16_t> alpha16;
 		const uint16_t* pAlpha = NULL;
 		if (bHasTransparency) {
-			try {
-				alpha16.resize((size_t)width * (size_t)height);
-			} catch (...) {
-				alpha16.clear();
+			// P3 (user-added): pre-check the alpha plane against the
+			// byte cap, like the rgb and 8-bit out buffers -- the rgb
+			// check at the top bounds it implicitly (width*12/row),
+			// but make the bound explicit so a reorder can't drop it.
+			// On failure the plane stays empty and the apply runs
+			// without alpha (pAlpha == NULL), as on a resize failure.
+			if (IsImageBufferSizeOk((size_t)width * sizeof(uint16_t), (size_t)height)) {
+				try {
+					alpha16.resize((size_t)width * (size_t)height);
+				} catch (...) {
+					alpha16.clear();
+				}
 			}
 			if (!alpha16.empty()) {
 				for (int y = 0; y < height; y++) {
@@ -95,10 +103,16 @@ static unsigned char* ConvertHeifHdrToSdr(const uint8_t* data, int stride, int w
 			}
 		}
 		std::vector<uint8_t> alternate;
-		try {
-			alternate.resize((size_t)width * (size_t)height * 4);
-		} catch (...) {
-			alternate.clear();
+		// P3 (user-added): pre-check the alternate view against the
+		// byte cap, like the 8-bit out buffer below (same width*4
+		// stride). On failure it stays empty and the lazy 8-bit path
+		// recomputes on toggle, as on a resize failure.
+		if (IsImageBufferSizeOk((size_t)width * 4, (size_t)height)) {
+			try {
+				alternate.resize((size_t)width * (size_t)height * 4);
+			} catch (...) {
+				alternate.clear();
+			}
 		}
 		if (!alternate.empty() && gainmap::ApplyGainMapToBgra16(rgb, width, height, transfer, primaries,
 				pGain->gray.data(), pGain->width, pGain->height, pGain->meta, wAlt,
