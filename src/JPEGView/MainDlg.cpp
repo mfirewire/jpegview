@@ -3157,6 +3157,14 @@ void CMainDlg::SwapToRawRepresentation(CJPEGImage* pNewImage) {
 		// that could only produce the thumbnail). There is nothing to
 		// swap to, and resetting parameters or OCR for a no-op swap
 		// would be wrong.
+		// R-3: the new image came from GetImageByHandle, which marked
+		// its request InUse; returning without NotifyNotUsed pins it
+		// InUse forever (no reclaim path releases InUse requests).
+		// The != guard is required: releasing the pointer-equal case
+		// would unpin the image currently on screen.
+		if (pNewImage != m_pCurrentImage) {
+			m_pJPEGProvider->NotifyNotUsed(pNewImage);
+		}
 		m_nPendingRawToggleHandle = -1;
 		return;
 	}
