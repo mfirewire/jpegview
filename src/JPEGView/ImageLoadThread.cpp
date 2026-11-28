@@ -1566,7 +1566,11 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 			// ReadImage (JXLWrapper.cpp:48-64); set the flag before the
 			// call so the catch below never frees a buffer the reader owns.
 			bJxlReaderOwnsBuffer = true;
-			uint8* pPixelData = (uint8*)m_jxlReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize);
+			// Gain-map (HDR toggle): the reader extracts the gain map
+			// (if any) into this struct; it is attached to the image
+			// below and applied in ProcessImageAfterLoad.
+			gainmap::ExtractedGainMap gain;
+			uint8* pPixelData = (uint8*)m_jxlReader.ReadImage(nWidth, nHeight, nBPP, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs, pEXIFData, request->OutOfMemory, request->SizeLimitExceeded, pBuffer, nFileSize, &gain);
 			if (pPixelData != NULL) {
 				if (bHasAnimation)
 					m_sLastJxlFileName = sFileName;
@@ -1576,6 +1580,13 @@ void CImageLoadThread::ProcessReadJXLRequest(CRequest* request) {
 				AlphaBlendImageToBackground((uint32*)pPixelData, (size_t)nWidth * (size_t)nHeight, CSettingsProvider::This().ColorTransparency());
 
 				request->Image = new CJPEGImage(nWidth, nHeight, pPixelData, pEXIFData, 4, 0, IF_JXL, bHasAnimation, request->FrameIndex, nFrameCount, nFrameTimeMs);
+				// Gain-map (HDR toggle): attach the extracted gain map
+				// (grayscale + metadata, not yet applied); the load-time
+				// rotation is mirrored onto it and the HDR view is applied
+				// in ProcessImageAfterLoad.
+				if (gain.valid) {
+					request->Image->SetRetainedGainMap(std::move(gain));
+				}
 				free(pEXIFData);
 			} else {
 				DeleteCachedJxlDecoder();

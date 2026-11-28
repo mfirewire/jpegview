@@ -36,6 +36,17 @@ uint32_t ReadU32Be(const uint8_t* p) {
            (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
 }
 
+uint64_t ReadU64Be(const uint8_t* p) {
+    return (static_cast<uint64_t>(p[0]) << 56) |
+           (static_cast<uint64_t>(p[1]) << 48) |
+           (static_cast<uint64_t>(p[2]) << 40) |
+           (static_cast<uint64_t>(p[3]) << 32) |
+           (static_cast<uint64_t>(p[4]) << 24) |
+           (static_cast<uint64_t>(p[5]) << 16) |
+           (static_cast<uint64_t>(p[6]) << 8) |
+           static_cast<uint64_t>(p[7]);
+}
+
 uint16_t ReadU16Le(const uint8_t* p) {
     return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) |
                                  static_cast<uint16_t>(p[1] << 8));
@@ -482,39 +493,34 @@ bool AppleGammaFieldPresentWithValue(const std::string& xmp) {
     return true;
 }
 
-}  // namespace
-
-bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out) {
+// Parse the ISO 21496-1 metadata body starting at min_ver (no URN):
+// min_ver u16 BE, writer_ver u16 BE, flags u8, then 7 rational pairs
+// (num i32 BE + den u32 BE): [0] baseHdrHeadroom,
+// [1] alternateHdrHeadroom, [2] gainMapMin, [3] gainMapMax,
+// [4] gamma, [5] baseOffset, [6] alternateOffset. Shared core for
+// ParseIso21496Metadata (URN form) and ParseIso21496MetadataNoUrn
+// (jhgm form). Rejects null/short payload, a zero denominator,
+// gamma <= 0, or any non-finite value. When flags bit 7
+// (multi-channel) is set only the FIRST channel set is parsed and
+// multiChannel is set to true; extra channel sets are ignored.
+bool ParseIso21496Body(const uint8_t* data, size_t size, Metadata& out) {
     out = Metadata();  // valid=false unless this function succeeds
 
-    // URN "urn:iso:std:iso:ts:21496:-1" (27 chars) + NUL = 28 bytes,
-    // then min_ver u16 + writer_ver u16 + flags u8 = 5 bytes,
-    // then 7 rational pairs of 8 bytes = 56 bytes. Total 89.
-    static const char kUrn[] = "urn:iso:std:iso:ts:21496:-1";
-    const size_t kUrnLen = 27;
-    const size_t kHeaderBytes = 28 + 5;
+    const size_t kHeaderBytes = 5;
     const size_t kNumPairs = 7;
     const size_t kPairBytes = 8;
     if (data == nullptr || size < kHeaderBytes + kNumPairs * kPairBytes) {
         return false;
     }
-    if (std::memcmp(data, kUrn, kUrnLen) != 0 || data[kUrnLen] != 0) {
-        return false;
-    }
     // Versions are accepted as-is (the layout is the version-0 one);
     // a future version may append fields after the 7 pairs, which the
-    // size >= 89 check already tolerates.
-    uint16_t minVer = ReadU16Be(data + 28);
-    uint16_t writerVer = ReadU16Be(data + 30);
+    // size >= 61 check already tolerates.
+    uint16_t minVer = ReadU16Be(data);
+    uint16_t writerVer = ReadU16Be(data + 2);
     (void)minVer;
     (void)writerVer;
-    uint8_t flags = data[32];
+    uint8_t flags = data[4];
 
-    // The 7 rational pairs, in order: [0] baseHdrHeadroom,
-    // [1] alternateHdrHeadroom, [2] gainMapMin, [3] gainMapMax,
-    // [4] gamma, [5] baseOffset, [6] alternateOffset. For a
-    // multi-channel payload (flags bit 7) this is the FIRST channel
-    // set; further sets are ignored.
     double vals[kNumPairs];
     for (size_t k = 0; k < kNumPairs; ++k) {
         const uint8_t* p = data + kHeaderBytes + k * kPairBytes;
@@ -542,6 +548,137 @@ bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out) {
     out.multiChannel = (flags & 0x80) != 0;
     out.useBaseColorSpace = (flags & 0x40) != 0;
     out.valid = true;
+    return true;
+}
+
+}  // namespace
+
+bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out) {
+    out = Metadata();  // valid=false unless this function succeeds
+
+    // URN "urn:iso:std:iso:ts:21496:-1" (27 chars) + NUL = 28 bytes,
+    // then the body (see ParseIso21496Body): min_ver u16 + writer_ver
+    // u16 + flags u8 = 5 bytes, then 7 rational pairs of 8 bytes =
+    // 56 bytes. Total 89.
+    static const char kUrn[] = "urn:iso:std:iso:ts:21496:-1";
+    const size_t kUrnLen = 27;
+    const size_t kHeaderBytes = 28 + 5;
+    const size_t kNumPairs = 7;
+    const size_t kPairBytes = 8;
+    if (data == nullptr || size < kHeaderBytes + kNumPairs * kPairBytes) {
+        return false;
+    }
+    if (std::memcmp(data, kUrn, kUrnLen) != 0 || data[kUrnLen] != 0) {
+        return false;
+    }
+    return ParseIso21496Body(data + 28, size - 28, out);
+}
+
+bool ParseIso21496MetadataNoUrn(const uint8_t* data, size_t size, Metadata& out) {
+    // jhgm form: the payload starts directly at min_ver (no URN).
+    // The body parser requires 5 + 7*8 = 61 bytes.
+    return ParseIso21496Body(data, size, out);
+}
+
+bool FindJxlGainMapBox(const uint8_t* data, size_t size,
+                       const uint8_t*& payload, size_t& payloadSize) {
+    payload = nullptr;
+    payloadSize = 0;
+    if (data == nullptr || size < 2) {
+        return false;
+    }
+    // Bare codestream (no boxes): starts with the JXL codestream
+    // signature FF 0A.
+    if (data[0] == 0xFF && data[1] == 0x0A) {
+        return false;
+    }
+    size_t pos = 0;
+    while (pos < size) {
+        // Need at least a box header (size u32 + type 4 bytes).
+        if (size - pos < 8) {
+            return false;
+        }
+        uint32_t boxSize = ReadU32Be(data + pos);
+        size_t headerSize = 8;
+        uint64_t totalSize = boxSize;
+        if (boxSize == 1) {
+            // largesize: a 64-bit size follows the type.
+            if (size - pos < 16) {
+                return false;
+            }
+            totalSize = ReadU64Be(data + pos + 8);
+            headerSize = 16;
+            if (totalSize < 16) {
+                return false;  // malformed largesize
+            }
+        } else if (boxSize == 0) {
+            // Box extends to the end of the buffer.
+            totalSize = size - pos;
+        } else if (boxSize < 8) {
+            return false;  // malformed: 2..7 can never be a box size
+        }
+        if (totalSize > size - pos) {
+            return false;  // box runs past the buffer
+        }
+        if (std::memcmp(data + pos + 4, "jhgm", 4) == 0) {
+            payload = data + pos + headerSize;
+            payloadSize = static_cast<size_t>(totalSize - headerSize);
+            return true;
+        }
+        // totalSize >= headerSize >= 8, so pos always advances.
+        pos += static_cast<size_t>(totalSize);
+    }
+    return false;
+}
+
+bool ParseJxlGainMapBundle(const uint8_t* payload, size_t payloadSize,
+                           const uint8_t*& metadata, size_t& metadataSize,
+                           const uint8_t*& gainCode, size_t& gainCodeSize) {
+    metadata = nullptr;
+    metadataSize = 0;
+    gainCode = nullptr;
+    gainCodeSize = 0;
+    // version u8 + metadata length u16 BE + metadata + color-encoding
+    // length u8 + color encoding + alt-ICC length u32 BE + alt ICC +
+    // gain codestream (rest of the buffer).
+    if (payload == nullptr || payloadSize < 1 + 2) {
+        return false;
+    }
+    if (payload[0] != 0) {
+        return false;  // jhgm version must be 0
+    }
+    size_t pos = 1;
+    uint16_t metaLen = ReadU16Be(payload + pos);
+    pos += 2;
+    if (payloadSize - pos < metaLen) {
+        return false;
+    }
+    metadata = payload + pos;
+    metadataSize = metaLen;
+    pos += metaLen;
+    if (payloadSize - pos < 1) {
+        return false;
+    }
+    uint8_t ceLen = payload[pos];
+    pos += 1;
+    if (payloadSize - pos < ceLen) {
+        return false;
+    }
+    pos += ceLen;  // color encoding: skipped by length, never parsed
+    if (payloadSize - pos < 4) {
+        return false;
+    }
+    uint32_t iccLen = ReadU32Be(payload + pos);
+    pos += 4;
+    if (payloadSize - pos < iccLen) {
+        return false;
+    }
+    pos += iccLen;  // alt ICC: skipped
+    if (payloadSize - pos == 0) {
+        return false;  // empty gain codestream
+    }
+    gainCode = payload + pos;
+    gainCodeSize = payloadSize - pos;
     return true;
 }
 

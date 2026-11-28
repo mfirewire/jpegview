@@ -7,6 +7,7 @@
 #include "jxl/resizable_parallel_runner.h"
 #include "jxl/resizable_parallel_runner_cxx.h"
 #include "HdrToneMap.h"
+#include "GainMap.h"
 
 class JxlReader
 {
@@ -23,7 +24,8 @@ public:
 		bool& outOfMemory, // set to true when no memory to read image
 		bool& isSizeLimitExceeded, // R-04/P2-5: set to true when the image exceeds the pixel cap (MaxImagePixelsMP); only ever set, never cleared here - the caller initializes it to false once per request
 		const void* buffer, // memory address containing jxl compressed data.
-		int sizebytes); // size of jxl compressed data
+		int sizebytes, // size of jxl compressed data
+		gainmap::ExtractedGainMap* pGainOut); // gain map out (nullable); filled when the file carries a jhgm box
 
 	// R-01: instance method now - the cache below is one per load thread
 	// (owned by CImageLoadThread), not a process-wide static.

@@ -234,3 +234,29 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -DJXL_STATIC_DEFINE -I src/JPEGView/libjxl/include tests/jxl_frame_header_test.cpp -ljxl -o /tmp/jxl_frame_header_test
           /tmp/jxl_frame_header_test
+  jxl-gainmap-test:
+    name: JXL gain-map (jhgm) extraction test
+    # Runs on ubuntu-latest (26.04). The runner image does not install
+    # libjxl, so the job installs libjxl-dev (26.04's repo has 0.11.1)
+    # and links plain -ljxl. The test decodes the nested gain
+    # codestream and the real base with the system decoder; the
+    # exercised symbols are ABI-stable across the vendored 0.13 headers
+    # and upstream 0.11.1. The box walk, bundle parse and metadata
+    # parse are pure C++ in GainMap.h/.cpp (JXLWrapper.cpp is
+    # MFC-coupled and does not compile on Linux).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Install libjxl dev package (link target)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libjxl-dev
+
+      - name: JXL gain-map extraction test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -DJXL_STATIC_DEFINE -I src/JPEGView -I src/JPEGView/libjxl/include tests/jxl_gainmap_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -ljxl -o /tmp/jxl_gainmap_test
+          /tmp/jxl_gainmap_test

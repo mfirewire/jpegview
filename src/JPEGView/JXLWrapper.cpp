@@ -11,6 +11,7 @@
 #include "jxl/resizable_parallel_runner_cxx.h"
 #include "Helpers.h"
 #include "HdrToneMap.h"
+#include "GainMap.h"
 #include "MaxImageDef.h"
 #include "SettingsProvider.h"
 #include "ICCProfileTransform.h"
@@ -378,6 +379,129 @@ bool JxlReader::DecodeJpegXlOneShot(const uint8_t* jxl, size_t size, std::vector
 	}
 }
 
+// JXL gain map (jhgm) extraction -- plan §3.4/§3.5. Decodes a naked
+// JXL codestream (the gain map inside a jhgm box) to single-channel
+// 8-bit grayscale with a throwaway decoder (the main decoder in
+// cache is busy with the animation state machine). Single-threaded:
+// the gain map is tiny (the sample's is 33x25), so no parallel
+// runner. Returns false (gray untouched) on any failure; the caller
+// falls back to SDR. The loop checks the out-buffer return values
+// (M-3): a 3-channel codestream with a 1-channel request makes
+// ProcessInput repeat JXL_DEC_NEED_IMAGE_OUT_BUFFER while both
+// buffer calls return ERROR, so an unchecked loop would hang the
+// load thread. The iteration bound is the second line of defence.
+static bool DecodeJxlGainMapGray(const uint8_t* code, size_t codeSize,
+                                 int baseWidth, int baseHeight,
+                                 std::vector<uint8_t>& gray, int& gainWidth, int& gainHeight) {
+    auto decoder = JxlDecoderMake(nullptr);
+    if (decoder.get() == NULL) {
+        return false;
+    }
+    if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(decoder.get(),
+        JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE)) {
+        return false;
+    }
+    JxlDecoderSetInput(decoder.get(), code, codeSize);
+    JxlDecoderCloseInput(decoder.get());
+    JxlPixelFormat format = { 1, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
+    gainWidth = gainHeight = 0;
+    // M-3: bound the loop; a still codestream needs only a handful of
+    // iterations (BASIC_INFO, NEED_IMAGE_OUT_BUFFER, FULL_IMAGE).
+    const int kMaxIterations = 64;
+    for (int iter = 0; iter < kMaxIterations; iter++) {
+        JxlDecoderStatus status = JxlDecoderProcessInput(decoder.get());
+        if (status == JXL_DEC_ERROR) {
+            return false;
+        } else if (status == JXL_DEC_NEED_MORE_INPUT) {
+            return false;
+        } else if (status == JXL_DEC_BASIC_INFO) {
+            JxlBasicInfo info;
+            if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(decoder.get(), &info)) {
+                return false;
+            }
+            // m-4: the ISO metadata carries no dimensions; the base
+            // size is the bound (a gain map is never larger than its
+            // base). Zero dimensions are rejected the same way.
+            if (info.xsize == 0 || info.ysize == 0 ||
+                info.xsize > (uint32_t)baseWidth || info.ysize > (uint32_t)baseHeight) {
+                return false;
+            }
+            gainWidth = (int)info.xsize;
+            gainHeight = (int)info.ysize;
+        } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+            // M-3: check both out-buffer calls, exactly as
+            // DecodeJpegXlOneShot does (JXLWrapper.cpp:271-303) -- a
+            // 3-channel codestream fails here, not in ProcessInput.
+            size_t buffer_size;
+            if (JXL_DEC_SUCCESS !=
+                JxlDecoderImageOutBufferSize(decoder.get(), &format, &buffer_size)) {
+                return false;
+            }
+            if (gainWidth <= 0 || gainHeight <= 0 ||
+                buffer_size != (size_t)gainWidth * gainHeight) {
+                return false;
+            }
+            gray.resize(buffer_size);
+            if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(decoder.get(), &format,
+                gray.data(), gray.size())) {
+                return false;
+            }
+        } else if (status == JXL_DEC_FULL_IMAGE) {
+            return gainWidth > 0 && gainHeight > 0 &&
+                gray.size() == (size_t)gainWidth * gainHeight;
+        } else {
+            return false;
+        }
+    }
+    return false;  // iteration bound hit
+}
+
+// JXL gain map (jhgm) extraction -- plan §3. Scans the file buffer
+// for the jhgm box, parses the bundle + ISO metadata (URN-less), and
+// decodes the nested codestream to grayscale. Returns false (leaves
+// *pGainOut untouched, valid stays false) when there is no gain map
+// or anything fails; the caller keeps the SDR base. Runs after
+// DecodeJpegXlOneShot, before DeleteCache(), so the file buffer is
+// still alive. Never returns true with an invalid map.
+static bool ExtractJxlGainMap(const uint8_t* fileData, size_t fileSize,
+                              int baseWidth, int baseHeight, bool isHdr,
+                              gainmap::ExtractedGainMap* pGainOut) {
+    if (isHdr || fileData == NULL || pGainOut == NULL) {
+        return false;
+    }
+    const uint8_t* jhgm = NULL;
+    size_t jhgmSize = 0;
+    if (!gainmap::FindJxlGainMapBox(fileData, fileSize, jhgm, jhgmSize)) {
+        return false;
+    }
+    const uint8_t* metadata = NULL;
+    size_t metadataSize = 0;
+    const uint8_t* gainCode = NULL;
+    size_t gainCodeSize = 0;
+    if (!gainmap::ParseJxlGainMapBundle(jhgm, jhgmSize, metadata, metadataSize,
+            gainCode, gainCodeSize)) {
+        return false;
+    }
+    gainmap::Metadata meta;
+    if (!gainmap::ParseIso21496MetadataNoUrn(metadata, metadataSize, meta)) {
+        return false;
+    }
+    // HDR base + inverse gain is out of scope (plan §1): the native
+    // HDR path already handles HDR bases, so skip the gain map here.
+    if (meta.baseHdrHeadroom > 0.0) {
+        return false;
+    }
+    gainmap::ExtractedGainMap gain;
+    if (!DecodeJxlGainMapGray(gainCode, gainCodeSize, baseWidth, baseHeight,
+                              gain.gray, gain.width, gain.height)) {
+        return false;
+    }
+    gain.meta = meta;
+    gain.valid = true;
+    *pGainOut = std::move(gain);
+    return true;
+}
+
 void* JxlReader::ReadImage(int& width,
 	int& height,
 	int& nchannels,
@@ -389,7 +513,8 @@ void* JxlReader::ReadImage(int& width,
 	bool& outOfMemory,
 	bool& isSizeLimitExceeded, // R-04/P2-5: pixel-cap rejection, not OOM
 	const void* buffer,
-	int sizebytes)
+	int sizebytes,
+	gainmap::ExtractedGainMap* pGainOut)
 {
 	outOfMemory = false;
 	width = height = 0;
@@ -477,6 +602,24 @@ void* JxlReader::ReadImage(int& width,
 			memcpy(exif_chunk, "\xFF\xE1\0\0Exif\0\0", 10);
 			*((unsigned short*)exif_chunk + 1) = _byteswap_ushort(cache.exif_size + 4);
 			memcpy((uint8_t*)exif_chunk + 10, cache.exif + 4, cache.exif_size - 4);
+		}
+	}
+
+	// Gain-map (HDR toggle): an SDR JXL with a jhgm box is an HDR
+	// photo -- extract the gain map (grayscale + metadata, NOT
+	// applied); the load thread attaches it to the image and applies
+	// it on demand, or at load when GainMapDefault() is HDR.
+	// ExtractJxlGainMap returns false when there is no gain map or
+	// anything fails; the SDR base is kept unchanged then. It runs
+	// after the decode (the base it reconstructs from is sRGB, like
+	// the AVIF/HEIF paths) and before DeleteCache() (the file buffer
+	// is still alive). P2-A1 (AVIF): gain-map work allocates, so a
+	// bad_alloc here must not fail the whole load -- fall back to SDR.
+	if (pGainOut != NULL) {
+		try {
+			ExtractJxlGainMap(cache.data, cache.data_size, width, height, isHdr, pGainOut);
+		} catch (...) {
+			// Keep the SDR base image; the gain map is optional.
 		}
 	}
 

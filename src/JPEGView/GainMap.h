@@ -89,6 +89,54 @@ struct Metadata {
 // multiChannel is set to true; extra channel sets are ignored.
 bool ParseIso21496Metadata(const uint8_t* data, size_t size, Metadata& out);
 
+// Parse ISO 21496-1 binary metadata WITHOUT the URN prefix: the
+// payload as stored in a JXL jhgm box (see FindJxlGainMapBox /
+// ParseJxlGainMapBundle below), which starts directly at min_ver.
+// Same layout and validation as ParseIso21496Metadata after its
+// 28-byte URN+NUL: min_ver u16 BE, writer_ver u16 BE, flags u8, then
+// 7 rational pairs (num i32 BE + den u32 BE). Returns true on success
+// (sets out.valid=true). Rejects (returns false, leaves
+// out.valid=false): null/short payload, size < 5+7*8 = 61 bytes, a
+// zero denominator, gamma <= 0, or any non-finite value. When flags
+// bit 7 (multi-channel) is set only the FIRST channel set is parsed
+// and multiChannel is set to true; extra channel sets are ignored.
+// (R1 option A: this shares the parse core with
+// ParseIso21496Metadata; the URN check stays in that function.)
+bool ParseIso21496MetadataNoUrn(const uint8_t* data, size_t size, Metadata& out);
+
+// Find the jhgm (gain-map) box in a JXL file buffer (ISO/IEC 18181-2
+// container). Scans the BMFF boxes and returns the FIRST jhgm box's
+// payload pointer + size into the original buffer (no copy). Returns
+// false when there is no jhgm box, the buffer is a bare codestream
+// (starts with the JXL codestream signature FF 0A, no boxes), or the
+// box walk hits malformed data. Walk rules: per box, size u32 BE +
+// 4-byte type; size == 1 means a u64 largesize follows the type
+// (header 16 bytes); size == 0 means the box extends to the end of
+// the buffer; a size of 2..7 (or a largesize < 16) is malformed;
+// every header and body must stay inside the buffer. A malformed box
+// is treated as "no jhgm" (the caller falls back to SDR), never as an
+// out-of-bounds read.
+bool FindJxlGainMapBox(const uint8_t* data, size_t size,
+                       const uint8_t*& payload, size_t& payloadSize);
+
+// Parse a jhgm box payload (JxlGainMapBundle layout, byte-for-byte
+// compatible with libjxl's JxlGainMapReadBundle — the vendored
+// Windows binaries do not export that function, so this parses the
+// layout in-tree). Order: version u8 (must be 0), metadata length
+// u16 BE, metadata, color-encoding length u8, color encoding,
+// alt-ICC length u32 BE, alt ICC, then the gain-map codestream (the
+// rest of the buffer; there is no separate codestream length field).
+// The color encoding is skipped by length only, never parsed (it is
+// only needed to apply the gain in the alternate color space, which
+// this implementation does not do — the gain is applied in the base
+// sRGB space, as for AVIF). Returns pointers + sizes into the
+// original payload (no copy). Returns false (out params left null/0)
+// when the version is not 0, any length runs past the payload, or
+// the codestream is empty.
+bool ParseJxlGainMapBundle(const uint8_t* payload, size_t payloadSize,
+                           const uint8_t*& metadata, size_t& metadataSize,
+                           const uint8_t*& gainCode, size_t& gainCodeSize);
+
 // Parse UltraHDR/Adobe XMP (hdrgm namespace) from an XMP packet string.
 // Fields (each may be a single value or an rdf:Seq of 3 rationals
 // "num/den" — the FIRST is taken): hdrgm:GainMapMin, hdrgm:GainMapMax,
