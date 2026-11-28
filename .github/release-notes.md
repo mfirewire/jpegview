@@ -8,7 +8,7 @@ This release builds on v1.3.46-20261123. Gain-map photos get a proper HDR/SDR to
 - **RAW thumbnail/full-size toggle (Ctrl+Shift+R)**: a RAW file can be flipped between the embedded thumbnail and the fully decoded image at any time (menu "Show RAW image"); each representation keeps its own stored processing parameters. The old one-way full-size reload is replaced by this toggle.
 - **JXL gain maps**: JXL files carrying an ISO 21496-1 gain map (jhgm) now apply it under the same Ctrl+H toggle, like JPEG, AVIF and HEIF.
 - **Gain-map speed**: applying a gain map is about 6x faster with byte-identical output (a fused lookup table replaces the per-pixel PQ round-trip; 8.3 MP UltraHDR: 6.44 s → 1.05 s).
-- **Menu translations**: four menu items (the HDR/RAW toggle commands) are now translated in 29 languages.
+- **Menu translations**: four menu items (Show HDR, Show RAW image, Convert to JXL..., Recognize text (OCR)) are now translated in 29 languages.
 
 ## Bugs fixed
 
@@ -44,6 +44,7 @@ This release builds on v1.3.46-20261123. Gain-map photos get a proper HDR/SDR to
 - The ZIP-prediction fix was validated against independent decoders and generated files, not a Photoshop-written sample (none was available); the 65535×65535 JXL out-of-memory guard is covered by unit tests only (no real sample exists).
 - The brotli patch level (1.2.1) cannot be confirmed from the binary itself; the upstream changelog is the only evidence.
 - Gain-map photos with transparency: the gain map is now applied after alpha blending, so a transparent or semi-transparent gain-map photo renders slightly differently than before; real gain-map photos are opaque, so this is accepted rather than fixed.
+- The Mozilla HDR-base reference vectors are verified by a documented manual step, not by CI (CI ffmpeg 8.0.1 cannot reproduce the decode); see the tie script header (tests/check_gainmap_vectors.py, EXCEPTION).
 
 ## Downloads
 
