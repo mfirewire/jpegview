@@ -74,6 +74,9 @@ Changed behavior:
 [1.3.46-20261121] 2026-11-21
 New features:
 - HDR images with PQ (ST 2084) or HLG transfer now display tone-mapped to SDR (1000-nit peak, SDR white 203 nits) instead of showing the raw signal too dark; PNG, AVIF, HEIF and JXL are supported. SDR images are unaffected
+- Gain maps (ISO 21496-1): JPEG UltraHDR and AVIF gain-map photos now apply their gain map. Apple XMP gain-map JPEGs (iPhone-shared HDR photos) are supported too, including files whose headroom lives in the auxiliary image's XMP. The headroom rule: a file whose XMP carries only HDRGainMapVersion and no HDRGainMapHeadroom shows SDR (no headroom is estimated from the pixels); a file that does carry a headroom uses it as a linear ratio converted with log2. HEIF gain maps are parsed but not applied in this release (see Changed behavior below).
+- PSD HDR: 16-bit and 32-bit PSD/PSB files (RGB and grayscale, Raw/RLE/ZIP) now open with tone mapping instead of falling back to the embedded thumbnail. 8-bit PSDs are byte-identical to before.
+- EXR and Radiance .hdr images now display tone-mapped to SDR (BT.2390, linear 1.0 = SDR white) via the linear-float tone-mapping entry point, instead of showing the raw signal too dark.
 
 Bugs fixed:
 - 16/32-bit PSD with an alpha channel: the tone-mapped RGBA output came out garbled (and could contain uninitialized bytes), because the tone mapper wrote packed 3-byte BGR into a 4-byte BGRA buffer; the HDR path now writes BGRA directly, with the alpha plane carried through. A 3-channel HDR PSD is now stored as 4-channel BGRA with opaque alpha
@@ -99,6 +102,10 @@ Bugs fixed:
 - A PSD with ZIP compression could fail to open (inflateInit returned -2), because the vendored zlib.lib ships no default allocator; PsdHdr::InflateTo now provides explicit allocators (PsdZAlloc/PsdZFree)
 - An Apple gain-map JPEG (an iPhone-shared HDR photo) could silently show SDR, because the XMP fallback only read the primary JPEG's XMP while Apple stores the HDRGainMapHeadroom in the AUX (gain) image's XMP; the gain image's own XMP is now tried as a second fallback, so such files apply their gain map (Headroom 4.532783 means 2.18 stops, not 4.53 stops)
 - Saving a JPEG whose embedded ICC profile is not sRGB (for example Adobe RGB or Display P3) used to keep that profile on the output file even though the saved pixels were converted to sRGB, so the file was mis-tagged and other viewers showed wrong colours; the non-sRGB profile is now stripped on save when embedded colour profiles are enabled (with the setting off the pixels are unconverted, so the source profile is still kept)
+- PSD files with an ICC profile whose white point is D65 (e.g. Adobe RGB) could render with a blue shift, because the colour-matrix solve mixed the profile's D65 white point with the D50 PCS colorants; the D50 white point is now substituted when wtpt is D65 (Adobe RGB: R x0.83, B x1.37 before the fix). Spec-compliant D50 profiles are unaffected.
+
+Changed behavior:
+- HEIF gain maps are not applied in this release: iPhone HDR photos in HEIF format are shown as SDR for now (gain-map application for HEIF is temporarily disabled — the highlights stayed too bright on one real sample, iPhone 15 Pro, iOS 18.0, even with the correct headroom, and gain-map opens are slow, about 7–9 s against under 1 s for SDR). The parser still implements the headroom rule, and JPEG/AVIF gain maps are unaffected. See docs/HDR-HEIC-exploration-2026-11-21.md.
 
 Tests:
 - libjxl upgraded from 0.12.0 to 0.13.0 (official upstream Windows release binaries, x86 and x64): the bundled brotli is now 1.2.1, mitigating CVE-2026-111497 (out-of-bounds write in the Brotli decoder, CVSS 4.0 9.2, under active exploitation). 0.13.0 also brings decoder memory-safety hardening, a gain-map API nullptr fix, legacy Display P3 v4 ICC handling and a CMYK black-channel fix. No JPEGView code changes were needed (decoder API unchanged; every JXL symbol JXLWrapper uses is present in the new headers and libraries)
