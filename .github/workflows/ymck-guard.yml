@@ -260,3 +260,16 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -O2 -DJXL_STATIC_DEFINE -I src/JPEGView -I src/JPEGView/libjxl/include tests/jxl_gainmap_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -ljxl -o /tmp/jxl_gainmap_test
           /tmp/jxl_gainmap_test
+  gainmap-rotate-test:
+    name: Gain-map free-rotation boundary test (RotateGrayFree P1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (no submodules needed)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Gain-map free-rotation boundary test
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -I src/JPEGView tests/gainmap_rotate_test.cpp src/JPEGView/GainMap.cpp src/JPEGView/HdrToneMap.cpp -o /tmp/gainmap_rotate_test
+          /tmp/gainmap_rotate_test

@@ -325,7 +325,13 @@ bool FusedApply(const uint8_t* base, int width, int height, size_t baseStride,
     const uint8_t* gain = gainMap;
     std::vector<uint8_t> upsampled;
     if (gainW != width || gainH != height) {
-        upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+        // OOM while upsampling: fail the HDR apply (SDR stays),
+        // do not throw into the caller.
+        try {
+            upsampled.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+        } catch (...) {
+            return false;
+        }
         BilinearUpsampleGray(gainMap, gainW, gainH, upsampled.data(), width, height);
         gain = upsampled.data();
     }
@@ -1213,6 +1219,26 @@ bool RotateGrayFree(const uint8_t* src, int srcW, int srcH, double angleRad,
             double dy = (static_cast<double>(j) + static_cast<double>(offsetY)) - cy;
             double sx = cx + ca * dx + sa * dy;
             double sy = cy - sa * dx + ca * dy;
+            // Clamp the sample coordinates to the source bounds (P1):
+            // the destination is the rotated bounding box, so corners
+            // map outside the source on both sides. Without this,
+            // x0/y0 can exceed the bounds and x1/y1 can go below zero
+            // (x1 = x0+1 is computed before x0 is clamped), and src[]
+            // reads out of bounds. Clamped samples take the nearest
+            // edge value (see GainMap.h). The index clamps below are
+            // retained as a safety net.
+            if (sx < 0.0) {
+                sx = 0.0;
+            }
+            if (sx > static_cast<double>(srcW - 1)) {
+                sx = static_cast<double>(srcW - 1);
+            }
+            if (sy < 0.0) {
+                sy = 0.0;
+            }
+            if (sy > static_cast<double>(srcH - 1)) {
+                sy = static_cast<double>(srcH - 1);
+            }
             int x0 = static_cast<int>(std::floor(sx));
             int y0 = static_cast<int>(std::floor(sy));
             double fx = sx - static_cast<double>(x0);
@@ -1222,8 +1248,14 @@ bool RotateGrayFree(const uint8_t* src, int srcW, int srcH, double angleRad,
             if (x0 < 0) {
                 x0 = 0;
             }
+            if (x0 > srcW - 1) {
+                x0 = srcW - 1;
+            }
             if (y0 < 0) {
                 y0 = 0;
+            }
+            if (y0 > srcH - 1) {
+                y0 = srcH - 1;
             }
             if (x1 > srcW - 1) {
                 x1 = srcW - 1;
